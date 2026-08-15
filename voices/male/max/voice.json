@@ -1,0 +1,12 @@
+{
+  "Id": "max",
+  "Name": "Max",
+  "Backend": 0,
+  "RemoteVoiceId": "",
+  "Dimension": 2048,
+  "ReferenceText": "Brave sounding man",
+  "Gender": 2,
+  "Note": "",
+  "Source": "Qwen-TTS Studio",
+  "CreatedUtc": "2026-08-14T16:38:40.3128102Z"
+}

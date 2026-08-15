@@ -1,0 +1,18 @@
+{
+  "_comment": "Copy to config.json (install.ps1 does this for you). Paths are machine-specific; config.json is git-ignored.",
+
+  "studioDir": "C:\\Users\\you\\Downloads\\qwen-tts-studio",
+  "modelDir": "C:\\Users\\you\\.qwen-tts-studio\\models",
+  "talker": "qwen-talker-1.7b-base-Q8_0.gguf",
+
+  "voicesDir": "voices",
+  "_extraVoicesDirs": "Extra folders searched for voices, same <sex>/<culture>/<id> layout. For voices you may keep but not publish -- they stay out of this repo entirely.",
+  "extraVoicesDirs": [],
+
+  "enabled": false,
+  "voice": "sibylla",
+  "source": "embedding",
+  "maxChars": 600,
+  "port": 8765,
+  "autostart": true
+}

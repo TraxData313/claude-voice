@@ -1,0 +1,369 @@
+"""
+Shared bits: config, the voice catalogue, turning a markdown answer into
+something worth hearing, and talking to the speech server.
+
+Imported by speak_server.py (the engine host), speak_hook.py (the Stop hook)
+and voice_cli.py (the switch).
+"""
+
+import json
+import os
+import re
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(ROOT, "config.json")
+LOG_DIR = os.path.join(ROOT, "logs")
+
+DEFAULTS = {
+    # --- machine-specific, written by install.ps1 -------------------------
+    "studioDir": r"C:\Program Files\qwen-tts-studio",
+    "modelDir": os.path.expanduser(r"~\.qwen-tts-studio\models"),
+    "talker": "qwen-talker-1.7b-base-Q8_0.gguf",   # d2048; the 0.6b model gives d1024
+    # Voices shipped with this repo. Anything here is public.
+    "voicesDir": "voices",
+    # Extra folders searched as well -- for voices you may keep but not publish.
+    # Same <sex>\<culture>\<id> layout. Never written to, never committed.
+    "extraVoicesDirs": [],
+
+    # --- runtime state, written by voice_cli ------------------------------
+    "enabled": False,
+    "voice": "sibylla",
+    "source": "embedding",     # or 'icl': closer clone, larger files
+    "maxChars": 600,
+    "port": 8765,
+    "autostart": True,
+    # Speak the short lines said mid-work, not just the final answer. The Stop
+    # hook only fires when a turn ends, so this rides PreToolUse instead.
+    "narrate": True,
+    "narrateMaxChars": 240,
+}
+
+
+def load_state():
+    state = dict(DEFAULTS)
+    try:
+        with open(CONFIG_PATH, encoding="utf-8-sig") as fh:
+            state.update(json.load(fh))
+    except (OSError, ValueError):
+        pass
+    return state
+
+
+def save_state(state):
+    with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
+        json.dump(state, fh, indent=2)
+        fh.write("\n")
+
+
+def voice_roots(state=None):
+    state = state or load_state()
+    roots = [state.get("voicesDir") or "voices"]
+    roots += list(state.get("extraVoicesDirs") or [])
+    out = []
+    for r in roots:
+        r = r if os.path.isabs(r) else os.path.join(ROOT, r)
+        if os.path.isdir(r) and r not in out:
+            out.append(r)
+    return out
+
+
+# --------------------------------------------------------------------------
+# voice catalogue
+# --------------------------------------------------------------------------
+
+def _is_voice_dir(d):
+    return (os.path.exists(os.path.join(d, "embedding.json"))
+            or os.path.exists(os.path.join(d, "icl-prompt.json")))
+
+
+def _read_voice(d, vid, sex, culture, root):
+    name = vid
+    try:
+        with open(os.path.join(d, "voice.json"), encoding="utf-8-sig") as fh:
+            name = json.load(fh).get("Name") or vid
+    except (OSError, ValueError):
+        pass
+    emb = os.path.join(d, "embedding.json")
+    icl = os.path.join(d, "icl-prompt.json")
+    return {
+        "id": vid, "name": name, "sex": sex, "culture": culture,
+        "dir": d, "root": root,
+        "embedding": emb if os.path.exists(emb) else None,
+        "icl": icl if os.path.exists(icl) else None,
+    }
+
+
+def catalog(state=None):
+    """Every voice under every configured root, as flat dicts.
+
+    Two layouts are accepted, because a handful of personal voices and a whole
+    generated library want different shapes:
+
+        <root>\\<sex>\\<id>              flat -- what this repo ships
+        <root>\\<sex>\\<culture>\\<id>   grouped -- for larger collections
+
+    Earlier roots win, so a bundled voice shadows a same-named local one.
+    """
+    state = state or load_state()
+    out, seen = [], set()
+    for root in voice_roots(state):
+        for sex in sorted(os.listdir(root)):
+            sex_dir = os.path.join(root, sex)
+            if not os.path.isdir(sex_dir):
+                continue
+            for entry in sorted(os.listdir(sex_dir)):
+                d = os.path.join(sex_dir, entry)
+                if not os.path.isdir(d):
+                    continue
+                if _is_voice_dir(d):
+                    if entry.lower() not in seen:
+                        seen.add(entry.lower())
+                        out.append(_read_voice(d, entry, sex, "other", root))
+                    continue
+                for vid in sorted(os.listdir(d)):       # entry was a culture
+                    sub = os.path.join(d, vid)
+                    if not os.path.isdir(sub) or not _is_voice_dir(sub):
+                        continue
+                    if vid.lower() in seen:
+                        continue
+                    seen.add(vid.lower())
+                    out.append(_read_voice(sub, vid, sex, entry, root))
+    return out
+
+
+def resolve(voice_id, source="embedding", state=None):
+    """Find a voice by id (exact first, then substring). Returns (voice, kwargs)."""
+    voices = catalog(state)
+    if not voices:
+        raise LookupError(
+            "no voices found. Add one with: python voice_cli.py clone <sample.wav> --name <name>")
+
+    needle = (voice_id or "").strip().lower()
+    hit = next((v for v in voices if v["id"].lower() == needle), None)
+    if hit is None:
+        matches = [v for v in voices if needle and needle in v["id"].lower()]
+        if len(matches) == 1:
+            hit = matches[0]
+        elif len(matches) > 1:
+            raise LookupError(
+                f"'{voice_id}' matches {len(matches)} voices: "
+                + ", ".join(m["id"] for m in matches[:8])
+                + ("..." if len(matches) > 8 else ""))
+        else:
+            raise LookupError(f"no voice matching '{voice_id}'")
+
+    path = hit.get("icl" if source == "icl" else "embedding") or hit["embedding"] or hit["icl"]
+    if path is None:
+        raise LookupError(f"voice '{hit['id']}' has no embedding or ICL prompt")
+    key = "icl_prompt_path" if path.endswith("icl-prompt.json") else "embedding_path"
+    return hit, {key: path}
+
+
+# --------------------------------------------------------------------------
+# markdown -> speech
+# --------------------------------------------------------------------------
+
+_FENCE = re.compile(r"```.*?```", re.S)
+_INLINE = re.compile(r"`([^`]+)`")
+_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_URL = re.compile(r"https?://\S+")
+_TABLE = re.compile(r"^\s*\|.*\|\s*$", re.M)
+_RULE = re.compile(r"^\s*([-*_]\s*){3,}$", re.M)
+_HEADING = re.compile(r"^\s{0,3}#{1,6}\s*", re.M)
+_QUOTE = re.compile(r"^\s{0,3}>\s?", re.M)
+_BULLET = re.compile(r"^\s*[-*+]\s+", re.M)
+_NUMBER = re.compile(r"^\s*\d+[.)]\s+", re.M)
+_EMPH = re.compile(r"(\*\*|\*|__|_|~~)")
+
+# Typography a terminal shows happily and a speech model does not. Anything not
+# listed and not a letter/digit (emoji, box drawing, check marks) is dropped
+# rather than handed to the model as an unpronounceable token.
+_SPOKEN = {
+    "—": ",", "–": ",", "―": ",",
+    "‘": "'", "’": "'", "“": '"', "”": '"',
+    "…": ".", " ": " ", "​": "",
+    "×": " times ", "°": " degrees ", "±": " plus or minus ",
+    "→": " to ", "←": " from ", "⇒": " gives ",
+    "≤": " at most ", "≥": " at least ", "≠": " not equal to ",
+    "•": " ", "·": " ", "✓": " ", "✗": " ",
+}
+_KEEP_PUNCT = set(" \n\t.,;:!?'\"()-/%$&+=@#")
+
+
+def _normalize(text):
+    import unicodedata
+
+    out = []
+    for ch in text:
+        if ch in _SPOKEN:
+            out.append(_SPOKEN[ch])
+        elif ch.isascii() or unicodedata.category(ch)[0] in "LN":
+            out.append(ch)
+        elif ch in _KEEP_PUNCT:
+            out.append(ch)
+        else:
+            out.append(" ")
+    return "".join(out)
+
+
+def _speakable_code(match):
+    """Keep short identifiers, drop paths and anything that reads like line noise."""
+    body = match.group(1).strip()
+    if not body or len(body) > 24 or "/" in body or "\\" in body:
+        return " "
+    return " " + body.replace("_", " ").replace("-", " ") + " "
+
+
+def clean_text(md, max_chars=600):
+    """Strip the markdown a terminal renders but an ear does not want."""
+    if not md:
+        return ""
+    t = _normalize(md)
+    t = _FENCE.sub(" ", t)
+    t = _TABLE.sub(" ", t)
+    t = _RULE.sub(" ", t)
+    t = _LINK.sub(r"\1", t)
+    t = _URL.sub(" ", t)
+    t = _INLINE.sub(_speakable_code, t)
+    t = _HEADING.sub("", t)
+    t = _QUOTE.sub("", t)
+    t = _BULLET.sub("", t)
+    t = _NUMBER.sub("", t)
+    t = _EMPH.sub("", t)
+    t = re.sub(r"[ \t]+", " ", t)
+    t = re.sub(r"\s*\n\s*", "\n", t).strip()
+
+    # Headings and list items carry no full stop of their own, so give them one:
+    # otherwise they run into the next sentence and the chunker cannot breathe.
+    lines = []
+    for ln in t.split("\n"):
+        ln = ln.strip()
+        if not re.search(r"[A-Za-z0-9]", ln):
+            continue
+        lines.append(ln if ln[-1] in ".!?:;," else ln + ".")
+    t = " ".join(lines)
+
+    t = re.sub(r"\s+([.,;:!?])", r"\1", t)      # 'reads .' <- a path we dropped
+    t = re.sub(r"([.,;:!?])\1+", r"\1", t)
+    t = re.sub(r"\s{2,}", " ", t).strip()
+
+    return truncate(t, max_chars)
+
+
+# Matches '## TL;DR', '**TLDR:**', 'TL;DR -' and friends, at a line start.
+_TLDR = re.compile(
+    r"^\s{0,3}(?:#{1,6}\s*)?(?:\*\*|__)?\s*TL\s*[;:.]?\s*DR\s*(?:\*\*|__)?\s*[:\-—]?\s*",
+    re.I | re.M)
+_NEXT_HEADING = re.compile(r"^\s{0,3}#{1,6}\s", re.M)
+
+
+def extract_summary(md):
+    """The TL;DR block, if the answer has one -- that alone is worth hearing.
+
+    An answer full of paths, flags and identifiers is written for eyes that can
+    skip around. The ear gets the summary; the detail stays on screen.
+    """
+    if not md:
+        return ""
+    m = _TLDR.search(md)
+    if not m:
+        return ""
+    rest = md[m.end():]
+    nxt = _NEXT_HEADING.search(rest)      # a later section is not part of the summary
+    if nxt:
+        rest = rest[:nxt.start()]
+    return rest.strip()
+
+
+def truncate(text, max_chars):
+    """Cut at a sentence boundary rather than mid-word."""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    m = list(re.finditer(r"[.!?](\s|$)", cut))
+    if m and m[-1].end() > max_chars * 0.4:
+        return cut[:m[-1].end()].strip()
+    return cut.rsplit(" ", 1)[0].strip() + "..."
+
+
+def chunks(text, target=180):
+    """Sentence-ish pieces, so speech starts before the whole thing is synthesised."""
+    parts = re.split(r"(?<=[.!?;:])\s+", text)
+    out, buf = [], ""
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        while len(p) > target * 2:                 # a run-on with no punctuation
+            head, sep, rest = p[:target].rpartition(" ")
+            if not sep:
+                break
+            out.append(head.strip())
+            p = rest
+        if not buf:
+            buf = p
+        elif len(buf) + len(p) + 1 <= target:
+            buf += " " + p
+        else:
+            out.append(buf)
+            buf = p
+    if buf:
+        out.append(buf)
+    return [c for c in out if re.search(r"[A-Za-z0-9]", c)]
+
+
+# --------------------------------------------------------------------------
+# talking to the server
+# --------------------------------------------------------------------------
+
+def post(port, path, payload=None, timeout=5):
+    import urllib.request
+
+    data = json.dumps(payload or {}).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}", data=data,
+        headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = resp.read().decode("utf-8", "replace")
+    return json.loads(body) if body.strip() else {}
+
+
+def server_alive(port, timeout=1.5):
+    try:
+        return post(port, "/health", timeout=timeout)
+    except Exception:
+        return None
+
+
+def start_server(state, wait=0):
+    """Launch the engine host detached. Returns True if it is (or came) up."""
+    import subprocess
+    import time
+
+    port = state["port"]
+    if server_alive(port):
+        return True
+
+    os.makedirs(LOG_DIR, exist_ok=True)
+    log = open(os.path.join(LOG_DIR, "speak-server.log"), "a", encoding="utf-8")
+    DETACHED = 0x00000008 | 0x08000000          # DETACHED_PROCESS | CREATE_NO_WINDOW
+    subprocess.Popen(
+        [_python(), "-u", os.path.join(ROOT, "speak_server.py"), "--port", str(port)],
+        stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+        creationflags=DETACHED, close_fds=True, cwd=ROOT)
+
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        health = server_alive(port)
+        if health and health.get("ready"):
+            return True
+        time.sleep(1.0)
+    return bool(server_alive(port))
+
+
+def _python():
+    import sys
+    exe = sys.executable or "python"
+    # pythonw keeps the detached engine from flashing a console; it sits next to python.exe
+    cand = os.path.join(os.path.dirname(exe), "pythonw.exe")
+    return cand if os.path.exists(cand) else exe

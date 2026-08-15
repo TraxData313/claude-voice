@@ -1,0 +1,12 @@
+# Machine-specific paths and live toggle state
+config.json
+
+# Engine and hook logs
+logs/
+
+__pycache__/
+*.pyc
+
+# Voices you may keep locally but not publish live outside this repo, via
+# "extraVoicesDirs" in config.json. Nothing derived from someone else's
+# recording belongs in voices/ -- see VOICES.md.
