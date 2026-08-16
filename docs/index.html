@@ -80,6 +80,28 @@
     border: 2px dashed rgba(87, 207, 192, .5); color: var(--dim); font-size: 14px;
   }
   a { color: var(--teal); }
+  .install { margin-top: 44px; }
+  .install h2 { font-size: 26px; margin: 0 0 6px; }
+  .install p { font-size: 15px; }
+  /* The line is meant to be taken away, so the button sits inside the block it
+     copies and the padding on the right keeps the text from running under it. */
+  .paste {
+    position: relative; margin: 18px 0 20px; padding: 20px 22px;
+    background: rgba(0, 0, 0, .3); border: 2px solid rgba(87, 207, 192, .45);
+    border-radius: 18px;
+  }
+  .paste pre {
+    margin: 0; padding-right: 96px; white-space: pre-wrap; overflow-wrap: anywhere;
+    font: 14px/1.7 Consolas, "DejaVu Sans Mono", monospace; color: var(--paper);
+  }
+  .copy {
+    position: absolute; top: 14px; right: 14px;
+    padding: 8px 14px; border: 0; border-radius: 12px; cursor: pointer;
+    background: var(--teal); color: var(--ink);
+    font: bold 13px Verdana, "Trebuchet MS", sans-serif;
+  }
+  .copy:hover { filter: brightness(1.1); }
+  .copy.done { background: var(--paper); }
   .shot { margin-top: 34px; text-align: center; }
   .shot img { max-width: 380px; width: 100%; border-radius: 12px; }
   .shot figcaption { color: var(--dim); font-size: 13px; margin-top: 10px; }
@@ -132,6 +154,30 @@
     <strong>Bulgarian</strong> comes out fluent but in a Russian accent. Write a line in one
     and listen.
   </p>
+
+  <section class="install">
+    <h2>Easy install</h2>
+    <p class="lede">Windows only. Paste this into Claude Code:</p>
+
+    <div class="paste">
+      <pre id="install-line">Clone https://github.com/TraxData313/claude-voice here, then follow docs/tour.md
+in it: set it up, turn it on, and give me the spoken tour.</pre>
+      <button class="copy" type="button" id="copy-install">Copy</button>
+    </div>
+
+    <p>
+      That is the whole of it. Claude fetches Python if you lack it, then the engine and
+      its model, installs, opens the panel and switches it on — then tells you
+      <em>out loud</em> how to drive it. Ten minutes, nearly all of it download — about
+      3 GB of engine and model, which resumes where it stopped if the connection drops.
+    </p>
+    <p>
+      <strong>No administrator rights anywhere</strong>, so it goes on a locked-down work
+      laptop as easily as your own.
+      <a href="https://github.com/TraxData313/claude-voice/blob/main/docs/install.md">By
+      hand, other builds, every-project install →</a>
+    </p>
+  </section>
 
   <p class="note">
     These pages exist because GitHub will not play audio inside a README — it offers
@@ -189,6 +235,60 @@
         count('listened-' + who, 'Played a sample: ' + who);
       });
     });
+
+    // Taking the install line away is the strongest thing a reader does here, so
+    // it is worth counting — once, however many times the button is pressed.
+    var copied = false;
+    var button = document.getElementById('copy-install');
+    var line = document.getElementById('install-line');
+    if (button && line) {
+      // The old way, for a browser without navigator.clipboard and for the times
+      // the new way says no — it refuses on plain http, and in some browsers
+      // whenever the page does not hold focus.
+      function copyTheOldWay(text) {
+        var box = document.createElement('textarea');
+        box.value = text;
+        box.style.position = 'fixed';
+        box.style.top = '0';
+        box.style.opacity = '0';
+        document.body.appendChild(box);
+        box.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        document.body.removeChild(box);
+        return ok ? Promise.resolve() : Promise.reject();
+      }
+
+      button.addEventListener('click', function () {
+        var text = line.textContent;
+        var done = navigator.clipboard
+          ? navigator.clipboard.writeText(text).catch(function () {
+              return copyTheOldWay(text);
+            })
+          : copyTheOldWay(text);
+
+        done.then(function () {
+          button.textContent = 'Copied';
+          button.classList.add('done');
+          setTimeout(function () {
+            button.textContent = 'Copy';
+            button.classList.remove('done');
+          }, 2000);
+          if (copied) return;
+          copied = true;
+          count('copied-the-install-line', 'Copied the install line');
+        }, function () {
+          // Both ways refused, so leave the line selected: the reader is one
+          // Ctrl+C from having it, and the button now says so.
+          var range = document.createRange();
+          range.selectNodeContents(line);
+          var selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          button.textContent = 'Ctrl+C';
+        });
+      });
+    }
 
     var left = false;
     document.querySelectorAll('a[href*="TraxData313/claude-voice"]').forEach(function (link) {

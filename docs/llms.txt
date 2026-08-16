@@ -18,7 +18,7 @@ alphabet with: Bulgarian reads fluently but in a Russian accent.
 
 ## Pages
 
-- [Hear the voices](https://traxdata313.github.io/claude-voice/): samples of Abby and Max, playable.
+- [Hear the voices](https://traxdata313.github.io/claude-voice/): samples of Abby and Max, playable, and the one line that installs the whole thing.
 - [Repository](https://github.com/TraxData313/claude-voice): the code, and the README.
 
 ## Documentation
