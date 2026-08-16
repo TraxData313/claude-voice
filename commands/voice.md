@@ -1,6 +1,6 @@
 ---
 description: Turn Claude's spoken voice on/off, or pick which voice it uses
-argument-hint: "on | off | status | list [filter] | set <voice-id> | replay | replay-all | say <text> | stop | kill"
+argument-hint: "help | on | off | status | list | set <voice> | repeat | repeat-all | say <text> | stop | kill"
 allowed-tools: Bash(__PYTHON__:*)
 ---
 
@@ -12,7 +12,7 @@ __PYTHON__ "__REPO__/voice_cli.py" $ARGUMENTS
 
 Notes for interpreting the result:
 
-- With no arguments this prints status.
+- With no arguments this prints status. `help` prints every command, grouped.
 - `on` starts the engine host if it is cold; the first model load takes 40-60s
   and the command waits for it.
 - `list` shows every available voice; `set <id>` accepts any unambiguous

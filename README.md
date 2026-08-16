@@ -103,6 +103,10 @@ python voice_cli.py max 900     # read a bit more of each answer
 `/voice <args>` inside Claude Code is the same thing — note the space, `/voice on` rather
 than `/voice_on`.
 
+**Can't remember a command?** `/voice help` prints the lot, grouped and explained.
+[CHEATSHEET.md](CHEATSHEET.md) is the same list to read at leisure — generated from the
+tool itself, so it cannot drift out of date.
+
 **There is no play button next to each message.** Claude Code has no API for adding
 controls to the transcript, so `replay` is how you hear something a second time.
 
