@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Max — brave, driving voice">
+  <!-- Original character. Flat, minimal, motivating. No likeness of any real person. -->
+  <circle cx="128" cy="128" r="124" fill="#12141c"/>
+  <circle cx="128" cy="128" r="121" fill="none" stroke="#f59e0b" stroke-width="6"/>
+
+  <clipPath id="disc"><circle cx="128" cy="128" r="118"/></clipPath>
+  <g clip-path="url(#disc)">
+
+    <!-- thick neck and tank-top shoulders -->
+    <rect x="106" y="162" width="44" height="32" fill="#eebd93"/>
+    <path d="M30 258 C58 200 198 200 226 258 Z" fill="#26303f"/>
+    <path d="M96 214 L112 258 M160 214 L144 258" fill="none" stroke="#1a222e" stroke-width="7"/>
+
+    <!-- head: wider jaw than Abby's -->
+    <path d="M128 58 C162 58 180 82 180 114 C180 148 162 172 128 176
+             C94 172 76 148 76 114 C76 82 94 58 128 58 Z" fill="#f0b98a"/>
+
+    <!-- stubble along the jaw -->
+    <path d="M84 128 C88 156 108 172 128 174 C148 172 168 156 172 128
+             C166 152 150 166 128 166 C106 166 90 152 84 128 Z"
+          fill="#7c5c41" opacity="0.35"/>
+
+    <!-- swept-back sandy hair, a bit unruly -->
+    <path d="M76 104 C72 66 98 42 128 42 C160 42 186 66 180 106
+             C172 86 162 78 150 80 C158 68 146 58 134 64
+             C120 54 98 60 90 76 C82 82 78 92 76 104 Z" fill="#d9a441"/>
+    <path d="M100 62 C110 56 122 55 130 58" fill="none" stroke="#eab95c" stroke-width="4" stroke-linecap="round"/>
+
+    <!-- the sweatband -->
+    <rect x="78" y="88" width="100" height="15" rx="7.5" fill="#ef4444"/>
+    <rect x="78" y="99" width="100" height="4" fill="#b91c1c" opacity="0.6"/>
+
+    <!-- determined brows -->
+    <path d="M94 115 L120 109 L121 116 L95 121 Z" fill="#8a6a34"/>
+    <path d="M162 115 L136 109 L135 116 L161 121 Z" fill="#8a6a34"/>
+
+    <!-- steady eyes -->
+    <g fill="#241f1c">
+      <circle cx="109" cy="127" r="5.5"/>
+      <circle cx="147" cy="127" r="5.5"/>
+    </g>
+    <g fill="#ffffff">
+      <circle cx="107.5" cy="125" r="1.9"/>
+      <circle cx="145.5" cy="125" r="1.9"/>
+    </g>
+
+    <!-- nose, and a grin with teeth in it -->
+    <path d="M128 130 q-4 9 3 11" fill="none" stroke="#c98d5f" stroke-width="4" stroke-linecap="round"/>
+    <path d="M108 147 Q128 165 148 147" fill="none" stroke="#8c4a2f" stroke-width="5" stroke-linecap="round"/>
+    <path d="M115 150 Q128 159 141 150 L138 155 Q128 161 118 155 Z" fill="#ffffff"/>
+
+    <!-- chin mark -->
+    <path d="M123 166 Q128 169 133 166" fill="none" stroke="#c98d5f" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>

@@ -139,5 +139,16 @@ New file `panel.py`, stdlib only (`tkinter`, `urllib.request`, `threading`).
 6. Voice dropdown. Verify it updates `~\.claude\CLAUDE.md` between the markers (that is
    `announce_voice` doing its job).
 
+## Icons
+
+`docs/icons/abby.svg` and `docs/icons/max.svg` exist — original flat-style portraits, one
+per shipped voice. The panel should show the current voice's face next to "now playing".
+
+**Tk cannot read SVG.** `tkinter.PhotoImage` handles PNG and GIF only. Do not add a
+dependency to rasterise them; either redraw a simplified version directly on a small
+`Canvas` (a dozen ovals and polygons — the source SVGs are already just flat shapes to
+crib coordinates from), or ship tiny PNGs exported by hand later. A coloured initial
+letter is an acceptable stand-in for any voice without an icon.
+
 Half a day, roughly. If something here turns out wrong in practice, prefer the smaller
 change and note it in this file — the next session reads this too.

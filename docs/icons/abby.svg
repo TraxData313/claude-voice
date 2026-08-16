@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Abby — calm, slightly nerdy voice">
+  <!-- Original character. Flat, minimal, friendly. No likeness of any real person. -->
+  <circle cx="128" cy="128" r="124" fill="#12141c"/>
+  <circle cx="128" cy="128" r="121" fill="none" stroke="#5eead4" stroke-width="6"/>
+
+  <clipPath id="disc"><circle cx="128" cy="128" r="118"/></clipPath>
+  <g clip-path="url(#disc)">
+
+    <!-- long wavy hair, back layer -->
+    <path d="M128 34 C86 34 58 66 58 106 L58 130
+             C58 152 50 172 42 188 C58 186 68 178 74 166
+             C74 184 70 202 60 218 C80 214 92 200 96 184
+             C98 200 96 214 90 228 C108 222 118 208 120 190
+             L136 190 C138 208 148 222 166 228
+             C160 214 158 200 160 184 C164 200 176 214 196 218
+             C186 202 182 184 182 166 C188 178 198 186 214 188
+             C206 172 198 152 198 130 L198 106 C198 66 170 34 128 34 Z"
+          fill="#95582f"/>
+
+    <!-- neck and shoulders -->
+    <rect x="114" y="168" width="28" height="26" fill="#eebd93"/>
+    <path d="M42 258 C68 206 188 206 214 258 Z" fill="#14b8a6"/>
+    <path d="M108 212 L128 226 L148 212" fill="none" stroke="#0d9488" stroke-width="5" stroke-linecap="round"/>
+
+    <!-- face -->
+    <ellipse cx="128" cy="124" rx="50" ry="54" fill="#f6c9a3"/>
+
+    <!-- centre-parted fringe -->
+    <path d="M128 42 C100 42 80 62 76 90 C92 76 110 70 124 70 L128 80 L132 70
+             C146 70 164 76 180 90 C176 62 156 42 128 42 Z" fill="#95582f"/>
+    <path d="M84 84 C94 74 106 70 116 69" fill="none" stroke="#b97a4a" stroke-width="4" stroke-linecap="round"/>
+    <path d="M172 84 C162 74 150 70 140 69" fill="none" stroke="#b97a4a" stroke-width="4" stroke-linecap="round"/>
+
+    <!-- blush, then freckles -->
+    <ellipse cx="99" cy="141" rx="9" ry="5.5" fill="#f0a087" opacity="0.4"/>
+    <ellipse cx="157" cy="141" rx="9" ry="5.5" fill="#f0a087" opacity="0.4"/>
+    <g fill="#d99e77">
+      <circle cx="97" cy="135" r="1.7"/><circle cx="105" cy="139" r="1.7"/><circle cx="113" cy="136" r="1.7"/>
+      <circle cx="143" cy="136" r="1.7"/><circle cx="151" cy="139" r="1.7"/><circle cx="159" cy="135" r="1.7"/>
+    </g>
+
+    <!-- gently raised brows: the innocent look lives here -->
+    <path d="M95 101 Q106 94 117 100" fill="none" stroke="#7a4c2c" stroke-width="4" stroke-linecap="round"/>
+    <path d="M139 100 Q150 94 161 101" fill="none" stroke="#7a4c2c" stroke-width="4" stroke-linecap="round"/>
+
+    <!-- round glasses -->
+    <g fill="none" stroke="#5eead4" stroke-width="4.5">
+      <circle cx="106" cy="121" r="16"/>
+      <circle cx="150" cy="121" r="16"/>
+      <path d="M122 119 Q128 115 134 119"/>
+      <path d="M90 119 L81 113"/>
+      <path d="M166 119 L175 113"/>
+    </g>
+
+    <!-- big bright eyes -->
+    <g fill="#241f1c">
+      <circle cx="106" cy="122" r="7"/>
+      <circle cx="150" cy="122" r="7"/>
+    </g>
+    <g fill="#ffffff">
+      <circle cx="104" cy="119.5" r="2.6"/><circle cx="108.5" cy="124.5" r="1.2"/>
+      <circle cx="148" cy="119.5" r="2.6"/><circle cx="152.5" cy="124.5" r="1.2"/>
+    </g>
+
+    <!-- nose and a small warm smile -->
+    <path d="M128 131 q-3 7 2 9" fill="none" stroke="#d99e77" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M117 148 Q128 156 139 148" fill="none" stroke="#b4552d" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>

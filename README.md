@@ -95,9 +95,18 @@ go stale.
 
 ## The voices
 
-Two ship with it: **Abby**, cute and slightly nerdy, and **Max**, brave and driving. Both
-belong to the author. Adding your own is one command and a clean 20–40 second clip of one
-person talking:
+Two ship with it, both the author's own — original characters, drawn here, borrowed from
+nobody:
+
+| | | |
+|---|---|---|
+| <img src="docs/icons/abby.svg" width="84" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and innocent-sounding. Calm and warm, never in a hurry — the voice for careful work, tricky debugging, and being talked through something gently. |
+| <img src="docs/icons/max.svg" width="84" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — the voice for grinding through a long list. |
+
+Switch any time with `/voice set abby` or `/voice set max`. The manner changes tone, never
+substance: neither voice will cheer a result that has not been checked.
+
+Adding your own is one command and a clean 20–40 second clip of one person talking:
 
 ```powershell
 python voice_cli.py clone C:\path\to\sample.wav --name "Ada"
