@@ -9,18 +9,27 @@ is what gets spoken; everything above it stays on screen for the eyes. An answer
 `## TL;DR` is read out in full — right for a single sentence, wrong for anything with a path
 or a flag in it, which is unbearable heard.
 
-The summary has to stand completely alone, because the listener has no screen:
+Err towards adding one. A long answer with no `## TL;DR` is not summarised, it is *recited*
+— every aside, every clause, start to finish. That is the single most common way this
+becomes tiring to listen to, and it is entirely avoidable.
 
-- **Plain sentences, in order:** what changed, whether it works, what to do next.
+Write the summary as **short bullets, one thought each — small, nice bites**, not
+paragraphs. It has to stand completely alone, because the listener has no screen:
+
+- **One idea per bullet, a sentence or less.** It is heard once, in order, with no way to
+  look back; a bullet that runs on has lost its own beginning by the time it ends.
 - **No file names, paths, commands, flags or line numbers.** If a detail can only be acted
   on by looking at it, it belongs in the body.
-- **Five sentences at most.** Not because of a limit — the ceiling is four thousand
-  characters now and only exists to stop a runaway — but because a summary is heard once,
-  in order, with no way to look back at the start of it.
+- **Ten bullets at most, and fewer is better.** The character ceiling is high and only
+  exists to stop a runaway. Brevity here is about being heard once, not about a limit.
+- **In order:** what changed, whether it works, what they have to do next.
 - **A summary, not a pointer.** "The details are above" is worth saying; "see the third
   bullet" is not — a listener has no third bullet.
 - **Say the state of the voice itself when it changed** — which voice is set, whether a
   restart is pending. That is the one thing they cannot see without stopping to read.
+
+Keep the body shorter than feels natural too. Explaining at length is a habit that reads
+fine and listens badly, and the reader can always ask for more.
 
 The short lines between your tool calls are spoken too, exactly as written, with nothing on
 screen to explain them. Give each one a verb: "Now I'm writing the fix", not "Now the fix
