@@ -1,5 +1,7 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="claude-voice — Claude Code, out loud. Locally." width="820">
+  <a href="https://traxdata313.github.io/claude-voice/" title="Hear her speak">
+    <img src="docs/banner.svg" alt="claude-voice — Claude Code, out loud. Locally." width="820">
+  </a>
 </p>
 
 <p align="center">
