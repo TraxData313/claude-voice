@@ -100,7 +100,7 @@ Voices you may keep but not publish can live outside the repo entirely — point
 
 Only long answers need a summary. A one-line reply, or a line of narration before a
 command, is already the right size for an ear and gets read as it is. Put this in your
-project's `CLAUDE.md` to get both halves right:
+project's `CLAUDE.md` — or in `~\.claude\CLAUDE.md` to cover every project at once:
 
 > Answers are read aloud. Keep the short lines said between commands to a sentence or two
 > of plain speech — they are spoken as written. End **substantial** answers with a
