@@ -180,4 +180,7 @@ embedding is a clone of a real person, so that folder has rules.
   out of it. *"For the love of money is the root of all evil."*
 - If you still insist on thanking me somehow — visit [my GitHub acc](https://github.com/TraxData313) and read my top pinned
 
+
+<img src="docs/Abby-Full-Size.png" width="620" alt="Abby">
+
 <!-- ── end author's section ── -->
