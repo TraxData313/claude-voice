@@ -665,21 +665,23 @@ class TranscriptWatcher(threading.Thread):
         except LookupError as exc:
             return log(f"watcher: {exc}")
 
-        # Two sessions talking through one voice are impossible to tell apart.
-        # Name the source, but only when it changes -- announcing every line
-        # would be worse than the confusion it is fixing.
+        # Two projects talking through one voice are impossible to tell apart,
+        # so say which one -- but only when it actually changes. Announcing
+        # every line would be worse than the confusion it is fixing.
         #
-        # The project, by default, not the conversation's title: 'qwen voices'
-        # says where you are in one or two words, while a generated title is a
-        # sentence and a listener who has heard it once does not need it again.
+        # The project, never the conversation's title. 'qwen voices' says where
+        # you are in two words, while a generated title is a whole sentence, and
+        # two conversations open on the same project are still that one project:
+        # switching between them is not news and should pass without a word.
+        # Anything other than 'off' means the project, so a stale setting from
+        # an older config cannot quietly bring the titles back.
         label = self.labels.get(path)
-        mode = state.get("sessionLabel", "project")
-        spoken = _tidy_label(self.projects.get(path)) if mode == "project" else label
+        project = _tidy_label(self.projects.get(path))
         announced = ""
-        if (mode != "off" and spoken
-                and self.last_source is not None and self.last_source != path):
-            announced = f"{spoken}. "
-        self.last_source = path
+        if (state.get("sessionLabel", "project") != "off" and project
+                and self.last_source is not None and self.last_source != project):
+            announced = f"{project}. "
+        self.last_source = project or self.last_source
 
         pieces = voice_lib.chunks(announced + speech)
         if pieces:

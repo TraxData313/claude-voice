@@ -49,9 +49,10 @@ DEFAULTS = {
     "watch": True,
     # Pause between one message and the next, so the seam is audible.
     "gapSeconds": 0.45,
-    # Say where a line came from when the speaker changes, and only then.
-    # 'project' is the folder you are working in and is two words; 'title' is
-    # the conversation's own name and is a sentence; 'off' says nothing.
+    # Name the project when the project changes, and only then. 'off' says
+    # nothing at all; anything else names it. Two conversations open on the
+    # same project are still that project, and switching between them passes
+    # without a word.
     "sessionLabel": "project",
     # After a restart the watcher resumes where it left off, but will not read
     # anything older than this -- catching up after a crash, not after a night.
