@@ -5,7 +5,7 @@ Loading the model takes the better part of a minute, which is fine once and
 unbearable per sentence -- so the engine lives here, in a long-running process,
 behind a tiny HTTP API on localhost:
 
-    POST /speak   {"text": "...", "voice": "sibylla", "source": "embedding"}
+    POST /speak   {"text": "...", "voice": "abby", "source": "embedding"}
     POST /stop    stop talking now, drop anything queued
     POST /health  {"ready": true, "speaking": false, ...}
     POST /quit    shut the process down

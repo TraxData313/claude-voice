@@ -27,7 +27,7 @@ DEFAULTS = {
 
     # --- runtime state, written by voice_cli ------------------------------
     "enabled": False,
-    "voice": "sibylla",
+    "voice": "abby",
     "source": "embedding",     # or 'icl': closer clone, larger files
     "maxChars": 600,
     "port": 8765,

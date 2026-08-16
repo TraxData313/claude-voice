@@ -15,7 +15,7 @@
   "narrateMaxChars": 240,
 
   "enabled": false,
-  "voice": "sibylla",
+  "voice": "abby",
   "source": "embedding",
   "maxChars": 600,
   "port": 8765,

@@ -8,7 +8,7 @@ they never said. Treat the `voices/` folder accordingly.
 
 | voice | | |
 |---|---|---|
-| `sibylla` | female | the author's own |
+| `abby` | female | the author's own |
 | `max` | male | the author's own |
 
 Both were made from recordings their owner is entitled to clone. That is the whole test

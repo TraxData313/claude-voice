@@ -91,7 +91,7 @@ begin speaking almost immediately.
 ```powershell
 python voice_cli.py on          # or off / toggle / status
 python voice_cli.py list        # every voice available
-python voice_cli.py set sibylla
+python voice_cli.py set abby
 python voice_cli.py say "trying a line"
 python voice_cli.py replay      # say the last answer again; replay 3 for the third back
 python voice_cli.py stop        # shut up mid-sentence
@@ -119,7 +119,7 @@ going, and the rest is spoken in one take.
 
 ## Voices
 
-Two voices ship with this repo: **Sibylla** and **Max**, both the author's own. See
+Two voices ship with this repo: **Abby** and **Max**, both the author's own. See
 [VOICES.md](VOICES.md) for what may go in that folder and what may not — the short version
 is that a speaker embedding *is* a clone of a real person's voice, and shipping one you
 did not record is not yours to give away.
