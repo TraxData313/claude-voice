@@ -1,6 +1,6 @@
 ---
 description: Turn Claude's spoken voice on/off, or pick which voice it uses
-argument-hint: "on | off | status | list [filter] | set <voice-id> | say <text> | stop | kill"
+argument-hint: "on | off | status | list [filter] | set <voice-id> | replay | replay-all | say <text> | stop | kill"
 allowed-tools: Bash(__PYTHON__:*)
 ---
 
@@ -17,5 +17,8 @@ Notes for interpreting the result:
   and the command waits for it.
 - `list` shows every available voice; `set <id>` accepts any unambiguous
   substring, so `set sib` works.
+- `replay` says the last answer's summary again; `replay-all` says the whole
+  message with no length cap. Both take a number to reach further back, and
+  `stop` cuts either off.
 - Report the CLI's output plainly. Do not re-run the command to "verify" --
   state is written synchronously.

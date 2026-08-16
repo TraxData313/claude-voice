@@ -24,6 +24,13 @@ $repo = $PSScriptRoot
 
 function Say($msg, $colour = "Gray") { Write-Host $msg -ForegroundColor $colour }
 
+# Out-File -Encoding utf8 writes a BOM in PowerShell 5.1, and a BOM at the top
+# of settings.json makes a strict JSON parser reject the whole file -- which
+# looks exactly like "hooks silently do nothing". Write it clean.
+function Write-Utf8($path, $text) {
+    [System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 # --- python ---------------------------------------------------------------
 # The hook is spawned without a shell profile, so a bare "python" is not enough:
 # anything installed by conda or the Windows Store alias will not resolve there.
@@ -81,7 +88,7 @@ $cfg.modelDir = $modelDir
 $cfg.talker = $talker
 
 if (-not $WhatIf) {
-    $cfg | ConvertTo-Json -Depth 10 | Out-File $configPath -Encoding utf8
+    Write-Utf8 $configPath ($cfg | ConvertTo-Json -Depth 10)
 }
 
 # --- the Stop hook --------------------------------------------------------
@@ -147,12 +154,12 @@ Say "settings      : $settingsPath"
 
 if (-not $WhatIf) {
     New-Item -ItemType Directory -Force -Path $claudeDir | Out-Null
-    $settings | ConvertTo-Json -Depth 10 | Out-File $settingsPath -Encoding utf8
+    Write-Utf8 $settingsPath ($settings | ConvertTo-Json -Depth 10)
 
     $cmdDir = Join-Path $claudeDir "commands"
     New-Item -ItemType Directory -Force -Path $cmdDir | Out-Null
-    (Get-Content (Join-Path $repo "commands\voice.md") -Raw).Replace("__PYTHON__", $PythonExe).Replace("__REPO__", $repo.Replace('\','/')) |
-        Out-File (Join-Path $cmdDir "voice.md") -Encoding utf8
+    $template = (Get-Content (Join-Path $repo "commands\voice.md") -Raw).Replace("__PYTHON__", $PythonExe).Replace("__REPO__", $repo.Replace('\','/'))
+    Write-Utf8 (Join-Path $cmdDir "voice.md") $template
     Say "slash command : $(Join-Path $cmdDir 'voice.md')" "Green"
 }
 

@@ -41,6 +41,15 @@ and `-StudioDir` / `-PythonExe` if either is somewhere unusual.
 
 **Then restart Claude Code** — hooks are only read at session start.
 
+To speak in **every** project rather than one, install into your user settings instead:
+
+```powershell
+.\install.ps1 -ProjectDir $env:USERPROFILE
+```
+
+Do one or the other, not both. Hooks defined in both places all fire, so you get two
+processes racing for every event.
+
 ```
 /voice on
 ```
@@ -128,6 +137,11 @@ things get it rejected:
 - *An entry is missing the field its event expects.* `PreToolUse` matches on tool name and
   wants a `matcher`; `Stop` fires once per turn and takes none. One malformed entry can
   invalidate the whole block, so a bad `PreToolUse` will silence `Stop` along with it.
+- *The file starts with a byte-order mark.* `Out-File -Encoding utf8` writes one in
+  PowerShell 5.1, and three invisible bytes at the top of `settings.json` are enough for a
+  strict JSON parser to reject the entire file. Nothing reports this; the hooks simply
+  never run. Check with `Get-Content settings.json -Encoding Byte -TotalCount 3` — `239
+  187 191` is the BOM. `install.ps1` writes without one.
 
 If the log stays empty after a restart with both of those correct, the hook may not be
 loading from the project at all — try installing it into your user settings instead:

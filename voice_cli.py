@@ -10,6 +10,7 @@ and make new ones.
     python voice_cli.py stop                # shut up mid-sentence
     python voice_cli.py start | kill        # engine host, by hand
     python voice_cli.py replay [n]          # say the last answer again (or the nth back)
+    python voice_cli.py replay-all [n]      # the whole message, not just its summary
     python voice_cli.py narrate on|off      # speak the short lines said mid-work
     python voice_cli.py source embedding|icl
     python voice_cli.py max <chars>
@@ -161,7 +162,7 @@ def _transcript_texts(project_dir):
     return out
 
 
-def cmd_replay(state, args):
+def _replay(state, args, full):
     """Say something again. There is no play button to put next to a message --
     Claude Code has no API for that -- so this is how you re-hear one."""
     n = int(args[0]) if args and args[0].lstrip("-").isdigit() else 1
@@ -170,8 +171,13 @@ def cmd_replay(state, args):
         raise SystemExit(f"only {len(texts)} answers in this session")
 
     text = texts[-n]
-    speech = (voice_lib.clean_text(voice_lib.extract_summary(text), state["maxChars"])
-              or voice_lib.clean_text(text, state["maxChars"]))
+    if full:
+        # Everything, and no length cap: asking for the whole message and then
+        # cutting it off at the usual limit would answer a different question.
+        speech = voice_lib.clean_text(text, 0)
+    else:
+        speech = (voice_lib.clean_text(voice_lib.extract_summary(text), state["maxChars"])
+                  or voice_lib.clean_text(text, state["maxChars"]))
     if not speech:
         raise SystemExit("that answer has nothing speakable in it")
 
@@ -179,9 +185,25 @@ def cmd_replay(state, args):
         print("Engine not running; starting it...")
         if not voice_lib.start_server(state, wait=120):
             raise SystemExit("engine did not come up -- see logs/speak-server.log")
-    voice_lib.post(state["port"], "/speak", {
+    r = voice_lib.post(state["port"], "/speak", {
         "text": speech, "voice": state["voice"], "source": state["source"]}, timeout=10)
-    print(f"Replaying answer -{n}: {speech[:70]}...")
+
+    # Roughly 14 characters a second, measured over the clips this produces.
+    mins, secs = divmod(int(len(speech) / 14), 60)
+    length = f"{mins}m {secs:02d}s" if mins else f"{secs}s"
+    print(f"Replaying {'all of ' if full else ''}answer -{n} "
+          f"({len(speech)} chars, about {length}, {r.get('queued')} chunks)")
+    print(f"  {speech[:70]}...")
+    if full:
+        print("  'stop' cuts it off.")
+
+
+def cmd_replay(state, args):
+    _replay(state, args, full=False)
+
+
+def cmd_replay_all(state, args):
+    _replay(state, args, full=True)
 
 
 def cmd_stop(state, _args):
@@ -317,6 +339,9 @@ COMMANDS = {
     "list": cmd_list, "set": cmd_set, "say": cmd_say, "stop": cmd_stop,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,
     "clone": cmd_clone, "replay": cmd_replay, "again": cmd_replay,
+    # Spelled several ways on purpose: it is typed from memory, mid-listen.
+    "replay-all": cmd_replay_all, "replay_all": cmd_replay_all,
+    "replayall": cmd_replay_all, "all": cmd_replay_all,
     "narrate": cmd_narrate,
 }
 
