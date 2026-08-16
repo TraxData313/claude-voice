@@ -21,8 +21,8 @@
 <p align="center">
   <em><strong>Abby</strong>, as claude-voice — click her to hear her speak.</em>
   <br>
-  <sub><img src="docs/flags/us.svg" height="11" alt="US"> English and
-  <img src="docs/flags/ru.svg" height="11" alt="RU"> Russian are tested and both sound right —
+  <sub><img src="docs/flags/us.png" height="15" alt="US"> English and
+  <img src="docs/flags/ru.png" height="15" alt="RU"> Russian are tested and both sound right —
   and 🌐 most widely used languages should read normally.</sub>
 </p>
 
@@ -184,9 +184,9 @@ Voices you may keep but not share never need to enter the repo at all — point
 
 | | |
 |---|---|
-| <img src="docs/flags/us.svg" height="13" alt="US"> **English** | tested — both voices were cloned from it |
-| <img src="docs/flags/ru.svg" height="13" alt="RU"> **Russian** | tested — Abby reads it genuinely well, cloned from English though she is |
-| <img src="docs/flags/bg.svg" height="13" alt="BG"> **Bulgarian** | reads, but in a **Russian accent** — the model takes it for odd Russian |
+| <img src="docs/flags/us.png" height="20" alt="US"> **English** | tested — both voices were cloned from it |
+| <img src="docs/flags/ru.png" height="20" alt="RU"> **Russian** | tested — Abby reads it genuinely well, cloned from English though she is |
+| <img src="docs/flags/bg.png" height="20" alt="BG"> **Bulgarian** | reads, but in a **Russian accent** — the model takes it for odd Russian |
 | 🌐 **most others** | **should read normally.** The model underneath is multilingual, and nothing in between cares which alphabet it is handed |
 
 Try one: write a line in it and listen. Bulgarian is the shape of the failure to expect from a
