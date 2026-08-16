@@ -247,6 +247,11 @@ _SPOKEN = {
 }
 _KEEP_PUNCT = set(" \n\t.,;:!?'\"()-/%$&+=@#")
 
+# Is there anything in this worth saying out loud? A letter or a digit in any
+# script, not only a Latin one -- asking for [A-Za-z0-9] threw away every line
+# of Russian, Greek or Chinese as if it had been punctuation, silently.
+_SPEAKABLE = re.compile(r"[^\W_]")
+
 
 def _normalize(text):
     import unicodedata
@@ -296,7 +301,7 @@ def clean_text(md, max_chars=600):
     lines = []
     for ln in t.split("\n"):
         ln = ln.strip()
-        if not re.search(r"[A-Za-z0-9]", ln):
+        if not _SPEAKABLE.search(ln):
             continue
         lines.append(ln if ln[-1] in ".!?:;," else ln + ".")
     t = " ".join(lines)
@@ -377,7 +382,7 @@ def chunks(text, first=140, target=320):
             limit = target                         # only the opener stays short
     if buf:
         out.append(buf)
-    return [c for c in out if re.search(r"[A-Za-z0-9]", c)]
+    return [c for c in out if _SPEAKABLE.search(c)]
 
 
 # --------------------------------------------------------------------------
