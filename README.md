@@ -49,7 +49,8 @@ in it: set it up, turn it on, and give me the spoken tour.
 
 That is the whole of it. Claude fetches Python if you lack it, then the engine and its
 model, installs, opens the panel and switches it on — then tells you *out loud* how to
-drive it. Ten minutes, nearly all of it download.
+drive it. Ten minutes, nearly all of it download — about 3 GB of engine and model, which
+resumes where it stopped if the connection drops.
 
 **No administrator rights anywhere**, so it goes on a locked-down work laptop as easily as
 your own. **[By hand, other builds, every-project install →](docs/install.md)**
