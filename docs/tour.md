@@ -4,6 +4,12 @@
 to set this up and show them around. Work through it in order and keep it brisk — the point
 is that they hear it working within a few minutes, not that they read a manual.
 
+## 0. You may have only just arrived
+
+If they pasted the one-liner from the README, you cloned this repo a moment ago and are
+reading this out of it. Everything below runs **from the repo folder**, so `cd` into it
+first. If you are already there, carry on.
+
 ## 1. Check the prerequisites before installing
 
 - **Python** — you need the absolute path to `python.exe`, not the word `python`. Anything
