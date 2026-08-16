@@ -305,9 +305,12 @@ does not have to say what is being checked. The line itself is anchored west for
 reason it exists: left to its own devices a label centres in the space it is given, and this
 one drifted right until it was touching the version number.
 
-- **One button, two stages.** It says `check now` until a check finds something, then
-  `update to 1.4.2`. Two buttons would have meant a permanently dead one, since you cannot
-  update to a version nobody has looked for yet.
+- **One button, three stages.** `check now` until a check finds something, then
+  `update to 1.4.2`, then `reopen panel`. Two buttons would have meant a permanently dead
+  one, since you cannot update to a version nobody has looked for yet — and the third stage
+  is there because the window is the one thing an update cannot put back for itself. The
+  engine it can: it stops it and starts it again. This window is the process it was started
+  as, so it offers to be replaced instead of telling you to go and do it.
 - **Ticking the box looks straight away**, as well as weekly. Somebody who has just asked for
   update checks should watch one happen rather than wait a week to learn whether it works.
 - **The link appears with the button, not after it.** A version number is not a reason to

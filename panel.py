@@ -351,6 +351,9 @@ class Panel:
         # Something the user's last press said that the files cannot: how a
         # pull went. It outranks the idle 'up to date' until they act again.
         self.update_msg = None
+        # An update was taken in this window, so this window is now the one
+        # thing running the old code.
+        self.update_reopen = False
         self.native_theme = ttk.Style().theme_use()
         self._build()
         self.apply_theme()
@@ -576,7 +579,13 @@ class Panel:
         # timer noticing a file; it does not get to argue with that.
         if self.update_busy:
             return
-        if newer:
+        if self.update_reopen:
+            # The engine was put back by the update itself. This window was
+            # not, and cannot be: it is the process it was started as. So the
+            # one useful thing left for the button is to start its replacement.
+            self.update_btn.configure(text="reopen panel")
+            self.whats_new.pack_forget()
+        elif newer:
             self.update_btn.configure(text=f"update to {newer['version']}")
             # Packed only now, and before the note so the row reads left to
             # right: what it would do, what is in it, how it went. Nobody
@@ -731,12 +740,24 @@ class Panel:
             self.show_version(force=True)
 
     def press_update(self):
-        """One button, two stages: find out, then take it."""
+        """One button, three stages: find out, take it, then stand aside."""
+        if self.update_reopen:
+            return self.reopen_panel()
         newer = update_check.available()
         if newer:
             self.take_update(newer)
         else:
             self.look_for_update()
+
+    def reopen_panel(self):
+        """Close this window and open one running the code it just pulled.
+
+        Closing first, so the geometry is written before the new one reads it;
+        the spawn survives this process ending, being detached, exactly as the
+        one that opened this window did.
+        """
+        self.close()
+        voice_lib.start_panel()
 
     def look_for_update(self):
         self.update_busy = True
@@ -786,9 +807,10 @@ class Panel:
             else:
                 _, ok, spoken, _newer = item
                 if ok:
-                    self.update_msg = f"updated to {update_check.shown_version()} -- reopen"
+                    self.update_reopen = True     # the button says the rest
+                    self.update_msg = f"updated to {update_check.shown_version()}"
                     if update_check.local().get("needsSetup"):
-                        self.update_msg = "updated -- run setup.ps1, reopen"
+                        self.update_msg += " -- run setup.ps1 too"
                 else:
                     # The first line is the refusal itself; the rest is detail,
                     # and detail is what the log is for.

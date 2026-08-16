@@ -17,18 +17,29 @@ The bottom row of the panel does the whole of it:
 | | |
 |---|---|
 | ☐ **auto-check** | the weekly look. Ticking it also looks **now**, so you see one happen rather than waiting a week to find out it works |
-| **check now** → **update to 1.4.2** | one button at two stages: it asks, and then it takes what it found |
+| **check now** → **update to 1.4.2** → **reopen panel** | one button at three stages: it asks, it takes what it found, and then it stands aside |
 | **what's new** | appears beside the button when there is something to read — the changelog, *before* you decide |
 | *up to date, 2 days ago* | how the last look went, when there is nothing else to say |
 | **v1.0.0** | in the far corner, and clickable |
 
-Pressing the update button pulls and restarts the engine, and then says `updated to 1.4.2 —
-reopen` in that same row: the panel is running the code it was started with, so the window
-itself has to be closed and opened again to become the new one. If the pull is refused — local
-changes in the way, usually — the reason appears there too, and the full account goes to
-`logs\panel.log`.
+If the pull is refused — local changes in the way, usually — the reason appears in that same
+row, and the full account goes to `logs\panel.log`.
 
 The panel never checks anything by itself. It reads the answer of whatever check last ran.
+
+## What restarts, and what you restart
+
+Nothing has a *restart button* to go hunting for. There are three things that could need
+putting back, and only one of them is ever your problem:
+
+| | |
+|---|---|
+| **the engine** | **automatic.** The update stops it and starts it again itself, and waits for the model to load — 40–60 seconds, during which the panel says the engine is down. This is the whole reason `--apply` exists |
+| **the panel window** | **one click.** It is the process it was started as, so it cannot become the new code by itself. After a successful update its button says `reopen panel`; pressing it saves the window's position, closes it, and opens the new one in the same place |
+| **Claude Code** | **only sometimes.** Hooks and the `/voice` command are read once, at session start, so a release that changes them needs a restart of Claude Code — and it will say so, in the panel and on the command line, rather than leaving you to guess |
+
+From the command line it is the same, minus the window: `update --apply` restarts the engine
+and tells you if anything else is outstanding.
 
 ## The step people miss
 
@@ -106,6 +117,25 @@ Or set `"updateCheck": false` in `config.json`. `"updateCheckDays": 0` also mean
 
 Nothing of yours is in that zip, so this does not touch `config.json`, your logs, or any
 voice you made yourself.
+
+## Why this is a `git pull` and not an installer
+
+Because **the way a thing is installed sets the way it is updated**, and this one is
+installed by cloning a repo. A checkout that updates by pulling is the normal shape for a
+tool distributed this way — it is how oh-my-zsh, nvm, pyenv and most editor plugin managers
+update themselves, and it is what the folder on disk already is.
+
+An installer-style updater — download a zip, swap the files — would be the wrong tool twice
+over. It would have to reimplement what git already does correctly (know what changed, refuse
+to trample your edits, be interruptible), and it would throw away the two things that come
+free with a checkout: **you can see exactly what changed**, and **you can go back** with
+`git checkout <old-sha>` if a release turns out badly.
+
+What *would* be sloppy is a bare `git pull` fired at a button. That can trample local edits,
+stop half-way in a merge conflict, or succeed while the running program carries on being the
+old one. So this one is `--ff-only`, refuses a dirty tree, refuses a branch with nowhere to
+pull from, checks that `HEAD` actually moved before claiming anything, and restarts what has
+to be restarted. The zip route above exists for copies that are not checkouts at all.
 
 ## What `--apply` will not do
 

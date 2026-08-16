@@ -264,13 +264,18 @@ def status_line(state=None):
     if newer:
         return plain(f"{shown_version()} -- {newer['version']} is out: "
                      f"{newer.get('headline', '')}").rstrip()
-    if not state.get("updateCheck", False):
-        return f"{shown_version()} -- checks are off ('update' looks now)"
-    if doc.get("error"):
-        return f"{shown_version()} -- last check failed, {ago(doc.get('checked'))}"
+
+    on = bool(state.get("updateCheck", False))
     if not doc.get("checked"):
-        return f"{shown_version()} -- checking in the background"
-    return f"{shown_version()} -- up to date (checked {ago(doc.get('checked'))})"
+        # Nothing has ever looked. Whether that is about to change is the only
+        # thing worth saying, and if it is not, say what would change it.
+        return f"{shown_version()} -- " + ("checking in the background" if on else
+                                           "not checked yet ('update' looks now)")
+    # A look that has already happened outranks the setting: 'checks are off'
+    # is a poor answer to "am I current?" when the answer is sitting in a file.
+    said = (f"last check failed, {ago(doc['checked'])}" if doc.get("error") else
+            f"up to date (checked {ago(doc['checked'])})")
+    return f"{shown_version()} -- {said}" + ("" if on else ", auto-check off")
 
 
 def last_look():
