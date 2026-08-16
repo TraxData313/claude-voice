@@ -9,6 +9,11 @@
   "_extraVoicesDirs": "Extra folders searched for voices, same <sex>/<culture>/<id> layout. For voices you may keep but not publish -- they stay out of this repo entirely.",
   "extraVoicesDirs": [],
 
+  "_watch": "Follow session transcripts directly rather than waiting for Claude Code to call the hooks. Works in any client, no restart. Turn off to rely on hooks alone.",
+  "watch": true,
+  "narrate": true,
+  "narrateMaxChars": 240,
+
   "enabled": false,
   "voice": "sibylla",
   "source": "embedding",

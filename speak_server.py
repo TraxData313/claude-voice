@@ -163,8 +163,108 @@ def _unlink(path):
         pass
 
 
+class TranscriptWatcher(threading.Thread):
+    """Speak new assistant messages by watching the session files on disk.
+
+    Hooks are the tidy way to do this, but they only fire if the client
+    actually runs them, and there is no way to tell from in here whether it
+    does. Claude Code writes every turn to a JSONL transcript regardless, so
+    watching those needs no cooperation from the client at all: it works in any
+    session, in any project, without a restart, and it keeps working if the
+    hooks are never wired up.
+
+    Starts at the end of each file it finds, so launching this does not replay
+    the entire history of a conversation at you.
+    """
+
+    PROJECTS = os.path.expanduser(os.path.join("~", ".claude", "projects"))
+    FRESH_SECONDS = 15 * 60      # ignore transcripts nobody has touched lately
+
+    def __init__(self, speaker, interval=0.7):
+        super().__init__(name="watcher", daemon=True)
+        self.speaker = speaker
+        self.interval = interval
+        self.offsets = {}
+
+    def run(self):
+        if not os.path.isdir(self.PROJECTS):
+            log(f"watcher: no transcripts at {self.PROJECTS}, not watching")
+            return
+        log("watcher: following session transcripts")
+        while True:
+            try:
+                self._sweep()
+            except Exception as exc:
+                log(f"watcher error: {exc}")
+            time.sleep(self.interval)
+
+    def _transcripts(self):
+        cutoff = time.time() - self.FRESH_SECONDS
+        for proj in os.scandir(self.PROJECTS):
+            if not proj.is_dir():
+                continue
+            for f in os.scandir(proj.path):
+                if f.name.endswith(".jsonl") and f.stat().st_mtime > cutoff:
+                    yield f.path, f.stat().st_size
+
+    def _sweep(self):
+        state = voice_lib.load_state()
+        for path, size in self._transcripts():
+            seen = self.offsets.get(path)
+            if seen is None:
+                self.offsets[path] = size      # start at the end, not the beginning
+                continue
+            if size <= seen:
+                self.offsets[path] = min(seen, size)   # truncated or rewritten
+                continue
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                fh.seek(seen)
+                chunk = fh.read()
+                self.offsets[path] = fh.tell()
+            # Config is re-read every sweep so 'voice off' takes effect at once.
+            if not state.get("enabled") or not state.get("watch", True):
+                continue
+            for line in chunk.splitlines():
+                self._consider(line, state)
+
+    # Not _handle: threading.Thread keeps a _handle attribute of its own on the
+    # instance, and it shadows any method of that name.
+    def _consider(self, line, state):
+        line = line.strip()
+        if not line:
+            return
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            return                                  # a half-written final line
+        if entry.get("type") != "assistant":
+            return
+        msg = entry.get("message") or {}
+        if msg.get("role") != "assistant":
+            return
+        content = msg.get("content")
+        text = content if isinstance(content, str) else "\n".join(
+            b.get("text", "") for b in (content or [])
+            if isinstance(b, dict) and b.get("type") == "text")
+        if not text.strip():
+            return
+
+        speech, what = voice_lib.speech_for(text, state)
+        if not speech or voice_lib.already_spoken(speech):
+            return
+        try:
+            voice, kwargs = voice_lib.resolve(state.get("voice"), state.get("source"), state)
+        except LookupError as exc:
+            return log(f"watcher: {exc}")
+        pieces = voice_lib.chunks(speech)
+        if pieces:
+            self.speaker.submit(Job(pieces, voice["id"], kwargs))
+            log(f"watcher: {what} [{voice['id']}] {speech[:50]}...")
+
+
 class Handler(BaseHTTPRequestHandler):
     speaker = None
+    watching = False
     server_version = "ClaudeVoice/1.0"
 
     def log_message(self, fmt, *args):        # the default logger spams stderr
@@ -189,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
         sp = Handler.speaker
 
         if route == "/health":
-            return self._reply(200, sp.status())
+            return self._reply(200, {**sp.status(), "watching": Handler.watching})
 
         if route == "/stop":
             sp.cancel()
@@ -254,6 +354,9 @@ def main():
         return
 
     Handler.speaker = Speaker(state)
+    if state.get("watch", True):
+        TranscriptWatcher(Handler.speaker).start()
+        Handler.watching = True
     log(f"listening on http://127.0.0.1:{args.port} (pid {os.getpid()})")
     try:
         httpd.serve_forever()

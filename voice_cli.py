@@ -49,6 +49,13 @@ def cmd_status(state, _args):
     print(f"  source       : {state['source']}")
     print(f"  max chars    : {state['maxChars']}")
     print(f"  engine       : {engine}  (port {state['port']})")
+    if health and health.get("watching"):
+        how = "following sessions itself (no hooks needed)"
+    elif state.get("watch", True):
+        how = "will follow sessions once the engine starts"
+    else:
+        how = "off -- relying on Claude Code hooks instead"
+    print(f"  watching     : {how}")
     print(f"  voices from  : {len(voice_lib.catalog(state))} in "
           f"{len(voice_lib.voice_roots(state))} folder(s)")
 
@@ -334,6 +341,15 @@ def cmd_clone(state, args):
     print(f"Try it:  python voice_cli.py set {vid} && python voice_cli.py say \"hello\"")
 
 
+def cmd_watch(state, args):
+    if not args or args[0] not in ("on", "off"):
+        raise SystemExit("usage: voice_cli.py watch on|off")
+    state["watch"] = args[0] == "on"
+    voice_lib.save_state(state)
+    print(f"Transcript watching {'on' if state['watch'] else 'off'}. "
+          "Restart the engine for it to take effect: kill, then start.")
+
+
 def cmd_narrate(state, args):
     if not args or args[0] not in ("on", "off"):
         raise SystemExit("usage: voice_cli.py narrate on|off")
@@ -354,7 +370,7 @@ COMMANDS = {
     "replay-all": cmd_replay_all, "replay_all": cmd_replay_all,
     "replayall": cmd_replay_all, "all": cmd_replay_all,
     "repeat-all": cmd_replay_all, "repeat_all": cmd_replay_all,
-    "narrate": cmd_narrate,
+    "narrate": cmd_narrate, "watch": cmd_watch,
 }
 
 

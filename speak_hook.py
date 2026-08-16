@@ -17,7 +17,7 @@ several tool calls that follow it.
 Always exits 0. A voice toy must never be able to break the session it decorates.
 """
 
-import hashlib
+
 import json
 import os
 import sys
@@ -25,10 +25,6 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import voice_lib
-
-SPOKEN_PATH = os.path.join(voice_lib.LOG_DIR, "spoken.json")
-SPOKEN_KEEP = 12
-
 
 def trace(msg):
     """One line per invocation. The hook is silent by design, which makes
@@ -39,27 +35,6 @@ def trace(msg):
             fh.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
     except OSError:
         pass
-
-
-def already_spoken(text, remember=True):
-    """True if this exact text went out recently."""
-    digest = hashlib.sha1(text.strip().encode("utf-8", "replace")).hexdigest()
-    try:
-        with open(SPOKEN_PATH, encoding="utf-8") as fh:
-            recent = json.load(fh)
-    except (OSError, ValueError):
-        recent = []
-    if digest in recent:
-        return True
-    if remember:
-        recent.append(digest)
-        try:
-            os.makedirs(voice_lib.LOG_DIR, exist_ok=True)
-            with open(SPOKEN_PATH, "w", encoding="utf-8") as fh:
-                json.dump(recent[-SPOKEN_KEEP:], fh)
-        except OSError:
-            pass
-    return False
 
 
 def last_assistant_text(transcript_path):
@@ -143,23 +118,17 @@ def main():
     if not text.strip():
         return
 
-    if event == "Stop":
-        summary = voice_lib.extract_summary(text)
-        speech = voice_lib.clean_text(summary, state.get("maxChars", 600))
-        what = "summary"
-        if not speech:
-            speech = voice_lib.clean_text(text, state.get("maxChars", 600))
-            what = "whole answer"
-    else:
-        # Mid-turn narration is already short; a long block here means the model
-        # wrote a full answer and then kept working, which the Stop hook covers.
-        speech = voice_lib.clean_text(text, state.get("narrateMaxChars", 240))
-        what = "narration"
+    speech, what = voice_lib.speech_for(text, state)
+    if event == "Stop" and what != "summary":
+        # A finished answer with no TL;DR is short enough to hear in full.
+        speech, what = voice_lib.clean_text(text, state.get("maxChars", 600)), "whole answer"
 
     if not speech:
         trace("  nothing speakable")
         return
-    if already_spoken(speech):
+    # Shared with the transcript watcher: whichever sees a message first, it is
+    # only ever said once.
+    if voice_lib.already_spoken(speech):
         trace(f"  {what} already spoken, skipping")
         return
 

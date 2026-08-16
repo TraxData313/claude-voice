@@ -3,7 +3,10 @@
 Claude Code reads its answers aloud, locally, in a voice you choose.
 
 No cloud, no API key, no audio leaving the machine. A local Qwen-TTS model does the
-speaking, and a `Stop` hook feeds it each answer as it finishes.
+speaking, and it follows your sessions by reading the transcripts Claude Code writes to
+disk — so it needs no cooperation from the client, no hooks, and no restart. (Hooks are
+supported too, and installed by default; if your client runs them they simply get there
+first. The two share a record of what has been said, so nothing is spoken twice.)
 
 It speaks two things. The short lines said **while it works** ("let me check whether that
 exists") go out as they happen, so you can follow along without watching. When a long
@@ -134,13 +137,20 @@ project's `CLAUDE.md` — or in `~\.claude\CLAUDE.md` to cover every project at 
 > plain sentences in the order *what changed, does it work, what do I do next*, five
 > sentences at most. Short answers need no TL;DR at all.
 
-| hook | fires | speaks |
+| source | sees | speaks |
 |---|---|---|
-| `PreToolUse` | before each command, mid-turn | the narration line above it |
-| `Stop` | when a turn ends | the TL;DR, or the whole answer if there is none |
+| the watcher | every assistant message, as it lands on disk | the TL;DR if there is one, otherwise the message |
+| `PreToolUse` hook | before each command, mid-turn | the narration line above it |
+| `Stop` hook | when a turn ends | the TL;DR, or the whole answer if there is none |
 
-Both dedupe against what was said recently, so a line spoken during the work is not
-repeated in the summary.
+All three dedupe against a shared record of what was said recently, so a line spoken
+during the work is not repeated in the summary, and the watcher and a hook seeing the
+same message only say it once.
+
+The watcher is what makes this dependable. Hooks only run if the client chooses to run
+them, and there is no way to find out from the outside whether it did — which looks
+exactly like the voice being broken. Turn it off with `voice_cli.py watch off` if you
+would rather rely on hooks alone.
 
 ## When nothing is spoken
 

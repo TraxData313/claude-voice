@@ -36,6 +36,9 @@ DEFAULTS = {
     # hook only fires when a turn ends, so this rides PreToolUse instead.
     "narrate": True,
     "narrateMaxChars": 240,
+    # Follow the session transcripts directly instead of waiting to be called.
+    # Hooks need the client to run them; this needs nothing but the files.
+    "watch": True,
 }
 
 
@@ -315,6 +318,49 @@ def chunks(text, target=180):
 # --------------------------------------------------------------------------
 # talking to the server
 # --------------------------------------------------------------------------
+
+SPOKEN_PATH = os.path.join(LOG_DIR, "spoken.json")
+SPOKEN_KEEP = 24
+
+
+def already_spoken(text, remember=True):
+    """True if this exact text went out recently.
+
+    Shared by the hook and the transcript watcher so that whichever sees a
+    message first, it is only ever said once.
+    """
+    import hashlib
+
+    digest = hashlib.sha1(text.strip().encode("utf-8", "replace")).hexdigest()
+    try:
+        with open(SPOKEN_PATH, encoding="utf-8") as fh:
+            recent = json.load(fh)
+    except (OSError, ValueError):
+        recent = []
+    if digest in recent:
+        return True
+    if remember:
+        recent.append(digest)
+        try:
+            os.makedirs(LOG_DIR, exist_ok=True)
+            with open(SPOKEN_PATH, "w", encoding="utf-8") as fh:
+                json.dump(recent[-SPOKEN_KEEP:], fh)
+        except OSError:
+            pass
+    return False
+
+
+def speech_for(text, state):
+    """What should actually be said for an assistant message, if anything.
+
+    A message with a TL;DR is a finished answer: say the summary. Anything else
+    is a line of narration written before a command, and is said as it stands.
+    """
+    summary = extract_summary(text)
+    if summary:
+        return clean_text(summary, state.get("maxChars", 600)), "summary"
+    return clean_text(text, state.get("narrateMaxChars", 240)), "narration"
+
 
 def post(port, path, payload=None, timeout=5):
     import urllib.request
