@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Abby for Claude</title>
+<!-- The tab shows the front of this and truncates the rest, so it still reads
+     "Abby for Claude" at any normal tab width. The tail is for search results,
+     where a title carrying no words anybody types is a page nobody finds. -->
+<title>Abby for Claude — local text-to-speech for Claude Code</title>
 <meta name="description" content="Listen to Abby and Max, the two voices that ship with claude-voice: Claude Code reads its answers aloud on your own machine, with no cloud, no API key and no audio leaving the computer.">
 <link rel="canonical" href="https://traxdata313.github.io/claude-voice/">
 <link rel="icon" href="icons/abby-48.png">
@@ -86,7 +89,9 @@
 <body>
 <div class="wrap">
 
-  <img class="banner" src="banner.svg"
+  <!-- Its own proportions, so the browser reserves the right box before the file
+       arrives and the page below does not jump once it does. -->
+  <img class="banner" src="banner.svg" width="820" height="240"
        alt="claude-voice — Claude Code, out loud. Locally.">
 
   <h1>Hear the voices</h1>
@@ -135,7 +140,8 @@
   </p>
 
   <figure class="shot">
-    <img src="panel.png" alt="The claude-voice panel, showing Abby mid-sentence">
+    <img src="panel.png" width="436" height="1076" loading="lazy" decoding="async"
+         alt="The claude-voice panel, showing Abby mid-sentence">
     <figcaption>The panel: what is being said, what is queued, and what was just said.</figcaption>
   </figure>
 

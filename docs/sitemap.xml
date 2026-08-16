@@ -2,6 +2,9 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://traxdata313.github.io/claude-voice/</loc>
+    <!-- Bump this in the commit that changes the page. A crawler that has been
+         here before uses it to decide whether coming back is worth its time. -->
+    <lastmod>2026-08-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>1.0</priority>
   </url>
