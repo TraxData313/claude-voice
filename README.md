@@ -30,6 +30,25 @@ and **[Qwen-TTS Studio](https://github.com/Danmoreng/qwen-tts-studio)** with a t
 ```powershell
 git clone https://github.com/TraxData313/claude-voice
 cd claude-voice
+```
+
+### Let Claude do it
+
+Open Claude Code in that folder and paste this:
+
+```
+Read docs/tour.md in this repo and follow it: set claude-voice up, turn it on,
+then give me the spoken tour.
+```
+
+It will check what you have, install it, switch it on, and then *tell you out loud* how to
+change voice, how to shush it mid-sentence, how to turn it off, and where the rest of the
+commands live. If something is missing — usually the model — it will say so plainly rather
+than pretending it worked.
+
+### Or do it yourself
+
+```powershell
 .\install.ps1                 # finds Python and Studio, writes config, adds /voice
 ```
 
@@ -92,6 +111,7 @@ Voices you may keep but not share never need to enter the repo at all — point
 
 | | |
 |---|---|
+| **[Setup and tour →](docs/tour.md)** | what Claude follows when you ask it to set this up for you |
 | **[How it works →](docs/how-it-works.md)** | the engine, the watcher, and the JNI bridge into an app with no CLI |
 | **[Writing for the ear →](docs/writing-for-the-ear.md)** | the TL;DR contract, and why captions sound wrong aloud |
 | **[When it goes quiet →](docs/troubleshooting.md)** | silence has no error message. Start here |
