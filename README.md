@@ -136,6 +136,9 @@ Two ship with it, both the author's own — original characters, borrowed from n
 | <img src="docs/icons/abby-256.png" width="150" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and warm. Calm, never in a hurry — the voice for careful work, tricky debugging, and being talked through something gently.<br>▶ **[Hear Abby](docs/samples/abby.wav?raw=1)** *(5s wav)* |
 | <img src="docs/icons/max-256.png" width="150" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — the voice for grinding through a long list.<br>▶ **[Hear Max](docs/samples/max.wav?raw=1)** *(4s wav)* |
 
+▶ **[Hear them both](https://traxdata313.github.io/claude-voice/)** — GitHub will not play
+audio inside a README, so the two samples live on a page of their own.
+
 Switch any time with `/voice set abby` or `/voice set max`. The manner changes tone, never
 substance: neither voice will cheer a result that has not been checked.
 

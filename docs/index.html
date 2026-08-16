@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-voice — hear the voices</title>
+<meta name="description" content="Listen to Abby and Max, the two voices that ship with claude-voice.">
+<style>
+  :root {
+    --ink: #12212e; --paper: #fdfaf3; --teal: #57cfc0;
+    --deep: #0e2a3a; --sky: #173d52; --dim: #9fc4cf;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px;
+    background: linear-gradient(160deg, var(--sky), var(--deep) 70%);
+    color: var(--paper);
+    font: 16px/1.6 Verdana, "Trebuchet MS", sans-serif;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  .banner { width: 100%; height: auto; display: block; }
+  h1 { font-size: 26px; margin: 40px 0 6px; }
+  .lede { color: var(--dim); margin: 0 0 28px; font-size: 15px; }
+  .voices { display: flex; flex-wrap: wrap; gap: 20px; }
+  .card {
+    flex: 1 1 360px; background: var(--paper); color: var(--ink);
+    border: 4px solid var(--ink); border-radius: 26px; padding: 20px;
+    display: flex; gap: 18px; align-items: center;
+  }
+  .card img { width: 116px; height: 116px; flex: none; }
+  .card h2 { margin: 0 0 4px; font-size: 21px; }
+  .card p { margin: 0 0 12px; font-size: 13.5px; color: #45606f; }
+  audio { width: 100%; max-width: 260px; }
+  .note {
+    margin-top: 34px; padding: 18px 22px; border-radius: 20px;
+    border: 2px dashed rgba(87, 207, 192, .5); color: var(--dim); font-size: 14px;
+  }
+  a { color: var(--teal); }
+  .shot { margin-top: 34px; text-align: center; }
+  .shot img { max-width: 380px; width: 100%; border-radius: 12px; }
+  .shot figcaption { color: var(--dim); font-size: 13px; margin-top: 10px; }
+  footer { margin-top: 44px; color: var(--dim); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <img class="banner" src="banner.svg"
+       alt="claude-voice — Claude Code, out loud. Locally.">
+
+  <h1>Hear the voices</h1>
+  <p class="lede">
+    Both ship with the repo, and both are spoken entirely on your own machine —
+    no cloud, no API key, nothing leaving the computer.
+  </p>
+
+  <div class="voices">
+    <div class="card">
+      <img src="icons/abby-256.png" alt="Abby">
+      <div>
+        <h2>Abby</h2>
+        <p>Cute, slightly nerdy, young and warm. Calm, never in a hurry.</p>
+        <audio controls preload="none" src="samples/abby.wav"></audio>
+      </div>
+    </div>
+    <div class="card">
+      <img src="icons/max-256.png" alt="Max">
+      <div>
+        <h2>Max</h2>
+        <p>Brave and driving, a trainer's energy. Punchy, counts off what is done.</p>
+        <audio controls preload="none" src="samples/max.wav"></audio>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">
+    These pages exist because GitHub will not play audio inside a README — it offers
+    the file for download instead. Everything else about the project lives in the
+    <a href="https://github.com/TraxData313/claude-voice">repository</a>.
+  </p>
+
+  <figure class="shot">
+    <img src="panel.png" alt="The claude-voice panel, showing Abby mid-sentence">
+    <figcaption>The panel: what is being said, what is queued, and what was just said.</figcaption>
+  </figure>
+
+  <footer>
+    created by <a href="https://github.com/TraxData313">TraxData313</a> ·
+    <a href="https://github.com/TraxData313/claude-voice">GitHub repo</a>
+  </footer>
+
+</div>
+</body>
+</html>
