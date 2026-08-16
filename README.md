@@ -20,6 +20,9 @@
 
 <p align="center">
   <em><strong>Abby</strong>, as claude-voice — click her to hear her speak.</em>
+  <br>
+  <sub>🇺🇸 English and 🇷🇺 Russian are tested and both sound right —
+  and 🌐 most widely used languages should read normally.</sub>
 </p>
 
 ---
@@ -178,9 +181,12 @@ Voices you may keep but not share never need to enter the repo at all — point
 
 ### Other languages
 
-**English and Russian are tested** and both sound right — Russian read by Abby, whose voice
-was cloned from English, is genuinely good. The model underneath is multilingual and nothing
-in the pipeline cares which alphabet it is handed, so **most others very likely work too**.
+| | |
+|---|---|
+| 🇺🇸 **English** | tested — both voices were cloned from it |
+| 🇷🇺 **Russian** | tested — Abby reads it genuinely well, cloned from English though she is |
+| 🌐 **most others** | **should read normally.** The model underneath is multilingual, and nothing in between cares which alphabet it is handed |
+
 Try one: write a line in it and listen.
 
 ```powershell
