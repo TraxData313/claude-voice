@@ -35,7 +35,11 @@ DEFAULTS = {
     # Speak the short lines said mid-work, not just the final answer. The Stop
     # hook only fires when a turn ends, so this rides PreToolUse instead.
     "narrate": True,
+    # Only a label boundary now: below this a message reads as a passing remark,
+    # above it as a spoken answer. Both are read in full.
     "narrateMaxChars": 240,
+    # The ceiling on a message with no TL;DR. Roughly five minutes of speech.
+    "fullMaxChars": 4000,
     # Follow the session transcripts directly instead of waiting to be called.
     # Hooks need the client to run them; this needs nothing but the files.
     "watch": True,
@@ -365,13 +369,18 @@ def already_spoken(text, remember=True):
 def speech_for(text, state):
     """What should actually be said for an assistant message, if anything.
 
-    A message with a TL;DR is a finished answer: say the summary. Anything else
-    is a line of narration written before a command, and is said as it stands.
+    The TL;DR is the whole contract. Write one and that alone is spoken, which
+    is what you want for an answer whose body is full of paths and flags.
+    Leave it out and the message is read in full -- which covers both the short
+    line of narration before a command and the deliberately spoken-word answer
+    that has no business being summarised.
     """
     summary = extract_summary(text)
     if summary:
         return clean_text(summary, state.get("maxChars", 600)), "summary"
-    return clean_text(text, state.get("narrateMaxChars", 240)), "narration"
+    spoken = clean_text(text, state.get("fullMaxChars", 4000))
+    kind = "narration" if len(spoken) <= state.get("narrateMaxChars", 240) else "whole answer"
+    return spoken, kind
 
 
 def post(port, path, payload=None, timeout=5):
