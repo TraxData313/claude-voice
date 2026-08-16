@@ -58,6 +58,11 @@ def cmd_status(state, _args):
     print(f"  watching     : {how}")
     print(f"  voices from  : {len(voice_lib.catalog(state))} in "
           f"{len(voice_lib.voice_roots(state))} folder(s)")
+    lines = _persona_lines(state)
+    if lines:
+        print()
+        for line in lines:
+            print(line)
 
 
 def cmd_on(state, _args):
@@ -109,6 +114,25 @@ def cmd_list(state, args):
     print(f"\n{len(rows)} voice(s). '*' is current. [ei] = embedding / ICL present.")
 
 
+def _persona_lines(state):
+    """The manner that goes with the current voice, for whoever is speaking as it."""
+    try:
+        voice, _ = voice_lib.resolve(state["voice"], state["source"], state)
+    except LookupError:
+        return []
+    if not voice.get("persona"):
+        return []
+    body = voice["persona"]
+    wrapped, line = [], "   "
+    for word in body.split():
+        if len(line) + len(word) + 1 > 76:
+            wrapped.append(line)
+            line = "   "
+        line += " " + word
+    wrapped.append(line)
+    return [f"  You are {voice['name']}. When the user calls you that, they mean you."] + wrapped
+
+
 def cmd_set(state, args):
     if not args:
         raise SystemExit("usage: voice_cli.py set <voice-id>")
@@ -116,6 +140,8 @@ def cmd_set(state, args):
     state["voice"] = voice["id"]
     voice_lib.save_state(state)
     print(f"Voice set to {_voice_label(state)}")
+    for line in _persona_lines(state):
+        print(line)
 
 
 def cmd_say(state, args):

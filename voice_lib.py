@@ -89,17 +89,21 @@ def _is_voice_dir(d):
 
 
 def _read_voice(d, vid, sex, culture, root):
-    name = vid
+    name, persona = vid, ""
     try:
         with open(os.path.join(d, "voice.json"), encoding="utf-8-sig") as fh:
-            name = json.load(fh).get("Name") or vid
+            doc = json.load(fh)
+        name = doc.get("Name") or vid
+        # How this voice behaves, not just how it sounds. Being addressed by
+        # name is natural once a voice has one, so the manner should match it.
+        persona = doc.get("Persona") or ""
     except (OSError, ValueError):
         pass
     emb = os.path.join(d, "embedding.json")
     icl = os.path.join(d, "icl-prompt.json")
     return {
         "id": vid, "name": name, "sex": sex, "culture": culture,
-        "dir": d, "root": root,
+        "persona": persona, "dir": d, "root": root,
         "embedding": emb if os.path.exists(emb) else None,
         "icl": icl if os.path.exists(icl) else None,
     }
