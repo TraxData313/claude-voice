@@ -87,13 +87,33 @@ of plain speech; those lines *are* the tour. Cover exactly these, in this order:
 
 Then stop. Do not read the whole command list aloud; that is what `help` is for.
 
-## 5. Worth mentioning once, then leaving alone
+## 5. Ask them once about update checks
+
+They installed this by cloning a repo, so nothing tells them when a newer version exists.
+There is a check for that, and **it is off**, because the whole promise of this project is
+that it runs on their machine and tells nobody about it. Turning it on is theirs to decide,
+not yours, so **ask, in one sentence, and take the answer**:
+
+> "There's a version check — once a week it asks GitHub whether there's a newer
+> claude-voice. It's off right now, and it's the only thing here that would ever use the
+> network. Want it on?"
+
+- **Yes** → `python voice_cli.py update on`
+- **No, or no clear answer** → leave it. Say that `/voice update` looks whenever they ask,
+  and move on.
+
+Do not sell it, do not ask twice, and do not turn it on because it seems helpful. Somebody
+who chose an offline voice for a reason has already answered this.
+
+## 6. Worth mentioning once, then leaving alone
 
 - The voice is **one setting shared by every session**. Changing it anywhere changes it
   everywhere, and it survives a reboot.
 - The **engine does not** survive a reboot. After restarting the machine they say `on` once,
   or press the button in the panel.
 - The panel can be closed and reopened from the **Abby for Claude** icon on the Desktop.
+- The **version is in the panel's bottom right corner**, and `/voice update` is how a newer
+  one arrives — it pulls and restarts the engine, which is the step that is easy to miss.
 - If it ever goes quiet, `status` says whether the engine died, and `on` revives it.
 
 ## If something is wrong

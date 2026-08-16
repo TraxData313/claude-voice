@@ -26,5 +26,9 @@
 
   "maxChars": 600,
   "port": 8765,
-  "autostart": true
+  "autostart": true,
+
+  "_updateCheck": "Whether it may look for a newer version of itself, at most once every updateCheckDays. Off -- and it is the only thing here that would ever use the network. 'voice_cli.py update' looks when you ask it to, whatever this says, and every contact is written down in logs/update.log. See docs/updating.md.",
+  "updateCheck": false,
+  "updateCheckDays": 7
 }

@@ -40,6 +40,7 @@ import webbrowser
 from tkinter import ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import update_check
 import voice_lib
 
 POLL_SECONDS = 0.5
@@ -342,6 +343,14 @@ class Panel:
         self.face_size = _sane_size(saved.get("panelFace", FACE))
         self.on_top = tk.BooleanVar(value=bool(saved.get("panelTopmost", True)))
         self.dark = tk.BooleanVar(value=bool(saved.get("panelDark", False)))
+        self.auto_update = tk.BooleanVar(value=bool(saved.get("updateCheck", False)))
+        # Answers from the update thread, drained on the Tk timer like the
+        # engine's. Nothing below touches a widget from another thread.
+        self.update_inbox = queue.Queue()
+        self.update_busy = False
+        # Something the user's last press said that the files cannot: how a
+        # pull went. It outranks the idle 'up to date' until they act again.
+        self.update_msg = None
         self.native_theme = ttk.Style().theme_use()
         self._build()
         self.apply_theme()
@@ -451,8 +460,64 @@ class Panel:
         # The last two rows are one thought: who she is, and who made the thing.
         # Nothing here is operated -- the controls all live at the top now --
         # so it sits below the working part of the window and stays there.
+        # The version, in the corner. Nobody needs it while working and
+        # everybody needs it when writing a bug report, so it goes as far out of
+        # the way as there is: the last row, hard right, in the small grey.
+        # Packed before the credit because the bottom of the window is filled
+        # upwards -- first one down is the lowest.
+        #
+        # It is read off disk. The panel never checks for anything and never
+        # touches the network; if an update is known here, it is because the
+        # user asked for a check somewhere else.
+        stamp = ttk.Frame(root)
+        stamp.pack(side="bottom", fill="x", padx=8, pady=(0, 6))
+
+        self.version = ttk.Label(stamp, text="", font=FONT_SMALL, cursor="hand2")
+        self.version.pack(side="right")
+        self.version.bind("<Button-1>", lambda _event: webbrowser.open(self.new_url))
+
+        # The only control in this window that can reach the network, so it is
+        # a tick box rather than something that happens quietly: ticked, it
+        # looks once a week and once immediately; unticked, nothing here ever
+        # contacts anything.
+        # "auto-check" rather than "auto-check for updates": at the narrowest
+        # the window goes, the longer label ate the room the line beside it
+        # needs, and this row already ends in a version number.
+        self.check(stamp, text="auto-check", variable=self.auto_update,
+                   command=self.toggle_auto_update).pack(side="left")
+
+        # One button, because it is one errand at two stages: look, then take
+        # what was found. A fixed width so the row does not shift under the
+        # pointer when the wording changes, and the small style because it
+        # belongs to the small print: a full-size button in the footer sets the
+        # height of a row that is mostly 8pt grey text, and looks it.
+        self.update_btn = ttk.Button(stamp, text="check now", width=15,
+                                     style="Small.TButton", command=self.press_update)
+        self.update_btn.pack(side="left", padx=(8, 0))
+
+        # Whatever came of it, in a few words. The whole account goes to
+        # logs\panel.log, which is where a window with one line to spare should
+        # put the other twenty.
+        #
+        # anchor west, or it centres itself in whatever room is left and drifts
+        # rightwards until it is touching the version. The padding on the right
+        # is the gap it keeps from it when the text is too long and is cut.
+        self.update_note = ttk.Label(stamp, text="", font=FONT_SMALL, anchor="w")
+        self.update_note.pack(side="left", padx=(8, 10), fill="x", expand=True)
+        self.dim.append(self.update_note)
+
+        # A version number is not a reason to take it. This appears beside the
+        # button when there is something to read, and opens the changelog --
+        # whose newest section is at the top, so the link needs no anchor.
+        self.new_url = update_check.CHANGELOG_URL
+        self.whats_new = self.link(stamp, "what's new", self.new_url)
+        self.whats_new.bind("<Button-1>", lambda _event: webbrowser.open(self.new_url))
+
+        self.version_seen = None
+        self.show_version()
+
         credit = ttk.Frame(root)
-        credit.pack(side="bottom", fill="x", padx=8, pady=(2, 6))
+        credit.pack(side="bottom", fill="x", padx=8, pady=(2, 2))
         made = ttk.Label(credit, text="created by ", font=FONT_SMALL, foreground=GREY)
         made.pack(side="left")
         self.link(credit, AUTHOR, AUTHOR_URL).pack(side="left")
@@ -484,6 +549,53 @@ class Panel:
         self.hist_head = self._section(root, "history — click to replay")
         self.hist_list = self._rows(root, height=3, expand=True)
         self.hist_list.bind("<Button-1>", self.replay)
+
+    def show_version(self, force=False):
+        """What version this is, and what the button is for at the moment.
+
+        The check's answer lives in one small file, so this watches that file's
+        timestamp rather than re-reading it twice a second -- and it changes
+        perhaps once a week.
+        """
+        try:
+            when = os.path.getmtime(update_check.CACHE_PATH)
+        except OSError:
+            when = 0
+        if when == self.version_seen and not force:
+            return
+        self.version_seen = when
+
+        dark = bool(self.dark.get())
+        self.version.configure(text=f"v{update_check.shown_version()}",
+                               foreground=DARK["dim"] if dark else GREY)
+
+        newer = update_check.available()
+        if newer:
+            self.new_url = newer.get("changelog") or update_check.CHANGELOG_URL
+        # Mid-errand the button is saying what it is doing, and this is only a
+        # timer noticing a file; it does not get to argue with that.
+        if self.update_busy:
+            return
+        if newer:
+            self.update_btn.configure(text=f"update to {newer['version']}")
+            # Packed only now, and before the note so the row reads left to
+            # right: what it would do, what is in it, how it went. Nobody
+            # should have to decide from a version number alone.
+            # winfo_manager, not winfo_ismapped: the question is whether it is
+            # packed, and an unmapped window's children are all "not mapped"
+            # whatever they are packed into.
+            if not self.whats_new.winfo_manager():
+                self.whats_new.pack(side="left", padx=(8, 0), before=self.update_note)
+        else:
+            self.update_btn.configure(text="check now")
+            self.whats_new.pack_forget()
+
+        # The rest of the row, which would otherwise be a stretch of nothing:
+        # whether it is current and when that was last true. A message left
+        # over from something the user just pressed outranks it, because it
+        # says something this cannot work out from a file.
+        note = self.update_msg or ("" if newer else update_check.last_look())
+        self.update_note.configure(text=one_line(update_check.plain(note), 30))
 
     def _section(self, parent, title):
         label = ttk.Label(parent, text=title, font=FONT_SMALL, foreground=GREY)
@@ -564,6 +676,11 @@ class Panel:
                       foreground=[("readonly", DARK["fg"])],
                       background=[("active", DARK["line"]), ("pressed", DARK["line"])],
                       arrowcolor=[("active", DARK["fg"])])
+        # The footer's own button: the colours of any other, at the size of the
+        # small print around it. Set here rather than once at startup because
+        # ttk keeps styles per theme, so a switch would otherwise lose it.
+        style.configure("Small.TButton", font=FONT_SMALL, padding=(6, 1))
+
         # The list a combobox drops is a plain Tk listbox, coloured the old way.
         popup = ((DARK["field"], DARK["fg"], DARK["sel"], DARK["fg"]) if dark else
                  ("SystemWindow", "SystemWindowText", "SystemHighlight", "SystemHighlightText"))
@@ -588,10 +705,98 @@ class Panel:
             label.configure(foreground=DARK["dim"] if dark else GREY)
         for label in self.links:
             label.configure(foreground=LINK_DARK if dark else LINK)
+        # Not in either list: its colour says whether there is an update, so it
+        # picks its own and has to be asked again when the theme changes.
+        self.show_version(force=True)
         for widget in _descendants(self.root):
             if isinstance(widget, tk.Checkbutton):     # ttk's are not these
                 self._paint_check(widget)
         self.drawn.pop("face", None)              # redraw it on the new background
+
+    def toggle_auto_update(self):
+        """The one switch here that lets this project use the network at all.
+
+        Ticking it looks straight away as well as weekly: somebody who has just
+        asked for update checks should see one happen, not wait a week to find
+        out whether it works.
+        """
+        on = bool(self.auto_update.get())
+        voice_lib.patch_state(updateCheck=on)
+        if on:
+            self.look_for_update()
+        else:
+            # The box itself now says nothing will be contacted, so the line
+            # beside it goes back to reporting the last look there was.
+            self.update_msg = None
+            self.show_version(force=True)
+
+    def press_update(self):
+        """One button, two stages: find out, then take it."""
+        newer = update_check.available()
+        if newer:
+            self.take_update(newer)
+        else:
+            self.look_for_update()
+
+    def look_for_update(self):
+        self.update_busy = True
+        self.update_msg = None
+        self.update_btn.state(["disabled"])
+        self.update_btn.configure(text="checking…")
+        self.update_note.configure(text="")
+
+        # urllib on the Tk thread would freeze the window for as long as the
+        # request takes, which offline is the whole timeout.
+        def go():
+            self.update_inbox.put(("checked", update_check.look_now()))
+
+        threading.Thread(target=go, name="update-check", daemon=True).start()
+
+    def take_update(self, newer):
+        self.update_busy = True
+        self.update_msg = None
+        self.update_btn.state(["disabled"])
+        self.update_btn.configure(text="updating…")
+        self.update_note.configure(text="pulling, then restarting the engine…")
+
+        def go():
+            # apply_update talks to git and then waits on a model load, so it
+            # belongs on a thread of its own twice over. Its account goes to
+            # panel.log, since this row has space for one line of it.
+            spoken = []
+            ok = update_check.apply_update(say=spoken.append)
+            for line in spoken:
+                print(line)
+            self.update_inbox.put(("applied", ok, spoken, newer))
+
+        threading.Thread(target=go, name="update-apply", daemon=True).start()
+
+    def drain_update(self):
+        """Answers from those threads, applied to widgets on the Tk thread."""
+        while True:
+            try:
+                item = self.update_inbox.get_nowait()
+            except queue.Empty:
+                return
+
+            if item[0] == "checked":
+                # Nothing worth keeping: what a check found is exactly what the
+                # line below reads back off the file, in fewer words.
+                self.update_msg = None
+            else:
+                _, ok, spoken, _newer = item
+                if ok:
+                    self.update_msg = f"updated to {update_check.shown_version()} -- reopen"
+                    if update_check.local().get("needsSetup"):
+                        self.update_msg = "updated -- run setup.ps1, reopen"
+                else:
+                    # The first line is the refusal itself; the rest is detail,
+                    # and detail is what the log is for.
+                    self.update_msg = spoken[0] if spoken else "nothing was pulled"
+
+            self.update_busy = False
+            self.update_btn.state(["!disabled"])
+            self.show_version(force=True)
 
     def toggle_dark(self):
         self.apply_theme()
@@ -687,8 +892,13 @@ class Panel:
         if got:
             try:
                 self.render(latest)
+                self.show_version()
             except tk.TclError:
                 return                           # the window is going away
+        try:
+            self.drain_update()
+        except tk.TclError:
+            return
         self.tick = self.root.after(DRAIN_MS, self._drain)
 
     def act(self, route, payload=None):

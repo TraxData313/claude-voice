@@ -17,6 +17,9 @@ and make new ones.
     python voice_cli.py volume <0-100>     # how loud, applied mid-sentence
     python voice_cli.py source embedding|icl
     python voice_cli.py max <chars>
+    python voice_cli.py version              # what this copy is, contacting nobody
+    python voice_cli.py update [--apply]     # is there a newer one? (asks GitHub)
+    python voice_cli.py update on|off        # allow a weekly look. Off by default
     python voice_cli.py clone <sample.wav> --name "Ada"   # add a voice of your own
 """
 
@@ -62,6 +65,10 @@ def cmd_status(state, _args):
     print(f"  watching     : {how}")
     print(f"  voices from  : {len(voice_lib.catalog(state))} in "
           f"{len(voice_lib.voice_roots(state))} folder(s)")
+    # Reads the last look off disk; it never checks from here. Quote this
+    # version when reporting a bug -- until now there was nothing to quote.
+    import update_check
+    print(f"  updates      : {update_check.status_line(state)}")
     lines = _persona_lines(state)
     if lines:
         print()
@@ -457,6 +464,11 @@ HELP = [
         ("start", "", "Load the model without turning the voice on."),
         ("kill", "", "Unload it and give the memory back."),
     ]),
+    ("Keeping it current", [
+        ("version", "", "What this copy is. Contacts nobody -- worth quoting in a bug report."),
+        ("update", "[--apply]", "Is there a newer version? --apply pulls it and restarts the engine."),
+        ("update", "on|off", "Allow one look a week. Off by default: nothing is contacted until you say so."),
+    ]),
 ]
 
 ALIASES = {"repeat": "replay, again", "repeat-all": "replay-all, all",
@@ -516,6 +528,66 @@ def _help_markdown():
     print(f"Wrote {path}")
 
 
+def cmd_version(state, _args):
+    """What this copy is. Nothing is contacted -- somebody typing 'version'
+    is asking what they have, not asking to be looked up somewhere."""
+    import update_check
+
+    doc = update_check.local()
+    print(f"claude-voice {update_check.shown_version()}"
+          + (f"  ({doc['date']})" if doc.get("date") else ""))
+    if doc.get("headline"):
+        print(f"  {update_check.plain(doc['headline'])}")
+    print(f"  {update_check.status_line(state)}")
+    print(f"  {voice_lib.ROOT}")
+
+
+def cmd_update(state, args):
+    """Is there a newer claude-voice, and do you want it?
+
+    This is the one command in the project that uses the network, and typing it
+    is the whole of the consent for that. 'update on' additionally allows a look
+    once a week without being asked; see update_check.py for what goes out.
+    """
+    import update_check
+
+    flags = [a.lstrip("-").lower() for a in args]
+
+    if flags and flags[0] in ("on", "off"):
+        state["updateCheck"] = flags[0] == "on"
+        voice_lib.save_state(state)
+        if state["updateCheck"]:
+            print("Update checks on -- one look a week, made while you run some other")
+            print("voice command, so nothing ever waits on the network.")
+            print(f"Every contact is written down in {update_check.CONTACT_LOG}")
+        else:
+            print("Update checks off. Nothing is contacted unless you type 'update'.")
+        return
+
+    print(f"You have {update_check.shown_version()}. Asking GitHub...")
+    result = update_check.look_now()
+    if result["error"]:
+        print(update_check.plain(result.get("why") or result["error"]))
+        print("Nothing else here wants the network, so this failing costs you nothing.")
+        return
+
+    remote = result["remote"] or {}
+    if not update_check.is_newer(remote.get("version")):
+        print(f"{update_check.shown_version()} is the newest there is.")
+        return
+
+    print(f"\n  {remote['version']} is out -- {update_check.plain(remote.get('headline', ''))}\n")
+    for note in (remote.get("notes") or [])[:6]:
+        print(f"    - {update_check.plain(str(note))}")
+
+    if "apply" in flags or "now" in flags or "yes" in flags:
+        print()
+        update_check.apply_update(state)
+        return
+    print("\n  Take it :  python voice_cli.py update --apply")
+    print(f"  Read it :  {remote.get('changelog') or update_check.CHANGELOG_URL}")
+
+
 def cmd_narrate(state, args):
     if not args or args[0] not in ("on", "off"):
         raise SystemExit("usage: voice_cli.py narrate on|off")
@@ -540,6 +612,7 @@ COMMANDS = {
     "replayall": cmd_replay_all, "all": cmd_replay_all,
     "repeat-all": cmd_replay_all, "repeat_all": cmd_replay_all,
     "narrate": cmd_narrate, "watch": cmd_watch,
+    "update": cmd_update, "upgrade": cmd_update, "version": cmd_version,
     "help": cmd_help, "commands": cmd_help,
 }
 
@@ -556,7 +629,14 @@ def main():
         hint = f" Did you mean: {' or '.join(near)}?" if near else \
                f" Try: {', '.join(sorted(set(COMMANDS)))}"
         raise SystemExit(f"unknown command '{cmd}'.{hint}")
-    COMMANDS[cmd](voice_lib.load_state(), args)
+    state = voice_lib.load_state()
+    # The weekly look, if it has been allowed and is overdue. Detached, so it
+    # cannot slow this command down or fail along with it -- and skipped for
+    # 'update' itself, which is on its way to ask GitHub directly.
+    if cmd not in ("update", "upgrade"):
+        import update_check
+        update_check.refresh_soon(state)
+    COMMANDS[cmd](state, args)
 
 
 if __name__ == "__main__":

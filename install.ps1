@@ -15,6 +15,7 @@
         .\install.ps1 -StudioDir "D:\qwen-tts-studio"  # if it is not auto-found
         .\install.ps1 -NoShortcut                      # skip the Desktop icon
         .\install.ps1 -NoNote                          # leave CLAUDE.md alone
+        .\install.ps1 -UpdateChecks                    # allow one look a week for a new version
         .\install.ps1 -WhatIf                          # show, do not write
 
     Hooks are read at session start: restart Claude Code afterwards.
@@ -26,6 +27,7 @@ param(
     [string]$PythonExe,
     [switch]$NoShortcut,
     [switch]$NoNote,
+    [switch]$UpdateChecks,
     [switch]$WhatIf
 )
 
@@ -119,6 +121,17 @@ if (Test-Path $configPath) {
 Set-Prop $cfg "studioDir" $StudioDir
 Set-Prop $cfg "modelDir" $modelDir
 Set-Prop $cfg "talker" $talker
+
+# Whether it may look for a newer version of itself. Off unless asked, because
+# everything else here runs on this machine and tells nobody about it, and that
+# is a promise worth more than the convenience. Said out loud either way: this
+# is the moment the user is deciding what this thing gets to do.
+if ($UpdateChecks) {
+    Set-Prop $cfg "updateCheck" $true
+    Say "update checks : on -- one look a week at GitHub, logged in logs\update.log" "Green"
+} else {
+    Say "update checks : off -- nothing is contacted. '/voice update' looks when asked" "Green"
+}
 
 if (-not $WhatIf) {
     Write-Utf8 $configPath ($cfg | ConvertTo-Json -Depth 10)

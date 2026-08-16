@@ -58,6 +58,17 @@ DEFAULTS = {
     # anything older than this -- catching up after a crash, not after a night.
     "catchupSeconds": 300,
 
+    # --- looking for a newer version --------------------------------------
+    # Off, and it stays off until somebody says otherwise. Everything else here
+    # runs on your machine and tells nobody about it, and a checker that phoned
+    # home by default would put an asterisk on that -- which would cost more
+    # trust than the convenience is worth. 'voice_cli.py update' works whatever
+    # this says, because typing it is the asking. See update_check.py.
+    "updateCheck": False,
+    # How stale the last look may be before another is made, in days. A hobby
+    # project does not release often enough to be worth asking daily.
+    "updateCheckDays": 7,
+
     # --- the panel --------------------------------------------------------
     # How many past utterances keep their audio, so replaying one is instant
     # and costs no synthesis at all.

@@ -50,6 +50,14 @@ command — it is `/voice on`, never `/voice_on`.
 | `start` | Load the model without turning the voice on. |
 | `kill` | Unload it and give the memory back. |
 
+## Keeping it current
+
+| command | does |
+|---|---|
+| `version` | What this copy is. Contacts nobody -- worth quoting in a bug report. |
+| `update [--apply]` | Is there a newer version? --apply pulls it and restarts the engine. |
+| `update on|off` | Allow one look a week. Off by default: nothing is contacted until you say so. |
+
 ## Also worth knowing
 
 - Aliases: `repeat` = `replay, again`; `repeat-all` = `replay-all, all`; `volume` = `vol, loud`.

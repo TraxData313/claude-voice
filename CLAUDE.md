@@ -31,8 +31,14 @@ the same idea: explain *why*, not what the line already says.
 
 ## Before you finish
 
-- `python -m py_compile speak_server.py voice_lib.py voice_cli.py panel.py speak_hook.py`
+- `python -m py_compile speak_server.py voice_lib.py voice_cli.py panel.py speak_hook.py
+  update_check.py`
 - Changed a command? `python voice_cli.py help --markdown` regenerates `docs/commands.md`.
+- **Releasing?** Bump `version` and `date` in `version.json`, write its `headline` for the
+  ear, and add the matching `## <version>` section to `CHANGELOG.md` — `update --apply`
+  prints that section to whoever takes the release. Set `needsSetup` when the release
+  changes `commands\`, `speaking-notes.md` or either installer, since a pull does not
+  reinstall those. Nobody hears about a release that does not bump that file.
 - Changed anything the engine imports? It must be restarted to take effect:
   `python voice_cli.py kill` then `start`. Config changes need no restart — the watcher
   re-reads it every sweep.

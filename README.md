@@ -66,6 +66,7 @@ tool either way. Mind the space: `/voice on`, never `/voice_on`.
 | `volume 40` | how loud, 0 to 100 — audible mid-sentence |
 | `list` | every voice available |
 | `panel` | the window below |
+| `update` | is there a newer claude-voice? It only ever looks when you ask |
 | `help` | every command, grouped |
 
 **[Full command list →](docs/commands.md)** — generated from the tool itself, so it cannot
@@ -125,6 +126,7 @@ embedding is a clone of a real person, so that folder has rules.
 | **[Install →](docs/install.md)** | doing it by hand, builds, options, and why no admin rights are needed |
 | **[Setup and tour →](docs/tour.md)** | what Claude follows when you ask it to set this up for you |
 | **[Commands →](docs/commands.md)** | all of them, grouped |
+| **[Updating →](docs/updating.md)** | getting a newer one, and exactly what the version check does and does not send |
 | **[The panel →](docs/panel-plan.md)** | how the window was built, and what changed on the way |
 | **[How it works →](docs/how-it-works.md)** | the engine, the watcher, the JNI bridge — and the things that cost real time to find |
 | **[Writing for the ear →](docs/writing-for-the-ear.md)** | the TL;DR contract, and why captions sound wrong aloud |

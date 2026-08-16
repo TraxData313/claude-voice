@@ -1,6 +1,6 @@
 ---
 description: Turn Claude's spoken voice on/off, or pick which voice it uses
-argument-hint: "help | on | off | status | panel | list | set <voice> | volume <0-100> | repeat | repeat-all | say <text> | stop | kill"
+argument-hint: "help | on | off | status | panel | list | set <voice> | volume <0-100> | repeat | repeat-all | say <text> | stop | kill | version | update"
 allowed-tools: Bash(__PYTHON__:*)
 ---
 
@@ -25,5 +25,10 @@ Notes for interpreting the result:
 - `replay` says the last answer's summary again; `replay-all` says the whole
   message with no length cap. Both take a number to reach further back, and
   `stop` cuts either off.
+- `version` prints what this copy is and contacts nobody. `update` is the one
+  command here that uses the network: it asks GitHub whether a newer version
+  exists, and `update --apply` pulls it and restarts the engine. `update
+  on|off` governs only the weekly unprompted look, which is off by default.
+  Never turn that on for the user without being asked to.
 - Report the CLI's output plainly. Do not re-run the command to "verify" --
   state is written synchronously.

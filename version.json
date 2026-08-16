@@ -1,0 +1,22 @@
+{
+  "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md.",
+
+  "version": "1.0.0",
+  "date": "2026-08-16",
+
+  "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
+  "headline": "It now knows what version it is, and can tell you when a newer one is out.",
+
+  "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
+  "notes": [
+    "A version number, shown by status and in the corner of the panel.",
+    "'update' checks GitHub when you ask it to, and can pull and restart for you.",
+    "The panel does the same along its bottom row, with a link to what is new.",
+    "Automatic weekly checks exist but stay off until you turn them on."
+  ],
+
+  "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
+  "needsSetup": false,
+
+  "changelog": "https://github.com/TraxData313/claude-voice/blob/main/CHANGELOG.md"
+}

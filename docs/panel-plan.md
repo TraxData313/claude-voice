@@ -288,3 +288,37 @@ anyway, and that is already where you click to change voice — with the size bo
 which is the only place that box has ever explained what it sizes. That empties the old foot
 row: the engine's state joined the credit line, and the bottom of the window is now the
 picture and who made the thing, with nothing in it to operate.
+
+**And then one row went back to the bottom — the version row.** The rule above says the foot
+of the window has nothing in it to operate, and this is the exception that keeps it: those
+controls are about *the program*, not about what is being said. Turning a voice off, skipping
+a line, changing who speaks — all of that stays at the top, where you look while it is
+talking. Which version you have, and whether there is a newer one, is a thing you deal with
+once and then forget for a month.
+
+Left to right it reads as one sentence: **auto-check** (a tick box, the only control in the
+window that can reach the network at all), the **button**, the **what's new** link, a line
+saying how the last look went, and the version itself in the far corner. The tick box says
+`auto-check` and not `auto-check for updates` because the longer label ate the room the line
+beside it needs at the narrowest the window goes — and a row that ends in a version number
+does not have to say what is being checked. The line itself is anchored west for the same
+reason it exists: left to its own devices a label centres in the space it is given, and this
+one drifted right until it was touching the version number.
+
+- **One button, two stages.** It says `check now` until a check finds something, then
+  `update to 1.4.2`. Two buttons would have meant a permanently dead one, since you cannot
+  update to a version nobody has looked for yet.
+- **Ticking the box looks straight away**, as well as weekly. Somebody who has just asked for
+  update checks should watch one happen rather than wait a week to learn whether it works.
+- **The link appears with the button, not after it.** A version number is not a reason to
+  take an update; the changelog is. It has to be readable *before* the decision, so it sits
+  between the button and the outcome.
+- **The empty half of the row earns its place**: with nothing else to say it reports
+  `up to date, 2 days ago` — which answers the only two questions that row exists for.
+- **Nothing here touches the network from the Tk thread.** The check and the pull run on
+  threads of their own and post their answers to a queue that the existing drain timer picks
+  up, exactly as engine state already does. A pull also restarts the engine and waits on a
+  model load, which is a minute of frozen window if it is done in the wrong place.
+- **The panel never checks by itself.** It reads the answer of whatever check last ran, off
+  disk, by watching one small file's timestamp. Everything it knows about updates arrived
+  because somebody asked for it.

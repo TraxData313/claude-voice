@@ -10,6 +10,7 @@
         .\setup.ps1 -Build system                # smaller Studio, if you have CUDA already
         .\setup.ps1 -NoPanel                     # do not open the window at the end
         .\setup.ps1 -NoNote                      # leave ~\.claude\CLAUDE.md alone
+        .\setup.ps1 -UpdateChecks                # let it look for a new version weekly
         .\setup.ps1 -WhatIf                      # say what it would do
 
     No administrator rights, and none are asked for. Python installs per-user;
@@ -28,6 +29,8 @@ param(
     [string]$StudioDir = (Join-Path $env:LOCALAPPDATA "Programs\qwen-tts-studio"),
     [string]$ModelDir  = (Join-Path $env:USERPROFILE ".qwen-tts-studio\models"),
     [string]$PythonExe,
+    # Qwen-TTS Studio's version, not this project's -- claude-voice's own is in
+    # version.json and is never passed in.
     [string]$Version   = "0.2.9",
     [ValidateSet("bundled", "system")]
     [string]$Build     = "bundled",
@@ -35,6 +38,7 @@ param(
     [switch]$NoShortcut,
     [switch]$NoNote,
     [switch]$NoPanel,
+    [switch]$UpdateChecks,
     [switch]$WhatIf
 )
 
@@ -258,9 +262,10 @@ foreach ($m in @("qwen-talker-1.7b-base-Q8_0.gguf", "qwen-tokenizer-12hz-Q8_0.gg
 Say ""
 $opts = @{ PythonExe = $PythonExe; StudioDir = $StudioDir }
 if ($ProjectDir) { $opts.ProjectDir = $ProjectDir }
-if ($NoShortcut) { $opts.NoShortcut = $true }
-if ($NoNote)     { $opts.NoNote = $true }
-if ($WhatIf)     { $opts.WhatIf = $true }
+if ($NoShortcut)   { $opts.NoShortcut = $true }
+if ($NoNote)       { $opts.NoNote = $true }
+if ($UpdateChecks) { $opts.UpdateChecks = $true }
+if ($WhatIf)       { $opts.WhatIf = $true }
 & (Join-Path $repo "install.ps1") @opts
 
 if ($WhatIf) { return }   # install.ps1 has already said so

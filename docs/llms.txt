@@ -30,3 +30,4 @@ alphabet with: Bulgarian reads fluently but in a Russian accent.
 - [Writing for the ear](https://github.com/TraxData313/claude-voice/blob/main/docs/writing-for-the-ear.md): the TL;DR contract, and why captions sound wrong read aloud.
 - [When it goes quiet](https://github.com/TraxData313/claude-voice/blob/main/docs/troubleshooting.md): silence has no error message, so start here.
 - [Voices](https://github.com/TraxData313/claude-voice/blob/main/docs/voices.md): what may be published, and what may only be kept.
+- [Updating](https://github.com/TraxData313/claude-voice/blob/main/docs/updating.md): pulling a newer version and restarting the engine, and exactly what the optional version check sends. It is off by default: this project makes no network request until asked.
