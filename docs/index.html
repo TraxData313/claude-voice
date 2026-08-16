@@ -14,6 +14,7 @@
 <!-- Proves to Google that whoever owns this page also owns the Search Console
      property for it. Must stay: removing it revokes the verification. -->
 <meta name="google-site-verification" content="3qz9bx_PvRL12ANOfT7t3J7IdYh8exl_Vv76WHfp12A" />
+<meta name="msvalidate.01" content="60538708B28D200D42DF02B3C2E87E61" />
 
 <!-- What a link to this page unfurls into, on anything that reads these. -->
 <meta property="og:type" content="website">
@@ -114,7 +115,12 @@
   }
   .demo figcaption { color: var(--dim); font-size: 13px; margin-top: 10px; text-align: center; }
   .shot { margin-top: 34px; text-align: center; }
-  .shot img { max-width: 380px; width: 100%; border-radius: 12px; }
+  /* height:auto is load-bearing. The img carries width/height attributes so the
+     browser can reserve its box before the file lands, and without this the
+     attribute height wins -- 1076px against a width the CSS has already
+     narrowed, which stretches her tall and squashes her sideways. Worse the
+     narrower the screen, so a phone showed it plainly and a desktop only just. */
+  .shot img { max-width: 380px; width: 100%; height: auto; border-radius: 12px; }
   .shot figcaption { color: var(--dim); font-size: 13px; margin-top: 10px; }
   footer { margin-top: 44px; color: var(--dim); font-size: 13px; }
 </style>
