@@ -15,16 +15,42 @@ because there is nothing to summarise.
 ## What you need
 
 - **Windows.** Playback uses `winsound` and the engine bridge loads a Windows DLL.
-- **[Qwen-TTS Studio](https://github.com/QwenLM)** installed, with a talker model
-  downloaded through it. `qwen-talker-1.7b-base` is the one to get: it produces the
-  2048-dimension embeddings this expects. The 0.6b model gives 1024 and will not match
-  voices made with the larger one.
+- **[Qwen-TTS Studio](https://github.com/Danmoreng/qwen-tts-studio)**, with a talker model
+  downloaded through it. Setting it up is the only fiddly part — see below.
 - **Python 3.9+** — standard library only. Nothing to `pip install`.
 - **Claude Code.**
 
-Studio has no CLI, so this drives its engine directly: it boots Studio's own bundled JVM
-in-process and calls the JNI methods behind the GUI. See `qwen_engine.py` if you want the
+No separate Java is needed: Studio ships its own JVM, and that is the one this boots.
+
+### Installing Qwen-TTS Studio
+
+Grab a Windows build from its
+[Releases page](https://github.com/Danmoreng/qwen-tts-studio/releases). Each release comes
+as either an **MSI installer** or a **portable ZIP** you can extract anywhere, in two
+flavours:
+
+| variant | when |
+|---|---|
+| `windows-cuda-bundled` | the safe default — larger, carries its own CUDA runtime |
+| `windows-cuda-system` | smaller, but needs NVIDIA's CUDA runtime already installed; falls back to CPU without it |
+
+Then launch it once. The Welcome screen offers to download GGUF models; take
+**`qwen-talker-1.7b-base`**. That size matters — it produces the 2048-dimension embeddings
+this expects, while the 0.6b model gives 1024 and will not work with voices made by the
+larger one. Models land in `~\.qwen-tts-studio\models`, and you can fetch more later from
+the Setup tab.
+
+That is all the GUI is needed for. `install.ps1` looks for Studio in the usual places
+(`Downloads`, `Program Files`, `%LOCALAPPDATA%\Programs`); if you extracted the ZIP
+somewhere else, pass `-StudioDir` and point it at the folder holding `app\` and `runtime\`.
+
+Studio itself has no CLI, so this drives its engine directly: it boots that bundled JVM
+in-process and calls the JNI methods sitting behind the GUI. See `qwen_engine.py` for the
 details, including the two constants that must be exactly right.
+
+*(Qwen-TTS Studio is a third-party desktop app for Alibaba's
+[Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) models — the app and the models come from
+different people.)*
 
 ## Install
 
