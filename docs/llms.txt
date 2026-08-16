@@ -10,6 +10,10 @@ needs no hooks and no cooperation from the client. A long answer is read as its
 TL;DR; a short one is read in full. Two voices ship with it, Abby and Max, and
 new ones are cloned from a 20-40 second recording of one person talking.
 
+Languages: English and Russian are tested and both sound right, including
+Russian read by a voice cloned from English. The model is multilingual and the
+text pipeline is script-agnostic, so most other languages are expected to work.
+
 ## Pages
 
 - [Hear the voices](https://traxdata313.github.io/claude-voice/): samples of Abby and Max, playable.

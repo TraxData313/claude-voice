@@ -166,6 +166,23 @@ whose you may only keep, is worth two minutes of your time before you add one:
 Voices you may keep but not share never need to enter the repo at all — point
 `extraVoicesDirs` at any folder and they show up marked *local only*.
 
+### Other languages
+
+**English and Russian are tested** and both sound right — Russian read by Abby, whose voice
+was cloned from English, is genuinely good. The model underneath is multilingual and nothing
+in the pipeline cares which alphabet it is handed, so **most others very likely work too**.
+Try one: write a line in it and listen.
+
+```powershell
+python voice_cli.py say "Сейчас я проверю, как это звучит."
+```
+
+Two things worth knowing before you do. A voice keeps the accent of the recording it was
+cloned from, so a foreign language arrives coloured by it — which may be charming or may
+not be what you wanted. And a language with no spaces between words, or one written
+right-to-left, is territory nobody here has walked: if it comes out wrong that is the model
+or the chunking, not a setting you have missed. Tell us what you find.
+
 ## Where the detail lives
 
 | | |
