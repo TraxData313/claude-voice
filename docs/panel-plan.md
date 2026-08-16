@@ -141,14 +141,34 @@ New file `panel.py`, stdlib only (`tkinter`, `urllib.request`, `threading`).
 
 ## Icons
 
-`docs/icons/abby.svg` and `docs/icons/max.svg` exist — original flat-style portraits, one
-per shipped voice. The panel should show the current voice's face next to "now playing".
+Round PNGs are ready and committed, one set per shipped voice:
 
-**Tk cannot read SVG.** `tkinter.PhotoImage` handles PNG and GIF only. Do not add a
-dependency to rasterise them; either redraw a simplified version directly on a small
-`Canvas` (a dozen ovals and polygons — the source SVGs are already just flat shapes to
-crib coordinates from), or ship tiny PNGs exported by hand later. A coloured initial
-letter is an acceptable stand-in for any voice without an icon.
+```
+docs/icons/<voice-id>-<size>.png      size ∈ {256, 96, 48, 24}
+```
+
+So `docs/icons/abby-48.png`, `docs/icons/max-24.png`, and so on. Transparent background,
+rimmed in the voice's colour — teal for Abby, amber for Max.
+
+**Load them straight into Tk.** `tkinter.PhotoImage(file=...)` reads PNG on Tk 8.6, which
+is what ships with Python 3.9+. No Pillow, no rasterising, no new dependency:
+
+```python
+img = tk.PhotoImage(file=os.path.join(voice_lib.ROOT, "docs", "icons", f"{vid}-48.png"))
+label.configure(image=img)
+label.image = img      # keep a reference or Tk garbage-collects it and shows nothing
+```
+
+Use **48** beside "now playing" and **24** in the session and history rows. Keep a dict of
+loaded images rather than re-reading per poll.
+
+Most voices have no icon — the ninety-odd trained ones certainly do not. Check the file
+exists and fall back to a coloured circle with the first letter. Do not let a missing icon
+raise.
+
+New voices get icons from `docs/icons/make_icons.py`, which is an **authoring** tool: it
+needs Pillow, is run once by hand, and its output is committed. Nothing at speaking time
+imports it.
 
 Half a day, roughly. If something here turns out wrong in practice, prefer the smaller
 change and note it in this file — the next session reads this too.

@@ -88,10 +88,28 @@ tool either way. Mind the space: `/voice on`, never `/voice_on`.
 | `repeat` | say the last answer again. `repeat-all` for the whole thing, not the summary |
 | `stop` | cut off what is playing. The voice stays on (`break` works too) |
 | `list` | every voice available |
-| `help` | all seventeen commands, grouped |
+| `panel` | a small window: what is playing, what is queued, and the switches |
+| `help` | every command, grouped |
 
 **[Full command list →](docs/commands.md)** — generated from the tool itself, so it cannot
 go stale.
+
+### The panel
+
+`/voice panel` opens a plain little window that floats over everything — a tick box turns
+that off — and shows what the voice is actually doing:
+
+- the line being spoken, and which session it came from
+- **stop**, **play** (say that line again from the top) and **skip** (drop it, keep the rest)
+- what is queued behind it
+- everything said recently — **click a line to hear it again**, played from the audio it
+  was heard as, so there is nothing to re-synthesise and no wait
+- a tick per session: untick one and that conversation stops being read aloud
+- the voice, as a dropdown
+
+It holds nothing of its own. It asks the engine what is happening twice a second and turns
+every click into a request, so closing it changes nothing, and opening it before the engine
+is running gives you a button to start one.
 
 ## The voices
 
@@ -100,8 +118,8 @@ nobody:
 
 | | | |
 |---|---|---|
-| <img src="docs/icons/abby.svg" width="84" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and innocent-sounding. Calm and warm, never in a hurry — the voice for careful work, tricky debugging, and being talked through something gently. |
-| <img src="docs/icons/max.svg" width="84" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — the voice for grinding through a long list. |
+| <img src="docs/icons/abby-96.png" width="88" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and warm. Calm, never in a hurry — the voice for careful work, tricky debugging, and being talked through something gently. |
+| <img src="docs/icons/max-96.png" width="88" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — the voice for grinding through a long list. |
 
 Switch any time with `/voice set abby` or `/voice set max`. The manner changes tone, never
 substance: neither voice will cheer a result that has not been checked.
