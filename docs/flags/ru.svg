@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 20" width="30" height="20" role="img" aria-label="Russian">
+  <rect width="30" height="20" fill="#fff"/>
+  <rect y="6.667" width="30" height="6.667" fill="#0039a6"/>
+  <rect y="13.333" width="30" height="6.667" fill="#d52b1e"/>
+  <rect width="30" height="20" fill="none" stroke="#0000001f" stroke-width="1"/>
+</svg>
