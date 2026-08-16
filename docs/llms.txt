@@ -23,6 +23,7 @@ alphabet with: Bulgarian reads fluently but in a Russian accent.
 
 ## Documentation
 
+- [Install](https://github.com/TraxData313/claude-voice/blob/main/docs/install.md): one command, and why none of it needs administrator rights.
 - [Commands](https://github.com/TraxData313/claude-voice/blob/main/docs/commands.md): every command, generated from the tool itself.
 - [How it works](https://github.com/TraxData313/claude-voice/blob/main/docs/how-it-works.md): the engine, the transcript watcher, and the JNI bridge into an app with no CLI.
 - [The panel](https://github.com/TraxData313/claude-voice/blob/main/docs/panel-plan.md): the floating window that shows what is being said, and what changed while building it.

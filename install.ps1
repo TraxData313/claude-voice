@@ -3,7 +3,8 @@
 
     Writes config.json (paths for this machine), installs the Stop hook into a
     project's .claude\settings.json, drops the /voice slash command next to it,
-    and puts a shortcut to the panel on the Desktop.
+    puts the note about writing to be heard into ~\.claude\CLAUDE.md, and puts a
+    shortcut to the panel on the Desktop.
 
     No administrator rights, by design: every path it writes to belongs to the
     user already, and Program Files is only ever read from, looking for Studio.
@@ -13,21 +14,29 @@
         .\install.ps1 -ProjectDir C:\code\my-project   # speak in that project
         .\install.ps1 -StudioDir "D:\qwen-tts-studio"  # if it is not auto-found
         .\install.ps1 -NoShortcut                      # skip the Desktop icon
+        .\install.ps1 -NoNote                          # leave CLAUDE.md alone
         .\install.ps1 -WhatIf                          # show, do not write
 
     Hooks are read at session start: restart Claude Code afterwards.
 #>
 
 param(
-    [string]$ProjectDir = $PSScriptRoot,
+    [string]$ProjectDir,
     [string]$StudioDir,
     [string]$PythonExe,
     [switch]$NoShortcut,
+    [switch]$NoNote,
     [switch]$WhatIf
 )
 
 $ErrorActionPreference = "Stop"
-$repo = $PSScriptRoot
+
+# There is no script file when this is piped into Invoke-Expression, so
+# $PSScriptRoot is empty -- and that pipe is the documented way past an
+# execution policy that refuses to run script files at all. Stand where the
+# user is standing instead.
+$repo = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+if (-not $ProjectDir) { $ProjectDir = $repo }
 
 function Say($msg, $colour = "Gray") { Write-Host $msg -ForegroundColor $colour }
 
@@ -36,6 +45,14 @@ function Say($msg, $colour = "Gray") { Write-Host $msg -ForegroundColor $colour 
 # looks exactly like "hooks silently do nothing". Write it clean.
 function Write-Utf8($path, $text) {
     [System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# The mirror of it, and the same bug from the other end: Get-Content -Raw in
+# PowerShell 5.1 decodes a file with no BOM as the system ANSI codepage, so an
+# em dash read out of a UTF-8 file and written straight back comes out as three
+# characters of nonsense. Every file this script reads was written as UTF-8.
+function Read-Utf8($path) {
+    return [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
 }
 
 # --- python ---------------------------------------------------------------
@@ -80,19 +97,28 @@ if (Test-Path $modelDir) {
 }
 
 # --- config.json ----------------------------------------------------------
+# voice_cli writes config.json back holding only what differs from its own
+# defaults, so a path we wrote last time is simply absent the next time if it
+# happened to match. Assigning to a property that is not there throws, which
+# turned a second run of the installer into an error. Set it either way.
+function Set-Prop($obj, $name, $value) {
+    if ($null -ne $obj.PSObject.Properties[$name]) { $obj.$name = $value }
+    else { $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value }
+}
+
 $configPath = Join-Path $repo "config.json"
 if (Test-Path $configPath) {
-    $cfg = Get-Content $configPath -Raw | ConvertFrom-Json
+    $cfg = Read-Utf8 $configPath | ConvertFrom-Json
     Say "config.json   : updating paths, keeping your settings"
 } else {
-    $cfg = Get-Content (Join-Path $repo "config.example.json") -Raw | ConvertFrom-Json
+    $cfg = Read-Utf8 (Join-Path $repo "config.example.json") | ConvertFrom-Json
     $cfg.PSObject.Properties.Remove("_comment")
     $cfg.PSObject.Properties.Remove("_extraVoicesDirs")
     Say "config.json   : creating"
 }
-$cfg.studioDir = $StudioDir
-$cfg.modelDir = $modelDir
-$cfg.talker = $talker
+Set-Prop $cfg "studioDir" $StudioDir
+Set-Prop $cfg "modelDir" $modelDir
+Set-Prop $cfg "talker" $talker
 
 if (-not $WhatIf) {
     Write-Utf8 $configPath ($cfg | ConvertTo-Json -Depth 10)
@@ -114,7 +140,7 @@ $command = if ("$PythonExe$hookScript" -match '\s') { "`"$PythonExe`" `"$hookScr
 function Has-Prop($obj, $name) { return $null -ne $obj.PSObject.Properties[$name] }
 
 if (Test-Path $settingsPath) {
-    $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+    $settings = Read-Utf8 $settingsPath | ConvertFrom-Json
 } else {
     $settings = [PSCustomObject]@{}
 }
@@ -165,9 +191,45 @@ if (-not $WhatIf) {
 
     $cmdDir = Join-Path $claudeDir "commands"
     New-Item -ItemType Directory -Force -Path $cmdDir | Out-Null
-    $template = (Get-Content (Join-Path $repo "commands\voice.md") -Raw).Replace("__PYTHON__", $PythonExe).Replace("__REPO__", $repo.Replace('\','/'))
+    $template = (Read-Utf8 (Join-Path $repo "commands\voice.md")).Replace("__PYTHON__", $PythonExe).Replace("__REPO__", $repo.Replace('\','/'))
     Write-Utf8 (Join-Path $cmdDir "voice.md") $template
     Say "slash command : $(Join-Path $cmdDir 'voice.md')" "Green"
+}
+
+# --- the note every session reads -----------------------------------------
+# Without this the whole TL;DR contract is a secret: a session has no way to
+# know it is being listened to, so it writes for the screen and the listener
+# gets a wall of paths read out at them. This is the part that makes an answer
+# worth hearing, so it is installed rather than left in the documentation.
+#
+# Always the user-level file, whichever project the hooks went into: the voice
+# is one setting shared by every session, and voice_lib.announce_voice keeps
+# the current voice's name up to date in this same block from now on.
+if (-not $NoNote) {
+    $notePath = Join-Path $env:USERPROFILE ".claude\CLAUDE.md"
+    $note = (Read-Utf8 (Join-Path $repo "speaking-notes.md")).TrimEnd() + "`n"
+    $open, $close = "<!-- claude-voice -->", "<!-- /claude-voice -->"
+
+    $existing = if (Test-Path $notePath) { Read-Utf8 $notePath } else { "" }
+    $start, $end = $existing.IndexOf($open), $existing.IndexOf($close)
+    if ($start -ge 0 -and $end -gt $start) {
+        # Replace our block and leave every word around it alone.
+        $merged = $existing.Substring(0, $start) + $note + $existing.Substring($end + $close.Length)
+        $what = "updated"
+    } else {
+        $merged = if ($existing.Trim()) { $existing.TrimEnd() + "`n`n" + $note } else { $note }
+        $what = "added to"
+    }
+
+    Say "spoken-answer : $what $notePath" "Green"
+    if (-not $WhatIf) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $notePath) | Out-Null
+        Write-Utf8 $notePath $merged
+        # Fills in the current-voice line inside the block just written, using
+        # the same path the CLI and the panel take, so the three cannot drift.
+        $voice = if (Has-Prop $cfg "voice") { $cfg.voice } else { "abby" }
+        & $PythonExe (Join-Path $repo "voice_cli.py") set $voice | Out-Null
+    }
 }
 
 # --- something to double click --------------------------------------------

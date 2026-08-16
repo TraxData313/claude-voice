@@ -64,11 +64,26 @@ gets the exact command.
 
 ## Telling Claude all this
 
-Put it in `CLAUDE.md` — in a project, or in `~\.claude\CLAUDE.md` to cover every project at
-once. The user-level file is loaded automatically at the start of every session, so a new
-conversation knows without being told.
+**The installer does it.** All of the above is condensed into
+[`speaking-notes.md`](../speaking-notes.md), and `install.ps1` writes it into
+`~\.claude\CLAUDE.md` between `<!-- claude-voice -->` markers — the user-level file, which is
+loaded at the start of every session in every project, so a new conversation knows it is
+being listened to without being told.
 
-Keep it short. The voice supplies the character; the model does not need to be told to act
-it, only to know it is being heard. `voice_cli.py set` keeps the current voice's name in
-that file up to date between markers, so a new session knows which voice it is speaking as
-without running anything.
+This matters more than it sounds. A session that does not know it is heard writes for the
+screen, and a screen answer read aloud is the wall this page exists to prevent. The contract
+only works if both ends know about it.
+
+Only the marked block is touched, so anything else in that file survives an install, and
+deleting the block is the whole of turning it off. `-NoNote` skips it entirely.
+
+The one line inside it that changes is the current voice: `voice_cli.py set` and the panel's
+dropdown both rewrite it between `<!-- current-voice -->` markers, so a new session knows
+which voice it is speaking as without running anything.
+
+Keep any additions short. The voice supplies the character; the model does not need to be
+told to act it, only to know it is being heard.
+
+**One session never gets it: the one that installed it.** `CLAUDE.md` is read when a session
+begins, so the conversation that ran the installer carries on unaware. Tell it directly, or
+restart it.

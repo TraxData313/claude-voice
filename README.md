@@ -33,26 +33,30 @@ totally free: no cloud, no API key, no account, no audio ever leaving the comput
 the network and she carries on talking.
 
 She speaks the short lines *while* it works, and reads a long answer as its `## TL;DR`
-rather than in full — detail is written for eyes that skip around.
+rather than in full — detail is written for eyes that skip around. The installer teaches
+Claude that contract in `~\.claude\CLAUDE.md`, so every session writes a summary worth
+hearing without being asked.
 **[How she decides what to say →](docs/writing-for-the-ear.md)**
 
 ## Easy install
 
-Windows only, three steps.
+Windows only. Paste this into Claude Code:
 
-1. **[Install Python](https://www.python.org/downloads/windows/)** — tick **"Add python.exe
-   to PATH"**. Nothing to `pip install`, ever.
-2. **[Get Qwen-TTS Studio](https://github.com/Danmoreng/qwen-tts-studio/releases/download/v0.2.9/qwen-tts-studio-0.2.9-windows-cuda-bundled.msi)**
-   *(v0.2.9, bundled CUDA, ~630 MB)* → run it once → let it download **`qwen-talker-1.7b-base`**.
-3. **Paste this into Claude Code:**
+```
+Clone https://github.com/TraxData313/claude-voice here, then follow docs/tour.md
+in it: set it up, turn it on, and give me the spoken tour.
+```
 
-   ```
-   Clone https://github.com/TraxData313/claude-voice here, then follow docs/tour.md
-   in it: set it up, turn it on, and give me the spoken tour.
-   ```
+That is the whole of it. Claude clones the repo, checks you have Python and installs it if
+you have not, fetches the speech engine and the ~2.4 GB of model that drives it, installs,
+opens the panel, switches it on, and then tells you *out loud* how to change voice, how to
+shush it mid-sentence, and how to turn it off.
 
-That is all of it — Claude clones, installs, switches it on, and tells you out loud how to
-drive it. **[Other builds, doing it by hand, every-project install →](docs/install.md)**
+**No administrator rights anywhere.** Nothing elevates, nothing wants to, and the one part
+that ships as an installer is unpacked rather than installed — so this goes on a locked-down
+work laptop as easily as your own. Expect ten minutes, nearly all of it download.
+
+**[Doing it by hand, other builds, every-project install →](docs/install.md)**
 
 ## Usage cheatsheet
 
@@ -131,7 +135,7 @@ embedding is a clone of a real person, so that folder has rules.
 
 | | |
 |---|---|
-| **[Install →](docs/install.md)** | builds, options, doing it by hand |
+| **[Install →](docs/install.md)** | doing it by hand, builds, options, and why no admin rights are needed |
 | **[Setup and tour →](docs/tour.md)** | what Claude follows when you ask it to set this up for you |
 | **[Commands →](docs/commands.md)** | all of them, grouped |
 | **[The panel →](docs/panel-plan.md)** | how the window was built, and what changed on the way |

@@ -1,6 +1,10 @@
 # Machine-specific paths and live toggle state
 config.json
 
+# Written here when you install for this repo as the project: the hook config
+# and the /voice command, both holding the absolute path to your own python.exe
+.claude/
+
 # Engine and hook logs
 logs/
 
