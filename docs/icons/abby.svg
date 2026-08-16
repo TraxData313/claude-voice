@@ -35,14 +35,14 @@
     <path d="M136 99 Q150 93 164 100" fill="none" stroke="#33221b" stroke-width="3.5" stroke-linecap="round"/>
 
     <!-- big almond eyes -->
-    <path d="M88 120 Q103 106 122 117 Q107 131 88 120 Z" fill="#ffffff"/>
-    <path d="M168 120 Q153 106 134 117 Q149 131 168 120 Z" fill="#ffffff"/>
-    <circle cx="107" cy="119" r="6" fill="#5b3a22"/>
-    <circle cx="149" cy="119" r="6" fill="#5b3a22"/>
-    <circle cx="107" cy="119" r="2.8" fill="#17181d"/>
-    <circle cx="149" cy="119" r="2.8" fill="#17181d"/>
-    <circle cx="105" cy="116.5" r="1.9" fill="#ffffff"/>
-    <circle cx="147" cy="116.5" r="1.9" fill="#ffffff"/>
+    <path d="M85 120 Q102 104 124 116 Q106 133 85 120 Z" fill="#ffffff"/>
+    <path d="M171 120 Q154 104 132 116 Q150 133 171 120 Z" fill="#ffffff"/>
+    <circle cx="106" cy="119" r="7" fill="#5b3a22"/>
+    <circle cx="150" cy="119" r="7" fill="#5b3a22"/>
+    <circle cx="106" cy="119" r="3.2" fill="#17181d"/>
+    <circle cx="150" cy="119" r="3.2" fill="#17181d"/>
+    <circle cx="103.5" cy="116" r="2.2" fill="#ffffff"/>
+    <circle cx="147.5" cy="116" r="2.2" fill="#ffffff"/>
 
     <!-- lash lines, winged at the outer corners -->
     <path d="M89 119 Q104 105 122 116" fill="none" stroke="#17181d" stroke-width="4.5" stroke-linecap="round"/>
