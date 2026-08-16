@@ -104,8 +104,18 @@ python voice_cli.py max 900     # read a bit more of each answer
 than `/voice_on`.
 
 **There is no play button next to each message.** Claude Code has no API for adding
-controls to the transcript, so `replay` is how you hear something a second time. A new
-answer always interrupts whatever is still being spoken; `stop` cuts it off entirely.
+controls to the transcript, so `replay` is how you hear something a second time.
+
+Lines queue rather than interrupt each other, so nothing gets cut off mid-word; only
+`say` and `replay` take the floor, because those are you asking for something *now*.
+`stop` clears the queue entirely.
+
+Each message is a separate synthesis, and two takes of the same voice are never quite
+identical, so the timbre shifts a little from one message to the next. That seam is worth
+having — it is how you hear that a new line has started — so there is a deliberate pause
+at it (`gapSeconds`). Within a single message the opposite is true, and the chunking is
+arranged to cross as few seams as possible: only the first piece is short, to get speech
+going, and the rest is spoken in one take.
 
 ## Voices
 
@@ -151,6 +161,11 @@ The watcher is what makes this dependable. Hooks only run if the client chooses 
 them, and there is no way to find out from the outside whether it did — which looks
 exactly like the voice being broken. Turn it off with `voice_cli.py watch off` if you
 would rather rely on hooks alone.
+
+It follows **every** session touched in the last fifteen minutes, not just the one in
+front of you. That is usually what you want — open a second Claude Code window and it
+speaks there too, with nothing to switch on. But two busy sessions will take turns
+through one voice, which is worth knowing before you wonder who is talking.
 
 ## When nothing is spoken
 
