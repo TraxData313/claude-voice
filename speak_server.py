@@ -67,9 +67,17 @@ class Speaker:
         threading.Thread(target=self._play_loop, name="player", daemon=True).start()
 
     # -- public ------------------------------------------------------------
-    def submit(self, job):
-        """Newest utterance wins: a fresh answer cuts off the previous one."""
-        self.cancel()
+    def submit(self, job, barge=False):
+        """Queue an utterance, or cut off what is playing and jump the queue.
+
+        Barging in was right when one hook spoke one finished answer: a newer
+        answer replaced an older one. It is wrong for a running commentary,
+        where each line is a different thing worth hearing -- there, cutting off
+        the previous line mid-word is just losing it. So the watcher queues,
+        and only a deliberate 'say this now' (replay, say) interrupts.
+        """
+        if barge:
+            self.cancel()
         self.jobs.put(job)
 
     def cancel(self):
@@ -142,8 +150,16 @@ class Speaker:
                     self.current = None
 
     def _play_loop(self):
+        last = None
         while True:
             job, path = self.play_q.get()
+            # A beat between one message and the next. The seam is useful --
+            # it is how you hear that a new line has started rather than the
+            # same one continuing -- so make it deliberate instead of leaving
+            # it to whatever gap the synthesiser happens to leave.
+            if last is not None and job is not last:
+                time.sleep(self.state.get("gapSeconds", 0.45))
+            last = job
             try:
                 if not job.cancelled:
                     self.speaking = True
@@ -258,8 +274,8 @@ class TranscriptWatcher(threading.Thread):
             return log(f"watcher: {exc}")
         pieces = voice_lib.chunks(speech)
         if pieces:
-            self.speaker.submit(Job(pieces, voice["id"], kwargs))
-            log(f"watcher: {what} [{voice['id']}] {speech[:50]}...")
+            self.speaker.submit(Job(pieces, voice["id"], kwargs))   # queued, never barging
+            log(f"watcher: {what} [{voice['id']}] {len(pieces)} chunk(s) {speech[:45]}...")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -320,7 +336,9 @@ class Handler(BaseHTTPRequestHandler):
             pieces = voice_lib.chunks(text)
             if not pieces:
                 return self._reply(400, {"error": "nothing speakable"})
-            sp.submit(Job(pieces, voice["id"], kwargs))
+            # An explicit request through the API is the user asking for this
+            # now, so it takes the floor.
+            sp.submit(Job(pieces, voice["id"], kwargs), barge=True)
             log(f"speak [{voice['id']}] {len(pieces)} chunk(s): {text[:60]}...")
             return self._reply(202, {"queued": len(pieces), "voice": voice["id"]})
 

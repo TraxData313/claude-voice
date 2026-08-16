@@ -39,6 +39,8 @@ DEFAULTS = {
     # Follow the session transcripts directly instead of waiting to be called.
     # Hooks need the client to run them; this needs nothing but the files.
     "watch": True,
+    # Pause between one message and the next, so the seam is audible.
+    "gapSeconds": 0.45,
 }
 
 
@@ -289,10 +291,18 @@ def truncate(text, max_chars):
     return cut.rsplit(" ", 1)[0].strip() + "..."
 
 
-def chunks(text, target=180):
-    """Sentence-ish pieces, so speech starts before the whole thing is synthesised."""
+def chunks(text, first=140, target=320):
+    """Sentence-ish pieces, so speech starts before the whole thing is synthesised.
+
+    Every chunk is a separate generation, and two generations of the same voice
+    are not identical -- the timbre drifts a little across a boundary, which is
+    heard as the speaker changing between sentences. So boundaries are worth
+    spending: only the *first* chunk is kept short, to get speech started
+    quickly, and the rest are large enough that most answers are one more piece.
+    """
     parts = re.split(r"(?<=[.!?;:])\s+", text)
     out, buf = [], ""
+    limit = first
     for p in parts:
         p = p.strip()
         if not p:
@@ -303,13 +313,15 @@ def chunks(text, target=180):
                 break
             out.append(head.strip())
             p = rest
+            limit = target
         if not buf:
             buf = p
-        elif len(buf) + len(p) + 1 <= target:
+        elif len(buf) + len(p) + 1 <= limit:
             buf += " " + p
         else:
             out.append(buf)
             buf = p
+            limit = target                         # only the opener stays short
     if buf:
         out.append(buf)
     return [c for c in out if re.search(r"[A-Za-z0-9]", c)]
