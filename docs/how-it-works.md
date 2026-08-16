@@ -97,3 +97,33 @@ thread is undefined behaviour, not a race you get away with.
 And do not name a method `_handle` on a `threading.Thread` subclass. CPython 3.13 keeps an
 attribute of that name on the instance, it shadows the method, and you get
 `'_thread._ThreadHandle' object is not callable` from a line that looks perfectly correct.
+
+## Things that cost real time to find
+
+Kept because they will not be obvious to the next person either.
+
+**Hooks are not dependable, so this does not need them.** A hook runs only if the client
+chooses to run it, and nothing from outside can tell whether it did — which looks exactly
+like the voice being broken. Claude Code writes every turn to a transcript on disk
+regardless, so that is what gets followed. No hooks, no restart, every session at once.
+
+**`SO_REUSEADDR` means something else on Windows.** `HTTPServer` sets it, and Windows then
+lets a *second* process bind a port already in use rather than failing — two engines, two
+model loads, every sentence spoken twice. Hence the explicit refusal and the health check
+before binding.
+
+**A synchronous `PlaySound` cannot be interrupted.** A purge from another thread does not
+cut it; it queues up behind it and returns once the clip has finished of its own accord. So
+`stop` quietly meant "drop the queue and wait out this sentence" — measured at 5.8 seconds
+on a long one. Playback is asynchronous now and a purge cuts within about 0.12s.
+
+**Saving a config wrote every default into it**, freezing them, so improving a default later
+reached nobody who had already run the tool. Only what differs from the defaults is written.
+
+**A filter that asks for `[A-Za-z0-9]` is asking "is this English".** Two of them decided
+whether a line was worth speaking, and threw away Russian, Greek and Chinese as though they
+were punctuation. The test is for a letter or digit in any script.
+
+**A BOM is not invisible.** `install.ps1` writes UTF-8 without one, because Claude Code
+stops reading `settings.json` the moment it finds a BOM there — and PowerShell's `>`
+redirect adds one by default.

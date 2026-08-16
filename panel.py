@@ -71,6 +71,10 @@ FACE = 128                   # the portrait beside the line being spoken
 FACE_SIZES = ("48", "64", "96", "128", "160", "192", "256")
 FACE_MIN, FACE_MAX = 24, 320
 ROW_ICON = 24                # and the small one on every row
+# However many sessions are live, only the newest few are worth a tick box --
+# an unbounded list pushes the history off the window exactly as a huge
+# portrait does.
+MAX_SESSIONS = 5
 # The two voices the repo ships. Clicking the portrait swaps between them.
 SHIPPED = ("abby", "max")
 # For the voices with no picture -- which is most of them. Picked from the id,
@@ -256,7 +260,6 @@ class Panel:
         root.title("claude-voice")
         self.wear_icon()
         root.wm_attributes("-topmost", self.on_top.get())
-        root.minsize(330, 400)
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.bind("<Configure>", self._rewrap)
 
@@ -335,8 +338,9 @@ class Panel:
         self.queue_head = self._section(root, "queued")
         self.queue_list = self._rows(root, height=3)
 
+        # Three rows is what it insists on; it takes any spare height going.
         self.hist_head = self._section(root, "history — click to replay")
-        self.hist_list = self._rows(root, height=6, expand=True)
+        self.hist_list = self._rows(root, height=3, expand=True)
         self.hist_list.bind("<Button-1>", self.replay)
         name = ttk.Label(foot, text="voice", font=FONT_SMALL, foreground=GREY)
         name.pack(side="left")
@@ -646,6 +650,35 @@ class Panel:
         except tk.TclError:
             pass
 
+    def hold_the_floor(self):
+        """Keep the window at least as tall as its contents need.
+
+        Called whenever the layout changes shape -- a new portrait size, a
+        different number of sessions -- because both change what the minimum is.
+        """
+        least = self._least_height()
+        if least == self.drawn.get("floor"):
+            return
+        self.drawn["floor"] = least
+        self.root.minsize(330, least)
+        if self.root.winfo_height() < least:
+            self.root.geometry(f"{self.root.winfo_width()}x{least}")
+
+    def _least_height(self):
+        """The height at which nothing has to be squeezed out.
+
+        Everything below the history is packed from the bottom and is given its
+        room first, so whatever is left over is the history's -- and with a big
+        portrait above it there was nothing left over at all: at 256px the
+        history vanished from the window entirely. Rather than guess a number,
+        ask every packed row how much it wants and add it up.
+        """
+        self.root.update_idletasks()
+        # The window's own requested height, which is the packer's answer to
+        # the same question -- and unlike adding up the rows, it counts the
+        # padding between them.
+        return self.root.winfo_reqheight()
+
     def pick_size(self, _event=None):
         """Resize the portrait. Typed sizes land on the nearest Tk can draw."""
         want = _sane_size(self.size_box.get(), self.face_size)
@@ -658,6 +691,7 @@ class Panel:
         voice_lib.patch_state(panelFace=want)
         self.width = 0
         self._rewrap()
+        self.hold_the_floor()
 
     def toggle_voice(self):
         """The switch itself: speaking, or not speaking anywhere."""
@@ -699,6 +733,7 @@ class Panel:
                 tree.tag_configure(voice or "?", foreground=colour_for(voice))
 
     def render_sessions(self, sessions, voice=None):
+        sessions = sessions[:MAX_SESSIONS]
         # The picture is the voice this session would be read in, so a change
         # of voice has to redraw these as well as the lists.
         shape = [voice] + [s["path"] for s in sessions]
@@ -716,6 +751,7 @@ class Panel:
                     text=f" {named(s.get('label'), s.get('project'))}  {s['when']}",
                     command=lambda p=s["path"], v=var: self.mute(p, v),
                 ).pack(fill="x", anchor="w")
+            self.hold_the_floor()          # one more session, one more row
             return
         for s in sessions:                        # same sessions, maybe new answers
             var = self.session_vars.get(s["path"])
