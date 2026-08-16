@@ -60,11 +60,12 @@ your own. **[By hand, other builds, every-project install →](docs/install.md)*
 ```
 /plugin marketplace add TraxData313/claude-voice
 /plugin install claude-voice@claude-voice
+/claude-voice:setup
 ```
 
-That puts `/claude-voice:voice` in your hands immediately. It does **not** fetch the engine
-and the model — that is the 3 GB below — so the first run says so and points you at
-`setup.ps1`, once. After that the plugin updates itself with `/plugin update`.
+The first two install the command; the third fetches the engine and the model, which a
+plugin download cannot carry. Then `/claude-voice:voice on` and she talks. Afterwards
+`/plugin update` keeps the command current without touching your settings.
 
 ## What it needs
 

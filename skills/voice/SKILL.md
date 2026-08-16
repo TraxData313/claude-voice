@@ -16,14 +16,11 @@ this shell's PATH — a common case, since a hook or a tool call gets no shell p
 Find it (`where python`, or `%USERPROFILE%\miniconda3\python.exe`) and use the full
 path rather than reporting the tool as broken.
 
-If it fails because the engine or the model is missing, this copy has the plugin but
-has not been set up yet. Setting it up is a one-time download of about 3 GB:
-
-```powershell
-${CLAUDE_PLUGIN_ROOT}/setup.ps1
-```
-
-Say so plainly and offer to run it, rather than retrying the CLI.
+If it fails because the engine or the model is missing, this copy has the plugin but has
+not been set up yet — a plugin install carries the command, not the 3 GB of engine and
+model. Tell the user to run **`/claude-voice:setup`**, which does exactly that and
+nothing else. Say it plainly and once; do not retry the CLI, and do not start the
+download on their behalf without being asked.
 
 Notes for interpreting the result:
 

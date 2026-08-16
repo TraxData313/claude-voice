@@ -40,12 +40,20 @@ Claude Code can carry the `/voice` command itself:
 ```
 /plugin marketplace add TraxData313/claude-voice
 /plugin install claude-voice@claude-voice
+/claude-voice:setup
 ```
 
-This installs the command as `/claude-voice:voice` and keeps it updated with `/plugin
-update`. It does **not** fetch the engine or the model, because a plugin install is not the
-place to pull down 3 GB — the first run tells you so and points you at `setup.ps1`. Run that
-once and everything works.
+The first two install the command as `/claude-voice:voice`. The third fetches the engine and
+the model — a plugin install is not the place to pull down 3 GB, so that is a separate,
+deliberate step which tells you what it is about to do and takes `--whatif` if you would
+rather see first.
+
+Afterwards `/plugin update` keeps the command current. Your `config.json` and `logs\` sit
+alongside the plugin and are untracked, so an update leaves them alone — tested, not assumed.
+
+You will end up with a plain `/voice` as well as `/claude-voice:voice`, because setup performs
+the full install and the plugin carries its own copy of the command. Both drive the same
+engine; neither interferes with the other.
 
 ## Or do it yourself
 
