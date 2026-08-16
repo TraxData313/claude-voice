@@ -129,6 +129,7 @@ embedding is a clone of a real person, so that folder has rules.
 | **[Updating →](docs/updating.md)** | getting a newer one, and exactly what the version check does and does not send |
 | **[The panel →](docs/panel-plan.md)** | how the window was built, and what changed on the way |
 | **[How it works →](docs/how-it-works.md)** | the engine, the watcher, the JNI bridge — and the things that cost real time to find |
+| **[Engine notes →](docs/engine-notes.md)** | why she sometimes stops early, changes voice, or buzzes — three different causes |
 | **[Writing for the ear →](docs/writing-for-the-ear.md)** | the TL;DR contract, and why captions sound wrong aloud |
 | **[Languages →](docs/languages.md)** | what is tested, and how it fails when it fails |
 | **[Voices →](docs/voices.md)** | what may go in that folder, and what may not |

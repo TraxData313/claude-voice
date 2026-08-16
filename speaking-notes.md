@@ -14,7 +14,9 @@ The summary has to stand completely alone, because the listener has no screen:
 - **Plain sentences, in order:** what changed, whether it works, what to do next.
 - **No file names, paths, commands, flags or line numbers.** If a detail can only be acted
   on by looking at it, it belongs in the body.
-- **Five sentences at most.** There is a hard character cut and it truncates mid-thought.
+- **Five sentences at most.** Not because of a limit — the ceiling is four thousand
+  characters now and only exists to stop a runaway — but because a summary is heard once,
+  in order, with no way to look back at the start of it.
 - **A summary, not a pointer.** "The details are above" is worth saying; "see the third
   bullet" is not — a listener has no third bullet.
 - **Say the state of the voice itself when it changed** — which voice is set, whether a

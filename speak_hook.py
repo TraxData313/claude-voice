@@ -37,6 +37,11 @@ def trace(msg):
         pass
 
 
+# So that a message cut short at the ceiling says so in the same file that
+# records whether the hook ran at all.
+voice_lib.notify = trace
+
+
 def last_assistant_text(transcript_path):
     """Newest assistant turn in the JSONL transcript, as plain text.
 

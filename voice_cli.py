@@ -342,6 +342,21 @@ def cmd_max(state, args):
     print(f"Reading at most {state['maxChars']} characters per answer.")
 
 
+def cmd_history(state, args):
+    """How many utterances stay replayable, and so how many wavs sit in temp.
+
+    The engine keeps a ring of these and deletes the wavs of whatever falls off
+    the end, so this is the only thing that decides how much disk the cache
+    uses. Takes effect on the next start -- the ring is the running engine's.
+    """
+    if not args or not args[0].isdigit() or int(args[0]) < 1:
+        raise SystemExit("usage: voice_cli.py history <count>")
+    state["historyKeep"] = int(args[0])
+    voice_lib.save_state(state)
+    print(f"Keeping the last {state['historyKeep']} utterances for replay. "
+          "Restart the engine to apply it: kill, then start.")
+
+
 def cmd_clone(state, args):
     """Turn a recording into a voice this can speak with.
 
@@ -455,7 +470,8 @@ HELP = [
     ]),
     ("Tuning what you hear", [
         ("volume", "<0-100>", "How loud. It is this app's own slider in the Windows mixer."),
-        ("max", "<chars>", "How much of a summary to read. Default 600."),
+        ("max", "<chars>", "Longest answer read before it is cut. Default 4000."),
+        ("history", "<count>", "Utterances kept for replay, and their wavs. Default 40."),
         ("narrate", "on|off", "Whether the short lines said mid-work are spoken."),
         ("watch", "on|off", "Follow sessions directly. Off means relying on hooks alone."),
         ("source", "embedding|icl", "Which clone to use. 'icl' is closer, and heavier."),
@@ -602,6 +618,7 @@ COMMANDS = {
     "list": cmd_list, "set": cmd_set, "say": cmd_say,
     "stop": cmd_stop, "break": cmd_stop, "shush": cmd_stop,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,
+    "history": cmd_history,
     "volume": cmd_volume, "vol": cmd_volume, "loud": cmd_volume,
     "clone": cmd_clone,
     # Named several ways on purpose. This gets typed from memory while

@@ -1,6 +1,5 @@
-# Commands
-
-Everything below works two ways: `/voice status` inside Claude Code, or
+Wrote C:\Users\Trax\Documents\claude-voice\docs\commands.md
+` inside Claude Code, or
 `python voice_cli.py status` in a terminal. Mind the space in the slash
 command — it is `/voice on`, never `/voice_on`.
 
@@ -38,7 +37,8 @@ command — it is `/voice on`, never `/voice_on`.
 | command | does |
 |---|---|
 | `volume <0-100>` | How loud. It is this app's own slider in the Windows mixer. |
-| `max <chars>` | How much of a summary to read. Default 600. |
+| `max <chars>` | Longest answer read before it is cut. Default 4000. |
+| `history <count>` | Utterances kept for replay, and their wavs. Default 40. |
 | `narrate on|off` | Whether the short lines said mid-work are spoken. |
 | `watch on|off` | Follow sessions directly. Off means relying on hooks alone. |
 | `source embedding|icl` | Which clone to use. 'icl' is closer, and heavier. |

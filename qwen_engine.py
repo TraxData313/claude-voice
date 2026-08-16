@@ -24,7 +24,8 @@ Loading the ICL encoder tears the talker model down underneath the engine.
 
 import ctypes
 import os
-from ctypes import POINTER, c_char_p, c_int, c_int64, c_uint8, c_void_p
+from ctypes import (CFUNCTYPE, POINTER, c_char_p, c_float, c_int, c_int64,
+                    c_uint8, c_void_p)
 
 JNI_VERSION_1_8 = 0x00010008
 
@@ -51,6 +52,113 @@ GET_ARRAY_LENGTH = 171
 GET_FLOAT_ARRAY_REGION = 205
 
 SAMPLE_RATE = 24000          # what the vocoder reports on load
+
+
+# ---------------------------------------------------------------------------
+# The DLL's own C ABI, beside the JNI wrappers we drive everything else through.
+#
+# We come down here for one reason: streaming. Speaking an answer as several
+# separate generations means the model rolls its prosody afresh for each, and
+# the same voice comes back as a recognisably different person at every seam.
+# One streaming generation hands its audio over in pieces as they are made, so
+# the timbre is continuous by construction and the first words arrive sooner
+# than a whole first sentence could be synthesised. The Kotlin 'generate'
+# wrapper cannot do it: it takes no parameter block and returns one array.
+#
+# Layouts below are copied from the sister project's host, where they were
+# derived from the disassembly of these same JNI wrappers and then proven over
+# 200 consecutive syntheses. Do not tidy them. A wrong offset does not raise --
+# it reads whatever else is there, and ggml's answer to bad input is abort().
+# ---------------------------------------------------------------------------
+
+
+class QwenResult(ctypes.Structure):
+    """40 bytes (0x28). Returned by value, so through a hidden pointer on x64."""
+    _fields_ = [
+        ("audio", POINTER(c_float)),   # 0x00  mono float32, owned by the result
+        ("num_samples", c_int),        # 0x08
+        ("sample_rate", c_int),        # 0x0C
+        ("success", c_int),            # 0x10  nonzero is ok
+        ("_reserved14", c_int),        # 0x14
+        ("error", c_char_p),           # 0x18  UTF-8, owned by the result
+        ("time_ms", c_int64),          # 0x20
+    ]
+
+
+class QwenParams(ctypes.Structure):
+    """The parameter block. Plain calls read the first 64 bytes, streaming reads
+    80 -- the extra 16 carry the chunking knobs. We always pass all 80, zeroed,
+    which is safe for both.
+
+    Two fields Studio itself leaves uninitialised, so it passes whatever was on
+    its stack. Zero them: 0x24 and 0x3C.
+    """
+    _fields_ = [
+        ("max_audio_tokens", c_int),        # 0x00  Studio default 4096 = 327.68 s
+        ("temperature", c_float),           # 0x04  Studio hardcodes 0.9
+        ("top_p", c_float),                 # 0x08  Studio hardcodes 1.0
+        ("top_k", c_int),                   # 0x0C  Studio hardcodes 50
+        ("threads", c_int),                 # 0x10  Studio hardcodes 4
+        ("_unknown14", c_int),              # 0x14  Studio writes 0
+        ("_unknown18", c_int),              # 0x18  Studio writes 1
+        ("_unknown1c", c_float),            # 0x1C  Studio writes 1.05 (repetition penalty?)
+        ("language_id", c_int),             # 0x20  -1 auto; en 2050, ru 2069
+        ("_unknown24", c_int),              # 0x24  UNINITIALISED in Studio; zero it
+        ("instruction", c_void_p),          # 0x28  const char* or null
+        ("speaker", c_void_p),              # 0x30  const char* or null
+        ("_unknown38", c_float),            # 0x38  Studio writes 2.0
+        ("_unknown3c", c_int),              # 0x3C  UNINITIALISED in Studio; zero it
+        ("chunk_seconds", c_float),         # 0x40  streaming only
+        ("left_context_seconds", c_float),  # 0x44  streaming only
+        ("collect_audio", c_int),           # 0x48  streaming only
+        ("_pad4c", c_int),                  # 0x4C
+    ]
+
+    @classmethod
+    def studio_defaults(cls, language_id=-1, max_audio_tokens=4096):
+        return cls(max_audio_tokens=max_audio_tokens, temperature=0.9, top_p=1.0,
+                   top_k=50, threads=4, _unknown14=0, _unknown18=1, _unknown1c=1.05,
+                   language_id=language_id, _unknown24=0, instruction=None,
+                   speaker=None, _unknown38=2.0, _unknown3c=0,
+                   chunk_seconds=0.0, left_context_seconds=0.0, collect_audio=0,
+                   _pad4c=0)
+
+
+class QwenChunk(ctypes.Structure):
+    """One streamed piece. 56 bytes (0x38).
+
+    The text-byte fields are the useful part beyond the audio: they say which
+    slice of the input this piece covers, which is how playback can be cut at a
+    sentence end rather than mid-word.
+    """
+    _fields_ = [
+        ("audio", POINTER(c_float)),   # 0x00  borrowed -- copy it before returning
+        ("num_samples", c_int),        # 0x08
+        ("sample_rate", c_int),        # 0x0C
+        ("start_sample", c_int64),     # 0x10
+        ("end_sample", c_int64),       # 0x18
+        ("start_frame", c_int),        # 0x20
+        ("end_frame", c_int),          # 0x24
+        ("start_text_byte", c_int),    # 0x28
+        ("end_text_byte", c_int),      # 0x2C
+        ("alignment_kind", c_int),     # 0x30
+        ("confidence", c_float),       # 0x34
+    ]
+
+
+# Return nonzero to carry on, zero to ask the engine to stop early. Confirmed
+# from the DLL's own JNI trampoline: it receives exactly (chunk*, user_data).
+QWEN_CHUNK_CALLBACK = CFUNCTYPE(c_int, c_void_p, c_void_p)
+
+# About a second is the sweet spot found live: long enough that making one never
+# starves playback, short enough that the first words arrive well inside a second.
+CHUNK_SECONDS = 1.0
+# How much already-spoken audio the engine keeps as context for the next piece.
+# This is the thing that carries the voice across the seams.
+LEFT_CONTEXT_SECONDS = 2.0
+# Measured, and the number the whole ceiling rests on: asked for 256 tokens, the
+# engine returned 491,520 samples -- 20.48 s -- twice, from two different texts.
+SAMPLES_PER_TOKEN = 1920
 
 
 class JavaVMOption(ctypes.Structure):
@@ -327,6 +435,114 @@ class Engine:
         if not self._call_bool(self._icl, wav, reference_text, out_path):
             raise RuntimeError(f"ICL extraction failed: {self.last_error()}")
         return out_path
+
+    # -- streaming, through the C ABI --------------------------------------
+
+    def _abi(self):
+        """Bind the DLL's own exports, lazily and once.
+
+        The JVM has already loaded this module -- its own ensureNativeLoaded()
+        did it, in the order ggml and CUDA need -- so opening it again by path
+        hands back the same module rather than a second copy of anything. And
+        the context we pass in is the one nativeInit gave us, which is what the
+        JNI wrappers have been forwarding as `ctx` all along.
+        """
+        if getattr(self, "_dll", None) is None:
+            dll = ctypes.CDLL(os.path.join(self.studio_dir, "qwen3_tts.dll"))
+            sig = [c_void_p, c_char_p, c_char_p, POINTER(QwenParams),
+                   QWEN_CHUNK_CALLBACK, c_void_p]
+            for name in ("qwen3_tts_synthesize_with_speaker_embedding_streaming",
+                         "qwen3_tts_synthesize_with_icl_prompt_streaming"):
+                fn = getattr(dll, name)
+                fn.restype = QwenResult
+                fn.argtypes = sig
+            dll.qwen3_tts_free_result.restype = None
+            dll.qwen3_tts_free_result.argtypes = [POINTER(QwenResult)]
+            self._dll = dll
+        return self._dll
+
+    def synthesize_streaming(self, text, on_piece, embedding_path=None,
+                             icl_prompt_path=None, language_id=-1,
+                             max_seconds=None):
+        """One generation, handed over in pieces as it is made.
+
+        `on_piece(samples, chunk)` is called for each piece, on this thread,
+        while the generation is still running. Return False from it to stop the
+        engine early -- that is the DLL's own documented way of being asked to
+        stop, and it is how the derail guard pulls the cord here.
+
+        This is not the same as calling synthesize() several times. The model
+        rolls its prosody afresh for every generation, so several calls give
+        several subtly different speakers; one streaming call keeps two seconds
+        of what it has already said as context for the next piece, which is what
+        carries the voice across a seam unchanged.
+
+        Returns how many samples were handed over. Truncation is safe: a derail
+        drifts, so everything already handed over is good speech.
+        """
+        dll = self._abi()
+        if not embedding_path and not icl_prompt_path:
+            raise ValueError("streaming needs an embedding or an ICL prompt")
+
+        # Two ceilings that do not depend on each other. The engine's own is
+        # exact -- ask for 256 tokens and 20.48 s is what comes back -- but it
+        # depends on the field still meaning what it means, so the sample count
+        # below trusts nothing and counts what actually arrives.
+        seconds = max_seconds or 327.68
+        tokens = max(40, min(4096, int(seconds * SAMPLE_RATE / SAMPLES_PER_TOKEN) + 1))
+        budget = int(tokens * SAMPLES_PER_TOKEN * 1.1) + SAMPLE_RATE
+
+        params = QwenParams.studio_defaults(language_id, tokens)
+        params.chunk_seconds = CHUNK_SECONDS
+        params.left_context_seconds = LEFT_CONTEXT_SECONDS
+        params.collect_audio = 0        # the pieces are the output; do not keep a second copy
+
+        state = {"samples": 0, "pieces": 0, "stopped": False, "error": None}
+
+        def _on_chunk(chunk_ptr, _user):
+            # Nothing may escape from here into native code: an exception
+            # unwinding through a C stack frame is undefined behaviour, and
+            # ggml's answer to a bad state is abort(), which no caller survives.
+            try:
+                if not chunk_ptr:
+                    return 1
+                c = ctypes.cast(chunk_ptr, POINTER(QwenChunk)).contents
+                n = c.num_samples
+                if not c.audio or n <= 0 or n > 50_000_000:
+                    return 1
+                state["samples"] += n
+                state["pieces"] += 1
+                if on_piece(c.audio[0:n], c) is False:
+                    state["stopped"] = True
+                    return 0
+                if state["samples"] > budget:
+                    state["stopped"] = True
+                    self._log(f"derail guard: {state['samples']} samples for "
+                              f"{len(text)} characters -- stopping it here")
+                    return 0
+                return 1
+            except BaseException as exc:            # noqa: BLE001 -- see above
+                state["error"] = exc
+                return 0
+
+        cb = QWEN_CHUNK_CALLBACK(_on_chunk)         # must outlive the call
+        call = (dll.qwen3_tts_synthesize_with_icl_prompt_streaming if icl_prompt_path
+                else dll.qwen3_tts_synthesize_with_speaker_embedding_streaming)
+        voice = (icl_prompt_path or embedding_path).encode("utf-8")
+
+        result = call(c_void_p(self.handle), text.encode("utf-8"), voice,
+                      ctypes.byref(params), cb, None)
+        try:
+            if state["error"] is not None:
+                raise state["error"]
+            # A generation we stopped ourselves reports failure, and rightly so.
+            # Only complain when nothing was handed over at all.
+            if not result.success and not state["stopped"]:
+                detail = (result.error or b"").decode("utf-8", "replace") or self.last_error()
+                raise RuntimeError(f"streaming synthesis failed: {detail}")
+        finally:
+            dll.qwen3_tts_free_result(ctypes.byref(result))
+        return state["samples"]
 
     def synthesize(self, text, embedding_path=None, icl_prompt_path=None,
                    reference_wav=None, language_id=-1):

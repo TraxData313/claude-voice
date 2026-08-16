@@ -47,7 +47,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import voice_lib
 import win_volume
-from qwen_engine import Engine, write_wav
+from qwen_engine import SAMPLE_RATE, Engine, write_wav
 
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "claude-voice")
 # Played wavs move here instead of being deleted, so hearing something again
@@ -57,6 +57,12 @@ HISTORY_DIR = os.path.join(CACHE_DIR, "history")
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+# voice_lib cannot log on its own, and the one thing it does silently -- cutting
+# the end off a long message -- is the thing most often mistaken for the engine
+# failing. Give it somewhere to say so.
+voice_lib.notify = log
 
 
 def set_volume(level):
@@ -331,29 +337,165 @@ class Speaker:
             job = self.jobs.get()
             with self.lock:
                 self.current = job
-            for i, chunk in enumerate(job.chunks):
-                if job.cancelled:
-                    break
-                try:
-                    samples = eng.synthesize(chunk, **job.kwargs)
-                except Exception as exc:
-                    log(f"synth failed on chunk {i}: {exc}")
-                    break
-                if job.cancelled:
-                    break
-                path = os.path.join(CACHE_DIR, f"say-{os.getpid()}-{time.time_ns()}.wav")
-                try:
-                    write_wav(path, samples)
-                except Exception as exc:
-                    log(f"wav write failed: {exc}")
-                    break
-                if job.cancelled:
-                    _unlink(path)
-                    break
-                self.play_q.put((job, path, False))    # blocks while the player is behind
-            with self.lock:
-                if self.current is job:
-                    self.current = None
+            try:
+                if self.state.get("streaming", True) and self._stream(eng, job):
+                    continue
+                self._chunked(eng, job)
+            finally:
+                with self.lock:
+                    if self.current is job:
+                        self.current = None
+
+    def _emit(self, job, samples):
+        """Write one playable piece and hand it to the player. False if we stopped."""
+        if job.cancelled:
+            return False
+        path = os.path.join(CACHE_DIR, f"say-{os.getpid()}-{time.time_ns()}.wav")
+        try:
+            write_wav(path, samples)
+        except Exception as exc:
+            log(f"wav write failed: {exc}")
+            return False
+        if job.cancelled:
+            _unlink(path)
+            return False
+        self.play_q.put((job, path, False))       # blocks while the player is behind
+        return True
+
+    # How much audio to get out of the door before worrying about seams, and how
+    # much to gather per piece after that. The first is small because it is the
+    # only thing between the answer arriving and the first word being heard; the
+    # rest are large because every one of them costs a gap in playback.
+    FIRST_SECONDS = 2.5
+    UNIT_SECONDS = 12.0
+
+    def _stream(self, eng, job):
+        """Speak the whole job as ONE generation, played as it is made.
+
+        This is the fix for the voice changing between sentences. Several
+        generations are several subtly different speakers, because the model
+        rolls its prosody afresh each time; one generation keeps two seconds of
+        what it has already said as context for the next piece, so the voice is
+        continuous by construction. It is also quicker to the first word --
+        measured 812 ms against 1967 ms for the first of two chunks.
+
+        Playback still has to be cut somewhere, since winsound plays a file at a
+        time. The cuts are placed in silence, which is why they are not heard.
+
+        Returns True if it spoke. False means nothing was played and the caller
+        should fall back -- never True-ish half measures, or the fallback would
+        say the first half of the answer twice.
+        """
+        text = " ".join(job.chunks).strip()
+        if not text:
+            return True
+        expect = voice_lib.expected_seconds(text)
+        buf, spoken, unit = [], [0.0], [self.FIRST_SECONDS]
+
+        def on_piece(samples, _chunk):
+            buf.extend(samples)
+            if job.cancelled:
+                return False
+            if len(buf) / SAMPLE_RATE < unit[0]:
+                return True
+            cut = voice_lib.quiet_cut(buf, SAMPLE_RATE)
+            if not cut:
+                # No breath to cut on yet. Gathering more is right: it moves the
+                # seam to the next natural pause rather than into a word. Only
+                # a genuine run-on gets cut regardless, and then only so that
+                # one endless sentence cannot hold up playback for ever.
+                if len(buf) / SAMPLE_RATE < unit[0] * 2.5:
+                    return True
+                cut = len(buf)
+            if not self._emit(job, buf[:cut]):
+                return False
+            spoken[0] += cut / SAMPLE_RATE
+            del buf[:cut]
+            unit[0] = self.UNIT_SECONDS
+            return True
+
+        try:
+            eng.synthesize_streaming(text, on_piece,
+                                     max_seconds=voice_lib.ceiling_seconds(text),
+                                     **job.kwargs)
+        except Exception as exc:
+            if spoken[0] > 0:
+                # Already speaking, so there is no going back to the old road
+                # without repeating what was heard. Keep what we have.
+                log(f"streaming stopped after {spoken[0]:.1f}s: {exc}")
+                return True
+            log(f"streaming unavailable, falling back to chunks: {exc}")
+            return False
+        if job.cancelled:
+            return True
+        if buf:
+            self._emit(job, buf)
+            spoken[0] += len(buf) / SAMPLE_RATE
+
+        verdict = voice_lib.audio_verdict(text, spoken[0])
+        if verdict != "ok":
+            log(f"  {verdict}: {spoken[0]:.1f}s of audio for {len(text)} characters, "
+                f"where {expect:.1f}s is honest")
+        return True
+
+    def _chunked(self, eng, job):
+        """The old road: a generation per piece of text, joined by playback.
+
+        Kept because streaming reaches past the JNI wrappers into the DLL's own
+        C ABI, and a build that does not export the streaming entry points would
+        otherwise have no voice at all. It has an audible seam at every piece,
+        which is the entire reason streaming exists.
+        """
+        for i, chunk in enumerate(job.chunks):
+            if job.cancelled:
+                return
+            try:
+                samples = self._say(eng, job, chunk)
+            except Exception as exc:
+                log(f"synth failed on chunk {i}: {exc}")
+                return
+            if not self._emit(job, samples):
+                return
+
+    def _say(self, eng, job, chunk):
+        """Synthesise one chunk, and refuse to believe a clip unlike its text.
+
+        The engine returns success for both of its real failures -- a derail
+        hands back minutes of babbling, a swallowed line hands back a fraction
+        of a second -- so 'did it return' catches neither. Length against text
+        catches both, and it is the only check we can make from here, since the
+        token ceiling that would stop a derail at the source is not reachable
+        through the Kotlin wrapper we call.
+
+        Retrying is cheap and a derail is a dice roll, not a property of the
+        text: the same words read cleanly a minute later. At better than four
+        times realtime a re-synthesis costs about a second per four seconds of
+        speech, and the listener never learns it happened.
+        """
+        expect = voice_lib.expected_seconds(chunk)
+        best = None
+        for attempt in (1, 2):
+            samples = eng.synthesize(chunk, **job.kwargs)
+            seconds = len(samples) / SAMPLE_RATE
+            verdict = voice_lib.audio_verdict(chunk, seconds)
+            if verdict == "ok":
+                if attempt == 2:
+                    log(f"  retry was clean ({seconds:.1f}s)")
+                return samples
+            log(f"  {verdict}: {seconds:.1f}s of audio for {len(chunk)} characters, "
+                f"where {expect:.1f}s is honest -- attempt {attempt} discarded")
+            if job.cancelled:
+                return samples
+            if best is None or abs(seconds - expect) < abs(len(best) / SAMPLE_RATE - expect):
+                best = samples
+        # Twice is not luck. Keep whichever attempt came nearest an honest
+        # reading, and cut the tail off it: a derail drifts, so every word
+        # before it is good and only what follows is noise.
+        ceiling = int(voice_lib.ceiling_seconds(chunk) * SAMPLE_RATE)
+        if len(best) > ceiling:
+            log(f"  keeping the first {ceiling / SAMPLE_RATE:.1f}s and dropping the rest")
+            return best[:ceiling]
+        return best
 
     def _play_loop(self):
         last = None

@@ -14,6 +14,17 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(ROOT, "config.json")
 LOG_DIR = os.path.join(ROOT, "logs")
 
+
+def _unlogged(msg):
+    pass
+
+
+# Whoever imports this and owns a log should point this at it. Nothing in here
+# can log on its own, and a cut that nobody records is precisely why a summary
+# stopping halfway looks like the engine breaking rather than a limit doing its
+# job. The server sets this to its own log; the hook sets it to its trace.
+notify = _unlogged
+
 DEFAULTS = {
     # --- machine-specific, written by install.ps1 -------------------------
     "studioDir": r"C:\Program Files\qwen-tts-studio",
@@ -29,7 +40,21 @@ DEFAULTS = {
     "enabled": False,
     "voice": "abby",
     "source": "embedding",     # or 'icl': closer clone, larger files
-    "maxChars": 600,
+    # Speak an answer as ONE generation, played as it is made, instead of a
+    # generation per sentence-group joined at playback. Several generations are
+    # several subtly different speakers -- the model rolls its prosody afresh
+    # for each -- and that is what is heard as the voice changing mid-answer.
+    # It is also quicker to the first word. Off falls back to the old road,
+    # which is worth having if a Studio build ever ships without the streaming
+    # entry points. See docs/engine-notes.md.
+    "streaming": True,
+    # The ceiling on a TL;DR. This was 600 -- about five sentences -- and it was
+    # the wrong kind of limit: it cut at a full stop, so the summary *sounded*
+    # finished and simply was not, and nothing said it had happened. A listener
+    # who finds an answer long can stop it with a keypress; one who is never
+    # told the end was dropped cannot do anything at all. So it now matches the
+    # full-answer ceiling and exists only to stop a runaway.
+    "maxChars": 4000,
     # How loud, 0.0 to 1.0. This is Windows' own per-app volume -- the slider
     # the mixer keeps under our name -- so it is applied to the engine process
     # rather than mixed into the audio, and takes effect mid-sentence.
@@ -355,24 +380,109 @@ def extract_summary(md):
 
 
 def truncate(text, max_chars):
-    """Cut at a sentence boundary rather than mid-word."""
+    """Cut at a sentence boundary rather than mid-word.
+
+    Cutting on a full stop is what makes this dangerous rather than merely
+    annoying: the intonation falls, the listener hears a finished thought, and
+    nothing about it sounds like a limit. So say so when it happens. The
+    ceiling is a runaway guard now, and a summary that trips it is worth
+    knowing about.
+    """
     if max_chars <= 0 or len(text) <= max_chars:
         return text
     cut = text[:max_chars]
     m = list(re.finditer(r"[.!?](\s|$)", cut))
-    if m and m[-1].end() > max_chars * 0.4:
-        return cut[:m[-1].end()].strip()
-    return cut.rsplit(" ", 1)[0].strip() + "..."
+    kept = (cut[:m[-1].end()].strip() if m and m[-1].end() > max_chars * 0.4
+            else cut.rsplit(" ", 1)[0].strip() + "...")
+    notify(f"cut {len(text) - len(kept)} characters off a {len(text)}-character "
+           f"message at the {max_chars} ceiling -- the end was not spoken")
+    return kept
 
 
-def chunks(text, first=140, target=320):
+# --------------------------------------------------------------------------
+# is what came back really speech?
+# --------------------------------------------------------------------------
+#
+# Autoregressive TTS derails: the model misses its end-of-speech token and
+# generates until it hits its own ceiling, which comes out as babbling or a
+# held vowel. It happens in the middle or at the end, never at the beginning,
+# so it is drift rather than bad conditioning -- and every word before it is
+# good. The engine's own default ceiling is 4096 audio tokens at 80 ms each,
+# which is 327 seconds of noise, and we cannot lower it from here: the Kotlin
+# 'generate' wrapper we reach through JNI takes no parameter block.
+#
+# So the check is after the fact, on the one thing we can always measure: how
+# much audio came back against how much the text justifies. The numbers below
+# were measured in the sister project against the same DLL. See
+# docs/engine-notes.md.
+
+# The factors below were not guessed. Every generation in this tool's own
+# speak-server.log -- a thousand of them -- was replayed against the estimate,
+# and honest speech landed between 0.20x and 1.18x of it, median 0.68x. The one
+# derail in that log sat at 2.21x, alone, with nothing between it and 1.18.
+SAMPLE_RATE = 24000
+GRACE_SECONDS = 1.5        # the breath at either end, which a short line is mostly made of
+CHARS_PER_SECOND = 13.0    # measured 13-17; the low end is the generous one, and generous is safe
+DERAIL_FACTOR = 1.8        # clears honest speech by half again, and still caught the real one
+MIN_SECONDS = 3.2          # never call a short line a derail: "Right, done." needs room
+
+# Far *less* audio than the text justifies is the same failure from the other
+# end -- the broken-ICL road returns ok with 1920 samples, eight hundredths of
+# a second. But honest short lines are quick, and a first pass at 0.35x flagged
+# fifteen perfectly good ones. Only the catastrophic shape is worth catching,
+# so: a tenth of an honest reading, and never more than six tenths of a second.
+SWALLOW_FACTOR = 0.10
+SWALLOW_FLOOR = 0.6
+
+
+def expected_seconds(text):
+    """How long an honest reading of this text should take."""
+    chars = len((text or "").strip())
+    return GRACE_SECONDS + chars / CHARS_PER_SECOND if chars else 0.0
+
+
+def ceiling_seconds(text):
+    """The longest this text may honestly become before we stop believing it."""
+    expected = expected_seconds(text)
+    return max(expected * DERAIL_FACTOR, MIN_SECONDS) if expected else 0.0
+
+
+def audio_verdict(text, seconds):
+    """'ok', 'derail' (babbling on) or 'swallowed' (it barely said anything).
+
+    Both failures return success from the engine -- that is the whole trap. A
+    derail returns minutes of noise and a swallowed line returns eight
+    hundredths of a second, and both say ok:true. Length against text is the
+    only honest test either way.
+    """
+    expected = expected_seconds(text)
+    if not expected:
+        return "ok"
+    if seconds > ceiling_seconds(text):
+        return "derail"
+    if seconds < min(SWALLOW_FLOOR, expected * SWALLOW_FACTOR):
+        return "swallowed"
+    return "ok"
+
+
+def chunks(text, first=140, target=480):
     """Sentence-ish pieces, so speech starts before the whole thing is synthesised.
 
     Every chunk is a separate generation, and two generations of the same voice
-    are not identical -- the timbre drifts a little across a boundary, which is
-    heard as the speaker changing between sentences. So boundaries are worth
-    spending: only the *first* chunk is kept short, to get speech started
-    quickly, and the rest are large enough that most answers are one more piece.
+    are not identical -- the model rolls its own prosody afresh each time, so
+    the timbre drifts across a boundary and the listener hears the speaker being
+    swapped mid-answer. The sister project hit the same thing in a playtest and
+    named it the same way. So boundaries are worth spending: only the *first*
+    chunk is kept short, to get speech started quickly, and the rest are large
+    enough that most answers are one more piece.
+
+    `target` went 320 -> 480 when the length check landed. Bigger pieces mean
+    fewer seams to hear, and the reason not to have them -- that one derail
+    would take a bigger bite out of the answer -- stopped applying once a
+    derailed piece is detected and re-synthesised instead of played.
+
+    None of which is the real fix. The engine can do one generation and hand
+    over its audio in pieces, which has no seam at all; see docs/engine-notes.md.
     """
     parts = re.split(r"(?<=[.!?;:])\s+", text)
     out, buf = [], ""
@@ -399,6 +509,75 @@ def chunks(text, first=140, target=320):
     if buf:
         out.append(buf)
     return [c for c in out if _SPEAKABLE.search(c)]
+
+
+# --------------------------------------------------------------------------
+# cutting a continuous stream into things that can be played
+# --------------------------------------------------------------------------
+#
+# A streaming generation arrives as one unbroken voice, which is the whole
+# point of it. But playback is winsound, which plays a file at a time and puts
+# a small gap between one and the next -- so the stream still has to be cut
+# somewhere, and a cut in the middle of a word is heard as a stutter.
+#
+# The engine does report which slice of text each piece covers, and that looked
+# like the answer until it was measured: the counter lags badly, stopping at
+# byte 140 of 213 on a clip that spoke every word. Silence does not lag. There
+# were eight clean gaps in twelve seconds of speech, which is more cut points
+# than a five-sentence answer needs.
+
+QUIET_WINDOW = 0.04        # 40 ms, about the shortest gap between two words
+QUIET_SEARCH = 1.5         # how far back from the end to look for one
+QUIET_RATIO = 0.12         # how far under the local peak counts as a gap
+
+
+def quiet_cut(samples, rate=24000, search=QUIET_SEARCH, window=QUIET_WINDOW,
+              ratio=QUIET_RATIO):
+    """Where to cut this buffer so the cut lands in a gap, not a word.
+
+    Looks only at the tail, because the caller has already decided it wants
+    roughly this much audio and the only question is where to round it to.
+
+    **Returns 0 when there is no gap to cut on**, which is not a failure and
+    must not be treated as one: the right answer then is to gather more audio
+    and ask again, which pushes the seam to the next natural breath instead of
+    putting it in the middle of a word. Speech runs out of breath every few
+    seconds, so this converges quickly.
+
+    The quietest window is not automatically a good cut -- in a continuous
+    stretch of speech one of them is still the quietest, and cutting there is
+    exactly the stutter this exists to avoid. Hence the ratio test.
+    """
+    n = len(samples)
+    win = max(1, int(window * rate))
+    back = min(n, int(search * rate))
+    if back < win * 2:
+        return 0
+
+    best, best_at, peak = None, 0, 0.0
+    for start in range(n - back, n - win + 1, win):
+        loudest = 0.0
+        for s in samples[start:start + win]:
+            a = -s if s < 0 else s
+            if a > loudest:
+                loudest = a
+        if loudest > peak:
+            peak = loudest
+        if best is None or loudest < best:
+            best, best_at = loudest, start + win
+
+    if peak <= 0.0:
+        return n                      # all silence: anywhere will do, take it all
+    return best_at if best <= peak * ratio else 0
+
+
+# On loudness, since it is the obvious next worry: the sister project had to
+# take ONE gain for a whole utterance, because normalising each piece to its own
+# peak makes the loudness breathe from one to the next -- the same defect as the
+# voice changing, wearing different clothes. We do not have that problem and
+# should not acquire it. write_wav's scale is exactly 1.0 for anything peaking
+# under 1.0, so it is a clipping guard rather than a normaliser, and every piece
+# of one generation comes out at the level the engine gave it. Leave it that way.
 
 
 # --------------------------------------------------------------------------
@@ -524,6 +703,27 @@ def server_alive(port, timeout=1.5):
         return None
 
 
+LOG_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _rolled(path, limit=LOG_MAX_BYTES):
+    """Move a log aside once it gets fat, keeping exactly one previous.
+
+    The engine writes about a kilobyte per spoken line -- timings, memory, the
+    prefill graph -- which is worth having and never stops. Appending forever is
+    fine for a week and silly for a year. Rolling at a start rather than mid-run
+    keeps it simple: nothing is holding the handle yet, and 'read the log first'
+    still finds the whole of the session you are actually debugging.
+    """
+    try:
+        if os.path.getsize(path) < limit:
+            return path
+        os.replace(path, path + ".1")       # replace, so the older .1 goes quietly
+    except OSError:
+        pass
+    return path
+
+
 def start_server(state, wait=0):
     """Launch the engine host detached. Returns True if it is (or came) up."""
     import subprocess
@@ -534,7 +734,7 @@ def start_server(state, wait=0):
         return True
 
     os.makedirs(LOG_DIR, exist_ok=True)
-    log = open(os.path.join(LOG_DIR, "speak-server.log"), "a", encoding="utf-8")
+    log = open(_rolled(os.path.join(LOG_DIR, "speak-server.log")), "a", encoding="utf-8")
     DETACHED = 0x00000008 | 0x08000000          # DETACHED_PROCESS | CREATE_NO_WINDOW
     subprocess.Popen(
         [_python(), "-u", os.path.join(ROOT, "speak_server.py"), "--port", str(port)],

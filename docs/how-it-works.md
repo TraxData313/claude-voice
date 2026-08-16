@@ -76,10 +76,21 @@ translated or removed.
 Synthesis and playback are separate threads, so speech starts on the first phrase instead
 of the last. Roughly 4× realtime, so the player never catches up with the synthesiser.
 
-Every chunk is a separate generation, and two takes of the same voice are not identical —
-the timbre drifts across a boundary, heard as the speaker changing mid-thought. So
-boundaries are spent carefully: **only the first chunk is short**, to get speech going, and
-the rest is spoken in one take.
+An answer is **one generation**, streamed. That matters because two takes of the same voice
+are not identical — the model rolls its prosody afresh for each, so a reply cut into
+sentences came back as a recognisably different person at every seam. Streaming hands the
+audio over in pieces as they are made, keeping two seconds of what it has already said as
+context, so the voice is continuous by construction and the first word arrives sooner than
+a whole first sentence could be synthesised.
+
+Playback still has to be cut somewhere, since the player takes one file at a time. The cuts
+are placed **in the gaps between words**, found by looking for the quietest moment near the
+end of what has been gathered — never at a fixed length, which is what would be heard as a
+stutter. If there is no gap to cut on, it gathers more and asks again.
+
+The old road — a generation per chunk — is still there behind `streaming: false`, for a
+Studio build that ships without the streaming entry points. It has the seam.
+**[Why, and what it cost to find →](engine-notes.md)**
 
 Lines **queue** rather than interrupt. Barging in was right when one hook spoke one
 finished answer; it is wrong for a running commentary, where cutting off the previous line
@@ -100,7 +111,10 @@ attribute of that name on the instance, it shadows the method, and you get
 
 ## Things that cost real time to find
 
-Kept because they will not be obvious to the next person either.
+Kept because they will not be obvious to the next person either. The ones about the
+*engine* misbehaving — stopping early, changing voice between sentences, buzzing — have
+their own page now: **[engine-notes.md](engine-notes.md)**, with the measurements behind
+each and where the guards are still missing.
 
 **Hooks are not dependable, so this does not need them.** A hook runs only if the client
 chooses to run it, and nothing from outside can tell whether it did — which looks exactly

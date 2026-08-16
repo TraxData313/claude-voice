@@ -1,22 +1,22 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md.",
 
-  "version": "1.0.0",
+  "version": "1.1.0",
   "date": "2026-08-16",
 
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "It now knows what version it is, and can tell you when a newer one is out.",
+  "headline": "She stays the same person the whole way through an answer now, and she has stopped buzzing.",
 
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "A version number, shown by status and in the corner of the panel.",
-    "'update' checks GitHub when you ask it to, and can pull and restart for you.",
-    "The panel does the same along its bottom row, with a link to what is new.",
-    "Automatic weekly checks exist but stay off until you turn them on."
+    "An answer is one generation now, spoken as it is made, so the voice no longer changes partway through.",
+    "She starts talking sooner. The first words arrive in about a second instead of two.",
+    "A clip that babbles past its own text is thrown away and made again. That was the buzzing.",
+    "Long answers are read out in full rather than cut short, and a cut now says that it happened."
   ],
 
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
-  "needsSetup": false,
+  "needsSetup": true,
 
   "changelog": "https://github.com/TraxData313/claude-voice/blob/main/CHANGELOG.md"
 }

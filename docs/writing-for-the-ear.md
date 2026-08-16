@@ -43,7 +43,10 @@ Only the summary is spoken, so it has to stand completely alone.
 - **No file names, paths, commands, flags or line numbers.** If a detail can only be acted
   on by looking at it, it belongs in the body.
 - **Plain sentences, in order:** what changed, whether it works, what to do next.
-- **Five sentences at most.** `maxChars` is a hard cut and it truncates mid-thought.
+- **Five sentences at most.** `maxChars` used to enforce this at 600 characters and it was a
+  bad way to learn the rule: the cut landed on a full stop, so the summary sounded finished
+  and simply was not. It is 4000 now and it says when it fires. Five is still right, because
+  a summary is heard once, in order, with no way to glance back at the start.
 - **It is a summary, not a pointer.** "The details are above" is worth saying; "see the
   third bullet" is not — a listener has no third bullet.
 - **Say the state of the voice itself when it changed.** Which voice is set, whether a
