@@ -1,60 +1,51 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Abby — calm, warm voice">
-  <!-- Original character in a flat, angular cartoon style. No likeness of any real person. -->
+  <!-- Original character. Flat, angular, serious in manner. No likeness of any real person. -->
   <circle cx="128" cy="128" r="124" fill="#12141c"/>
   <circle cx="128" cy="128" r="121" fill="none" stroke="#5eead4" stroke-width="6"/>
 
-  <clipPath id="disc"><circle cx="128" cy="128" r="118"/></clipPath>
-  <g clip-path="url(#disc)">
+  <clipPath id="discA"><circle cx="128" cy="128" r="118"/></clipPath>
+  <g clip-path="url(#discA)">
 
-    <!-- long dark hair, sharp-tipped -->
-    <path d="M128 34 C84 34 58 64 58 104 L58 150 C58 168 54 184 46 196
-             L70 188 L64 214 L90 200 L92 222 L112 204 L128 214 L144 204
-             L164 222 L166 200 L192 214 L186 188 L210 196
-             C202 184 198 168 198 150 L198 104 C198 64 172 34 128 34 Z"
-          fill="#33221b"/>
+    <!-- dark hair, sharp-tipped bob -->
+    <path d="M128 36 C88 36 62 66 62 106 C62 138 68 158 64 176
+             L84 168 L80 190 L100 178 L102 196 L118 184 L128 190 L138 184
+             L154 196 L156 178 L176 190 L172 168 L192 176
+             C188 158 194 138 194 106 C194 66 168 36 128 36 Z" fill="#241812"/>
 
-    <!-- neck and shoulders -->
-    <rect x="116" y="164" width="24" height="26" fill="#eebd93"/>
-    <path d="M42 258 C68 206 188 206 214 258 Z" fill="#14b8a6"/>
-    <path d="M110 212 L128 228 L146 212" fill="none" stroke="#0d9488" stroke-width="5" stroke-linecap="round"/>
+    <!-- neck and top -->
+    <rect x="117" y="160" width="22" height="26" fill="#eebd93"/>
+    <path d="M44 258 C70 208 186 208 212 258 Z" fill="#0f766e"/>
+    <path d="M112 210 L128 222 L144 210" fill="none" stroke="#14b8a6" stroke-width="4" stroke-linecap="round"/>
 
-    <!-- face, chin gently tapered -->
-    <path d="M128 64 C158 64 172 88 170 116 C168 146 152 168 128 172
-             C104 168 88 146 86 116 C84 88 98 64 128 64 Z" fill="#f6c9a3"/>
+    <!-- face, soft oval -->
+    <path d="M128 62 C156 62 170 86 168 114 C166 142 152 164 128 168
+             C104 164 90 142 88 114 C86 86 100 62 128 62 Z" fill="#f6c9a3"/>
 
-    <!-- side-swept angular fringe -->
-    <path d="M128 42 C100 42 82 58 78 88 L96 82 L94 96 L112 86 L114 98 L130 84
-             C142 72 160 74 178 92 C176 60 156 42 128 42 Z" fill="#33221b"/>
+    <!-- centre-parted curtain fringe, calm -->
+    <path d="M78 92 C80 62 100 42 128 42 C158 42 178 62 178 94
+             C168 78 152 70 136 70 L128 82 L122 70
+             C104 70 88 78 78 92 Z" fill="#241812"/>
 
-    <!-- blush -->
-    <ellipse cx="99" cy="139" rx="8.5" ry="4.5" fill="#f0a087" opacity="0.35"/>
-    <ellipse cx="157" cy="139" rx="8.5" ry="4.5" fill="#f0a087" opacity="0.35"/>
+    <!-- thin calm brows -->
+    <path d="M96 102 Q106 98 116 101" fill="none" stroke="#2a1d16" stroke-width="3" stroke-linecap="round"/>
+    <path d="M140 101 Q150 98 160 102" fill="none" stroke="#2a1d16" stroke-width="3" stroke-linecap="round"/>
 
-    <!-- slim arched brows -->
-    <path d="M92 100 Q106 93 120 99" fill="none" stroke="#33221b" stroke-width="3.5" stroke-linecap="round"/>
-    <path d="M136 99 Q150 93 164 100" fill="none" stroke="#33221b" stroke-width="3.5" stroke-linecap="round"/>
+    <!-- calm dark eyes, mostly iris, one quiet highlight -->
+    <path d="M92 118 Q104 108 120 116 Q106 127 92 118 Z" fill="#ffffff"/>
+    <path d="M164 118 Q152 108 136 116 Q150 127 164 118 Z" fill="#ffffff"/>
+    <circle cx="106" cy="117" r="6.5" fill="#3d2417"/>
+    <circle cx="150" cy="117" r="6.5" fill="#3d2417"/>
+    <circle cx="106" cy="117" r="3" fill="#17181d"/>
+    <circle cx="150" cy="117" r="3" fill="#17181d"/>
+    <circle cx="104" cy="114.5" r="1.6" fill="#ffffff"/>
+    <circle cx="148" cy="114.5" r="1.6" fill="#ffffff"/>
+    <path d="M92 117 Q104 107 120 115" fill="none" stroke="#17181d" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M164 117 Q152 107 136 115" fill="none" stroke="#17181d" stroke-width="3.5" stroke-linecap="round"/>
 
-    <!-- big almond eyes -->
-    <path d="M85 120 Q102 104 124 116 Q106 133 85 120 Z" fill="#ffffff"/>
-    <path d="M171 120 Q154 104 132 116 Q150 133 171 120 Z" fill="#ffffff"/>
-    <circle cx="106" cy="119" r="7" fill="#5b3a22"/>
-    <circle cx="150" cy="119" r="7" fill="#5b3a22"/>
-    <circle cx="106" cy="119" r="3.2" fill="#17181d"/>
-    <circle cx="150" cy="119" r="3.2" fill="#17181d"/>
-    <circle cx="103.5" cy="116" r="2.2" fill="#ffffff"/>
-    <circle cx="147.5" cy="116" r="2.2" fill="#ffffff"/>
+    <!-- the smallest nose -->
+    <path d="M127 132 L125 138" fill="none" stroke="#dba57d" stroke-width="2.5" stroke-linecap="round"/>
 
-    <!-- lash lines, winged at the outer corners -->
-    <path d="M89 119 Q104 105 122 116" fill="none" stroke="#17181d" stroke-width="4.5" stroke-linecap="round"/>
-    <path d="M89 119 L81 112" fill="none" stroke="#17181d" stroke-width="4.5" stroke-linecap="round"/>
-    <path d="M167 119 Q152 105 134 116" fill="none" stroke="#17181d" stroke-width="4.5" stroke-linecap="round"/>
-    <path d="M167 119 L175 112" fill="none" stroke="#17181d" stroke-width="4.5" stroke-linecap="round"/>
-
-    <!-- the smallest possible nose -->
-    <path d="M127 132 q-2 5 2 6" fill="none" stroke="#d99e77" stroke-width="3" stroke-linecap="round"/>
-
-    <!-- soft small lips -->
-    <path d="M115 147 Q121 143 128 146 Q135 143 141 147 Q135 156 128 156 Q121 156 115 147 Z" fill="#c14b5a"/>
-    <path d="M117 148 Q128 151 139 148" fill="none" stroke="#8f3542" stroke-width="1.6"/>
+    <!-- small quiet lips, the faintest warmth -->
+    <path d="M118 148 Q128 145 138 148 Q133 154 128 154 Q123 154 118 148 Z" fill="#b3606a"/>
   </g>
 </svg>
