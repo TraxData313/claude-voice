@@ -12,6 +12,16 @@
   <sub>Abby and Max, 5 seconds each</sub>
 </p>
 
+<p align="center">
+  <a href="https://traxdata313.github.io/claude-voice/" title="Hear her speak">
+    <img src="docs/art/abby.jpg" width="620" alt="Abby">
+  </a>
+</p>
+
+<p align="center">
+  <em><strong>Abby</strong>, as claude-voice — click her to hear her speak.</em>
+</p>
+
 ---
 
 Claude Code reads its answers aloud, in a voice you choose, using a local Qwen-TTS model.
