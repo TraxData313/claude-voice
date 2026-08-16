@@ -128,7 +128,7 @@ model loads, every sentence spoken twice.
 - **Want to help?** Give feedback and report bugs.
 - **No donations** — this is a hobby, done for fun and out of good will; I want to keep money
   out of it. *"For the love of money is the root of all evil."*
-- If you still insist on thanking me somehow — visit [my GitHub acc](https://github.com/TraxData313) and read the top pinned
+- If you still insist on thanking me somehow — visit [my GitHub acc](https://github.com/TraxData313) and read my top pinned
 
 <!-- ── end author's section ── -->
 
