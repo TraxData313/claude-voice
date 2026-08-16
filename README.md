@@ -133,8 +133,8 @@ Two ship with it, both the author's own — original characters, borrowed from n
 
 | | | |
 |---|---|---|
-| <img src="docs/icons/abby-256.png" width="150" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and warm. Calm, never in a hurry — the voice for careful work, tricky debugging, and being talked through something gently.<br>▶ **[Hear Abby](docs/samples/abby.wav?raw=1)** |
-| <img src="docs/icons/max-256.png" width="150" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — the voice for grinding through a long list.<br>▶ **[Hear Max](docs/samples/max.wav?raw=1)** |
+| <img src="docs/icons/abby-256.png" width="150" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and warm. Calm, never in a hurry — the voice for careful work, tricky debugging, and being talked through something gently.<br>▶ **[Hear Abby](docs/samples/abby.wav?raw=1)** *(5s wav)* |
+| <img src="docs/icons/max-256.png" width="150" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — the voice for grinding through a long list.<br>▶ **[Hear Max](docs/samples/max.wav?raw=1)** *(4s wav)* |
 
 Switch any time with `/voice set abby` or `/voice set max`. The manner changes tone, never
 substance: neither voice will cheer a result that has not been checked.
