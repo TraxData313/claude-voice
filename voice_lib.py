@@ -30,6 +30,10 @@ DEFAULTS = {
     "voice": "abby",
     "source": "embedding",     # or 'icl': closer clone, larger files
     "maxChars": 600,
+    # How loud, 0.0 to 1.0. This is Windows' own per-app volume -- the slider
+    # the mixer keeps under our name -- so it is applied to the engine process
+    # rather than mixed into the audio, and takes effect mid-sentence.
+    "volume": 1.0,
     "port": 8765,
     "autostart": True,
     # Speak the short lines said mid-work, not just the final answer. The Stop

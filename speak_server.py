@@ -20,6 +20,7 @@ whatever /state last said and turns every click into one of these:
     POST /replay-id     {"id": 16} -- play kept audio, synthesising nothing
     POST /mute-session  {"path": "...jsonl", "muted": true}
     POST /set-voice     {"voice": "max"}
+    POST /volume        {"level": 0.6} -- 0 to 1, and audible mid-sentence
 
 Two threads do the work. The engine thread owns the QwenEngine and never lets
 anyone else touch it -- a JNIEnv pointer belongs to the thread that made the
@@ -45,6 +46,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import voice_lib
+import win_volume
 from qwen_engine import Engine, write_wav
 
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "claude-voice")
@@ -55,6 +57,21 @@ HISTORY_DIR = os.path.join(CACHE_DIR, "history")
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def set_volume(level):
+    """How loud this process is allowed to be. Returns the level asked for.
+
+    Windows keeps the slider, not us -- see win_volume for why -- and a machine
+    that will not hand it over is no reason to stop speaking, so a failure is
+    logged and the level is still remembered for the next start.
+    """
+    level = win_volume.clamp(level)
+    try:
+        win_volume.set_level(level)
+    except Exception as exc:
+        log(f"could not set the volume: {exc}")
+    return level
 
 
 class Job:
@@ -108,6 +125,10 @@ class Speaker:
         self.speaking = False
         self.spoken = 0
         os.makedirs(CACHE_DIR, exist_ok=True)
+        # Before anything can play: Windows remembers a level per application,
+        # so without this the voice comes back at whatever the last run -- or
+        # a hand in the mixer -- left it at.
+        set_volume(state.get("volume", 1.0))
         # Last run's wavs are orphans: the deque that knew which utterance each
         # one belonged to died with that process.
         _empty_dir(HISTORY_DIR)
@@ -731,6 +752,7 @@ class Handler(BaseHTTPRequestHandler):
                 "voices": _voice_list(state),
                 "voice": state.get("voice"),
                 "source": state.get("source"),
+                "volume": win_volume.clamp(state.get("volume", 1.0)),
                 "enabled": bool(state.get("enabled")),
             })
 
@@ -748,6 +770,16 @@ class Handler(BaseHTTPRequestHandler):
                 sp.cancel()
             log(f"voice turned {'on' if on else 'off'}")
             return self._reply(200, {"enabled": on})
+
+        if route == "/volume":
+            level = payload.get("level")
+            if not isinstance(level, (int, float)):
+                return self._reply(400, {"error": "no level"})
+            # Applied first, remembered second: the point of a slider is the
+            # sentence you can already hear getting quieter as you drag it.
+            level = set_volume(level)
+            voice_lib.patch_state(volume=level)
+            return self._reply(200, {"volume": level})
 
         if route == "/skip":
             return self._reply(200, {"skipped": sp.skip_current()})

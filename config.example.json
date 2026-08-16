@@ -20,6 +20,10 @@
   "enabled": false,
   "voice": "abby",
   "source": "embedding",
+
+  "_volume": "How loud, 0.0 to 1.0. This is Windows' own per-app volume -- the slider the mixer keeps under this app's name -- so it applies in the middle of a sentence, and to replayed audio.",
+  "volume": 1.0,
+
   "maxChars": 600,
   "port": 8765,
   "autostart": true

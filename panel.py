@@ -7,11 +7,13 @@ It floats on top -- there is a tick box to stop it doing that -- and is
 deliberately plain:
 
     what is playing now, and which session it came from
-    stop / play / skip
+    which voice is speaking, and how big to draw them
+    turn it off, skip this line, skip everything
+    how loud it is
     what is queued behind it
     what has been said -- click a line to hear it again
     which sessions are heard and which are muted
-    which voice is speaking
+    and Abby along the bottom, whoever is actually talking
 
 One rule keeps this simple: **the panel owns no state**. It is a view over the
 engine's HTTP API, polling /state about twice a second; everything it shows
@@ -42,7 +44,11 @@ import voice_lib
 
 POLL_SECONDS = 0.5
 DRAIN_MS = 120
-DEFAULT_GEOMETRY = "410x580"
+# How long the volume slider waits, after you stop moving it, before saying so.
+SEND_MS = 160
+# Tall enough to open with a proper picture of her at the bottom rather than a
+# strip. She is most of the reason the window is this shape.
+DEFAULT_GEOMETRY = "440x860"
 # WxH, optionally offset: '+100+80', or '-8+0' meaning 8 in from the right, or
 # '+-8+0' meaning 8 past the left edge. Tk writes all three.
 GEOMETRY = re.compile(r"^(\d+x\d+)(?:([+-])(-?\d+)([+-])(-?\d+))?$")
@@ -55,6 +61,10 @@ GREY = "#666666"
 LINK = "#1a5fb4"
 LINK_DARK = "#7aa7ff"
 
+# What the window is called, on its title bar and in the taskbar. The project
+# is claude-voice; the thing with a face on it is Abby, and the Desktop
+# shortcut says the same, so that the icon and the window agree.
+APP_NAME = "Abby for Claude"
 AUTHOR = "TraxData313"
 AUTHOR_URL = "https://github.com/TraxData313"
 REPO_URL = "https://github.com/TraxData313/claude-voice"
@@ -67,8 +77,22 @@ REPO_URL = "https://github.com/TraxData313/claude-voice"
 DARK = {"bg": "#24262b", "field": "#1c1e22", "fg": "#e4e6eb",
         "dim": "#9aa0a6", "sel": "#3a4a63", "line": "#3a3d44"}
 ICON_DIR = os.path.join(voice_lib.ROOT, "docs", "icons")
+ART_DIR = os.path.join(voice_lib.ROOT, "docs", "art")
+# Abby along the bottom, whoever happens to be speaking. She is the face of the
+# thing rather than a readout of anything -- the window already says whose voice
+# it is, in three other places -- so she stays put when the voice changes.
+ART = "abby"
+ART_STEP = 16                # ask in steps, so a slow drag is not a hundred redraws
+# The window will not shrink below its contents plus this much, so there is
+# always room for the whole of her. Any less and she would have to be cropped
+# to fit, and she is shown whole or not at all.
+ART_FLOOR = 180
 FACE = 128                   # the portrait beside the line being spoken
-FACE_SIZES = ("48", "64", "96", "128", "160", "192", "256")
+# The four worth offering. Any number can still be typed in, and the sizes in
+# between were a longer list saying nothing a person choosing would want said.
+FACE_SIZES = ("48", "96", "128", "256")
+# Wide enough for the row of buttons and both tick boxes, which is what sets it.
+MIN_WIDE = 420
 FACE_MIN, FACE_MAX = 24, 320
 ROW_ICON = 24                # and the small one on every row
 # However many sessions are live, only the newest few are worth a tick box --
@@ -102,15 +126,17 @@ class Icons:
     and the caller draws a coloured initial instead.
     """
 
-    def __init__(self):
+    def __init__(self, where=None):
+        self.where = where or ICON_DIR
         self.loaded = {}
         self.on_disk = {}
         self.chose = {}          # which file each drawn size came from, and how
+        self.fitted = None       # the one picture drawn big, and the box it fits
 
     def get(self, voice_id, size):
         key = (voice_id, size)
         if key not in self.loaded:
-            path = os.path.join(ICON_DIR, f"{voice_id}-{size}.png")
+            path = os.path.join(self.where, f"{voice_id}-{size}.png")
             try:
                 self.loaded[key] = tk.PhotoImage(file=path) if os.path.exists(path) else None
             except tk.TclError:
@@ -121,7 +147,7 @@ class Icons:
         """Which sizes were drawn for this voice and committed as files."""
         if voice_id not in self.on_disk:
             found = []
-            for name in os.listdir(ICON_DIR) if os.path.isdir(ICON_DIR) else []:
+            for name in os.listdir(self.where) if os.path.isdir(self.where) else []:
                 stem, dot, ext = name.rpartition(".")
                 if ext != "png" or not dot:
                     continue
@@ -181,10 +207,71 @@ class Icons:
         return self.loaded[key]
 
 
+    def fit(self, voice_id, wide, tall, over=1.12):
+        """The largest a picture can be drawn in a box without distorting it.
+
+        Not the same question as at(): that one is about a square of a given
+        size, this one is about filling a space of whatever shape the window
+        has left over. Returns (image, width, height), or (None, 0, 0).
+
+        Width may overshoot, because the canvas clips it and a picture that
+        reaches both edges looks intended while one sitting in a margin looks
+        like a mistake -- and what goes over the edge is scenery, not her.
+        Height may not: she is shown whole, and a window too short for that
+        gets a smaller picture rather than a cropped one. The window's own
+        minimum keeps a size worth looking at always possible.
+
+        One result is kept, not a cache of them. Dragging a window edge asks
+        this a hundred times, and every answer is a few megabytes of pixels.
+        """
+        key = (voice_id, wide, tall)
+        if self.fitted and self.fitted[0] == key:
+            return self.fitted[1]
+        best = None
+        for src in self.stored(voice_id):
+            base = self.get(voice_id, src)
+            if base is None:
+                continue
+            for zoom in range(1, 5):
+                if base.width() * zoom > 2048:      # keep the working copy sane
+                    break
+                for shrink in range(1, 9):
+                    # zoom multiplies exactly; subsample keeps every nth pixel
+                    # and rounds up, so the arithmetic has to as well.
+                    w = -(-base.width() * zoom // shrink)
+                    h = -(-base.height() * zoom // shrink)
+                    if w > wide * over or h > tall or w < 60:
+                        continue
+                    # Biggest wins; between two of a size, the one that got
+                    # there with less zoom, since zoom is pixel doubling.
+                    score = (-w * h, zoom, -src)
+                    if best is None or score < best[0]:
+                        best = (score, base, zoom, shrink, w, h)
+        if best is None:
+            self.fitted = (key, (None, 0, 0))
+            return self.fitted[1]
+        _score, base, zoom, shrink, w, h = best
+        picture = base
+        if zoom > 1:
+            picture = picture.zoom(zoom)
+        if shrink > 1:
+            picture = picture.subsample(shrink)
+        self.fitted = (key, (picture, w, h))
+        return self.fitted[1]
+
+
 def one_line(text, width):
     """Collapse to a single line short enough to sit in a list."""
     text = " ".join((text or "").split())
     return text if len(text) <= width else text[:width - 1].rstrip() + "…"
+
+
+def _percent(level, fallback=100):
+    """A 0-to-1 volume as a whole percent, or the fallback if it is nonsense."""
+    try:
+        return max(0, min(100, int(round(float(level) * 100))))
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _sane_size(value, fallback=FACE):
@@ -241,7 +328,14 @@ class Panel:
         self.drawn = {}              # last drawn content, to skip pointless redraws
         self.pending = {}            # clicked, not yet confirmed by a poll
         self.width = 0
+        self.volume_send = None      # a drag waiting to be told to the engine
+        self.echoing = False         # drawing the slider, rather than being dragged
+        # Fitting the picture settles the layout, and settling the layout can
+        # deliver another resize event -- which would arrive in the middle of
+        # this one. Doing that to any depth is a hang, so it is done once.
+        self.drawing_art = False
         self.icons = Icons()
+        self.art_pics = Icons(ART_DIR)     # the big picture, in its own folder
         self.dim = []                # the labels that are grey in either theme
         self.links = []              # and the ones that are clickable
         saved = voice_lib.load_state()
@@ -257,7 +351,7 @@ class Panel:
     # -- laying it out -----------------------------------------------------
     def _build(self):
         root = self.root
-        root.title("claude-voice")
+        root.title(APP_NAME)
         self.wear_icon()
         root.wm_attributes("-topmost", self.on_top.get())
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -267,18 +361,30 @@ class Panel:
         head.pack(fill="x", padx=8, pady=(8, 0))
         top = ttk.Frame(head)
         top.pack(fill="x")
-        who = ttk.Frame(top)
+        who = self.who = ttk.Frame(top)
         who.pack(side="left", padx=(0, 10))
         self.face = tk.Canvas(who, width=self.face_size, height=self.face_size,
                               highlightthickness=0,
                               cursor="hand2",
                               background=ttk.Style().lookup("TFrame", "background"))
         self.face.pack()
-        self.face_name = ttk.Label(who, text="", font=FONT_BOLD, anchor="center",
-                                   cursor="hand2")
-        self.face_name.pack(fill="x", pady=(2, 0))
-        for spot in (self.face, self.face_name):
-            spot.bind("<Button-1>", self.flip_voice)
+        self.face.bind("<Button-1>", self.flip_voice)
+        # Directly under the portrait, in place of the name it used to print
+        # there -- the dropdown says the name anyway, and this is where you
+        # already click to change voice, so it is where the control belongs.
+        # The size box beside it is the size of the picture above them both,
+        # which is not something a box on its own in a corner ever said.
+        picks = ttk.Frame(who)
+        picks.pack(pady=(3, 0))
+        self.voice_box = ttk.Combobox(picks, state="readonly", width=12, font=FONT_SMALL)
+        self.voice_box.pack(side="left")
+        self.voice_box.bind("<<ComboboxSelected>>", self.pick_voice)
+        # Not read-only: pick one of the sizes or type your own.
+        self.size_box = ttk.Combobox(picks, width=3, font=FONT_SMALL, values=FACE_SIZES)
+        self.size_box.set(str(self.face_size))
+        self.size_box.pack(side="left", padx=(4, 0))
+        for event in ("<<ComboboxSelected>>", "<Return>", "<FocusOut>"):
+            self.size_box.bind(event, self.pick_size)
         said = ttk.Frame(top)
         said.pack(side="left", fill="x", expand=True)
         # Who is talking goes above what they said: you read down to the words
@@ -297,8 +403,14 @@ class Panel:
         self.power = ttk.Button(bar, text="turn off", width=9, command=self.toggle_voice)
         self.power.pack(side="left", padx=(0, 6))
         self.transport = [self.power]
-        for text, route in (("stop", "/stop"), ("skip", "/skip")):
-            b = ttk.Button(bar, text=text, width=6, command=lambda r=route: self.act(r))
+        # The queue is the whole difference between these two, so the labels
+        # say so rather than leaving it to be discovered: 'skip line' gives up
+        # on this sentence and goes straight to the next, 'skip all' throws
+        # away everything waiting as well. Nothing here is called stop, because
+        # neither of them pauses anything -- there is no coming back to it.
+        # Skipping one line is the small, everyday one, so it is nearest.
+        for text, route in (("skip line", "/skip"), ("skip all", "/stop")):
+            b = ttk.Button(bar, text=text, command=lambda r=route: self.act(r))
             b.pack(side="left", padx=(0, 4))
             self.transport.append(b)
         # Only ever shown when there is no engine to talk to.
@@ -311,6 +423,24 @@ class Panel:
         self.check(bar, text="dark", variable=self.dark,
                    command=self.toggle_dark).pack(side="right", padx=(0, 8))
 
+        # A row of its own. Three buttons and two tick boxes already fill the
+        # one above, and a slider squeezed in beside them would be a few pixels
+        # long -- too short to aim at, which is the one thing a slider must be.
+        loud = ttk.Frame(head)
+        loud.pack(fill="x", pady=(6, 0))
+        how_loud = ttk.Label(loud, text="volume", font=FONT_SMALL, foreground=GREY)
+        how_loud.pack(side="left")
+        # Fixed width, and packed before the slider: a number that changes from
+        # 8% to 100% would otherwise shove the slider sideways as you drag it.
+        self.volume_shown = ttk.Label(loud, text="", font=FONT_SMALL, foreground=GREY,
+                                      width=5, anchor="e")
+        self.volume_shown.pack(side="right")
+        self.volume = ttk.Scale(loud, from_=0, to=100, orient="horizontal",
+                                command=self.slide_volume)
+        self.volume.pack(side="left", fill="x", expand=True, padx=6)
+        self.transport.append(self.volume)
+        self.dim += [how_loud, self.volume_shown]
+
         ttk.Separator(root).pack(fill="x", padx=8, pady=(8, 0))
 
         # The bottom of the window is packed from the bottom up, so that the
@@ -318,19 +448,31 @@ class Panel:
         # must always be visible, rather than shouldering them off the edge.
         # The packer hands out space in the order things were packed, so the
         # credit going first is also what keeps it on screen in a small window.
+        # The last two rows are one thought: who she is, and who made the thing.
+        # Nothing here is operated -- the controls all live at the top now --
+        # so it sits below the working part of the window and stays there.
         credit = ttk.Frame(root)
-        credit.pack(side="bottom", fill="x", padx=8, pady=(0, 6))
+        credit.pack(side="bottom", fill="x", padx=8, pady=(2, 6))
         made = ttk.Label(credit, text="created by ", font=FONT_SMALL, foreground=GREY)
         made.pack(side="left")
         self.link(credit, AUTHOR, AUTHOR_URL).pack(side="left")
         dot = ttk.Label(credit, text="  ·  ", font=FONT_SMALL, foreground=GREY)
         dot.pack(side="left")
         self.link(credit, "GitHub repo", REPO_URL).pack(side="left")
-        self.dim += [made, dot]
+        # The engine's state has no row of its own any more, and it belongs
+        # with the small print rather than beside the buttons.
+        self.status = ttk.Label(credit, text="", font=FONT_SMALL, foreground=GREY)
+        self.status.pack(side="right")
+        self.dim += [made, dot, self.status]
 
-        foot = ttk.Frame(root)
-        foot.pack(side="bottom", fill="x", padx=8, pady=6)
-        ttk.Separator(root).pack(side="bottom", fill="x", padx=8, pady=(8, 0))
+        # Her, right above the credit -- the picture is what she looks like,
+        # not a readout of anything, so it belongs at this end of the window.
+        # No expand: the height is worked out in draw_art and set here, which
+        # leaves the spare room to the history rather than splitting it.
+        self.art = tk.Canvas(root, highlightthickness=0, borderwidth=0, height=1)
+        self.art.pack(side="bottom", fill="x")
+
+        ttk.Separator(root).pack(side="bottom", fill="x", padx=8, pady=(8, 4))
         self.sessions = ttk.Frame(root)
         self.sessions.pack(side="bottom", fill="x", padx=8)
         self._section(root, "sessions — ticked means heard").pack_configure(side="bottom")
@@ -342,23 +484,6 @@ class Panel:
         self.hist_head = self._section(root, "history — click to replay")
         self.hist_list = self._rows(root, height=3, expand=True)
         self.hist_list.bind("<Button-1>", self.replay)
-        name = ttk.Label(foot, text="voice", font=FONT_SMALL, foreground=GREY)
-        name.pack(side="left")
-        self.voice_box = ttk.Combobox(foot, state="readonly", width=17, font=FONT)
-        self.voice_box.pack(side="left", padx=6)
-        self.voice_box.bind("<<ComboboxSelected>>", self.pick_voice)
-        self.status = ttk.Label(foot, text="", font=FONT_SMALL, foreground=GREY)
-        self.status.pack(side="right")
-
-        # Not read-only: pick one of the sizes or type your own.
-        size = ttk.Label(foot, text="size", font=FONT_SMALL, foreground=GREY)
-        size.pack(side="left", padx=(8, 0))
-        self.size_box = ttk.Combobox(foot, width=4, font=FONT_SMALL, values=FACE_SIZES)
-        self.size_box.set(str(self.face_size))
-        self.size_box.pack(side="left", padx=4)
-        for event in ("<<ComboboxSelected>>", "<Return>", "<FocusOut>"):
-            self.size_box.bind(event, self.pick_size)
-        self.dim += [name, size, self.status]
 
     def _section(self, parent, title):
         label = ttk.Label(parent, text=title, font=FONT_SMALL, foreground=GREY)
@@ -420,6 +545,18 @@ class Panel:
                       foreground=[("disabled", DARK["dim"]), ("active", "#ffffff")],
                       lightcolor=[("active", DARK["sel"]), ("pressed", DARK["sel"])],
                       darkcolor=[("active", DARK["sel"]), ("pressed", DARK["sel"])])
+            # The slider's handle is drawn with the widget's own background,
+            # which in this theme is the window's -- a handle the same colour
+            # as everything behind it, sitting in a groove nobody can see. So
+            # the groove is the darker field colour and the handle is lighter
+            # than both, which is the only reason it reads as a handle.
+            style.configure("Horizontal.TScale", background=DARK["dim"],
+                            troughcolor=DARK["field"], bordercolor=DARK["line"],
+                            lightcolor=DARK["dim"], darkcolor=DARK["dim"])
+            style.map("Horizontal.TScale",
+                      background=[("active", "#ffffff"), ("disabled", DARK["line"])],
+                      lightcolor=[("active", "#ffffff"), ("disabled", DARK["line"])],
+                      darkcolor=[("active", "#ffffff"), ("disabled", DARK["line"])])
             style.configure("TCombobox", selectbackground=DARK["sel"],
                             selectforeground=DARK["fg"], arrowcolor=DARK["fg"])
             style.map("TCombobox",
@@ -444,6 +581,9 @@ class Panel:
         back = DARK["bg"] if dark else style.lookup("TFrame", "background")
         self.root.configure(background=back)
         self.face.configure(background=back)
+        # What shows either side of her when the window is a shape no scaling
+        # of the picture quite fills.
+        self.art.configure(background=back)
         for label in self.dim:
             label.configure(foreground=DARK["dim"] if dark else GREY)
         for label in self.links:
@@ -478,11 +618,54 @@ class Panel:
         return tree
 
     def _rewrap(self, _event=None):
-        """Keep the now-playing line wrapping to the window, not past it."""
+        """Keep the now-playing line wrapping to the window, not past it.
+
+        Measured from the portrait *column*, not the portrait. The dropdowns
+        underneath are wider than a small picture, and taking the picture's
+        width instead let the spoken line run off the right-hand edge -- by
+        exactly the difference, which is why it only showed at some sizes.
+        """
         width = self.root.winfo_width()
-        if width and width != self.width:
-            self.width = width
-            self.now.configure(wraplength=max(140, width - self.face_size - 34))
+        column = max(self.face_size, self.who.winfo_width())
+        if width and (width, column) != self.width:
+            self.width = (width, column)
+            self.now.configure(wraplength=max(140, width - column - 40))
+        self.draw_art()
+
+    def draw_art(self, force=False):
+        """Abby along the bottom, as big as the window can spare.
+
+        Scaled, never stretched: she is drawn at one of the sizes Tk can
+        actually reach and centred, so a window of an awkward width clips a
+        little scenery off her sides rather than squashing her.
+        """
+        if self.drawing_art:
+            return
+        wide = max(120, self.root.winfo_width()) // ART_STEP * ART_STEP
+        # Room nothing else is entitled to. The packer hands out space in the
+        # order things were packed and she comes before the lists, so simply
+        # asking for a share of the window took it from them -- at which point
+        # the queue and the history were not in the window at all. What is
+        # spare, by contrast, is what is left once every row has what it asked
+        # for, and taking all of it costs the lists nothing they insisted on.
+        spare = max(0, self.root.winfo_height() - self._least_height())
+        tall = spare // ART_STEP * ART_STEP
+        if (wide, tall) == self.drawn.get("art") and not force:
+            return
+        self.drawn["art"] = (wide, tall)
+        self.drawing_art = True
+        try:
+            picture, w, h = self.art_pics.fit(ART, wide, tall)
+            # Exactly her height: the canvas hugs the picture, so there is no
+            # band of background above her and nothing of her below the edge.
+            self.art.configure(height=h or 1)
+            self.art.delete("all")
+            if picture is not None:
+                self.art.create_image(self.root.winfo_width() // 2, 0,
+                                      image=picture, anchor="n")
+            self.hold_the_floor()
+        finally:
+            self.drawing_art = False
 
     # -- talking to the engine ---------------------------------------------
     def _poll_loop(self):
@@ -587,6 +770,24 @@ class Panel:
             self.drawn["enabled"] = on
         self.power.configure(text="turn off" if on else "turn on")
 
+        # The engine owns the level: it is the process making the noise, and
+        # the mixer slider being moved is that process's own. So this only ever
+        # echoes what came back -- except while it is being dragged, when
+        # echoing would drag it out from under the hand doing the dragging.
+        # An engine too old to know about volume says nothing about it, and
+        # inventing a level for it would drag the slider back to full every
+        # time it was moved -- which is exactly how this read from the outside.
+        if "volume" in st and not self.held("volume"):
+            level = _percent(st.get("volume"))
+            if level != self.drawn.get("volume"):
+                self.drawn["volume"] = level
+                self.echoing = True
+                try:
+                    self.volume.set(level)
+                finally:
+                    self.echoing = False
+                self.volume_shown.configure(text=f"{level}%")
+
         if st.get("error"):
             note = f"engine failed: {one_line(st['error'], 28)}"
         elif not st.get("ready"):
@@ -615,12 +816,11 @@ class Panel:
         self.status.configure(text="engine: down")
 
     def draw_face(self, voice_id):
-        """The portrait and the name under it, or a coloured initial for a
-        voice with no picture."""
+        """The portrait, or a coloured initial for a voice with no picture.
+        The name is not drawn here: the dropdown underneath says it."""
         if self.drawn.get("face") == voice_id:
             return
         self.drawn["face"] = voice_id
-        self.face_name.configure(text=self.voice_names.get(voice_id, voice_id or ""))
         self.face.delete("all")
         picture, size = self.icons.at(voice_id, self.face_size)
         # The canvas takes the size actually drawn, so nothing is cropped and
@@ -656,12 +856,20 @@ class Panel:
         Called whenever the layout changes shape -- a new portrait size, a
         different number of sessions -- because both change what the minimum is.
         """
-        least = self._least_height()
+        # Everything else, plus room for a picture of her worth having. The
+        # lists give up their spare height to her happily, but not their own
+        # rows, so without this the window could be dragged to a size where she
+        # had nowhere to be.
+        least = self._least_height() + ART_FLOOR
         if least == self.drawn.get("floor"):
             return
         self.drawn["floor"] = least
-        self.root.minsize(330, least)
-        if self.root.winfo_height() < least:
+        self.root.minsize(MIN_WIDE, least)
+        # Only once the window is really on screen. Before that winfo_width is
+        # the packer's guess rather than the size asked for, and writing it
+        # back as a geometry pinned the window to that guess -- which is how a
+        # 440-wide default opened at 360 with the tick boxes cut off.
+        if self.root.winfo_ismapped() and self.root.winfo_height() < least:
             self.root.geometry(f"{self.root.winfo_width()}x{least}")
 
     def _least_height(self):
@@ -677,7 +885,11 @@ class Panel:
         # The window's own requested height, which is the packer's answer to
         # the same question -- and unlike adding up the rows, it counts the
         # padding between them.
-        return self.root.winfo_reqheight()
+        #
+        # Less the picture, which is not part of any minimum: her height is a
+        # share of the window's, so counting it would raise the floor every
+        # time the window grew, and the floor would then stop it shrinking back.
+        return self.root.winfo_reqheight() - int(self.art.cget("height"))
 
     def pick_size(self, _event=None):
         """Resize the portrait. Typed sizes land on the nearest Tk can draw."""
@@ -700,6 +912,29 @@ class Panel:
         self.drawn["enabled"] = on
         self.power.configure(text="turn off" if on else "turn on")
         self.act("/enabled", {"on": on})
+
+    def slide_volume(self, value):
+        """Dragging is continuous; the engine only needs where you stopped.
+
+        The number beside the slider follows the handle immediately, because
+        that is what makes the thing feel connected to anything at all. The
+        POST does not: a request per pixel would be a hundred round trips for
+        one drag, so it waits until the handle has been still for a moment.
+        """
+        if self.echoing:
+            return                   # we moved it ourselves, to match the engine
+        level = int(round(float(value)))
+        self.volume_shown.configure(text=f"{level}%")
+        self.drawn["volume"] = level
+        self.hold("volume", 4)       # long enough to cover the send as well
+        if self.volume_send is not None:
+            self.root.after_cancel(self.volume_send)
+        self.volume_send = self.root.after(SEND_MS, self.send_volume)
+
+    def send_volume(self):
+        self.volume_send = None
+        self.hold("volume")          # the poll already in flight says the old level
+        self.act("/volume", {"level": self.drawn.get("volume", 100) / 100.0})
 
     def flip_voice(self, _event=None):
         """Click the portrait to swap between the two shipped voices."""

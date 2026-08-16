@@ -2,11 +2,17 @@
     Wires Claude Code up to speak.
 
     Writes config.json (paths for this machine), installs the Stop hook into a
-    project's .claude\settings.json, and drops the /voice slash command next to it.
+    project's .claude\settings.json, drops the /voice slash command next to it,
+    and puts a shortcut to the panel on the Desktop.
+
+    No administrator rights, by design: every path it writes to belongs to the
+    user already, and Program Files is only ever read from, looking for Studio.
+    Keep the repo somewhere you own -- config.json lives beside the code.
 
         .\install.ps1                                  # this repo's own folder as the project
         .\install.ps1 -ProjectDir C:\code\my-project   # speak in that project
         .\install.ps1 -StudioDir "D:\qwen-tts-studio"  # if it is not auto-found
+        .\install.ps1 -NoShortcut                      # skip the Desktop icon
         .\install.ps1 -WhatIf                          # show, do not write
 
     Hooks are read at session start: restart Claude Code afterwards.
@@ -16,6 +22,7 @@ param(
     [string]$ProjectDir = $PSScriptRoot,
     [string]$StudioDir,
     [string]$PythonExe,
+    [switch]$NoShortcut,
     [switch]$WhatIf
 )
 
@@ -161,6 +168,14 @@ if (-not $WhatIf) {
     $template = (Get-Content (Join-Path $repo "commands\voice.md") -Raw).Replace("__PYTHON__", $PythonExe).Replace("__REPO__", $repo.Replace('\','/'))
     Write-Utf8 (Join-Path $cmdDir "voice.md") $template
     Say "slash command : $(Join-Path $cmdDir 'voice.md')" "Green"
+}
+
+# --- something to double click --------------------------------------------
+# The panel is the only part of this with a window, and until now the only way
+# to open one was to type a command -- which is a poor answer to "I closed it,
+# how do I get it back".
+if (-not $NoShortcut) {
+    & (Join-Path $repo "make_shortcut.ps1") -PythonExe $PythonExe -WhatIf:$WhatIf
 }
 
 Say ""

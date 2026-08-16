@@ -74,11 +74,43 @@ Do one or the other, not both.
 - copies the `/voice` slash command into `.claude\commands\`
 - registers the hooks in `.claude\settings.json` — note that **hooks are read once, at
   session start**, so restart Claude Code afterwards
+- puts a **claude-voice shortcut on your Desktop** that opens the panel; `-NoShortcut`
+  skips it, and `.\make_shortcut.ps1` puts it back later (`-Remove` takes it away,
+  `-StartMenu` adds one there too)
 - writes every file as UTF-8 **without a BOM**, because a BOM in `settings.json` stops
   Claude Code reading it at all
 
 Nothing is installed system-wide, nothing is written outside the repo and your `.claude`
 folder, and nothing runs at boot. To undo it, delete the folder.
+
+## No administrator rights needed
+
+Nothing here elevates, and nothing wants to. Every file it writes is one you already own —
+the repo folder, your `.claude` folder, your Desktop, your temp folder. It reads `Program
+Files` only to look for Studio there; it never writes to it. It touches no registry key, adds
+no service, and installs nothing machine-wide. So it goes on a locked-down work laptop as
+easily as your own, with two provisos:
+
+- **Keep the folder somewhere you own** — `Documents`, not `Program Files`. The settings file
+  lives beside the code, so a folder you cannot write to is a voice that cannot remember
+  anything.
+- **PowerShell may refuse to run a script it did not sign**, which is a policy, not a
+  permission. Either of these gets past it without any rights at all:
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\install.ps1
+  ```
+
+  ```powershell
+  Get-Content .\install.ps1 -Raw | Invoke-Expression
+  ```
+
+  The second one works even where the first is blocked by group policy, because the rule is
+  about running script *files*.
+
+Qwen-TTS Studio is the one part that is not ours: take its **`.zip`** rather than the `.msi`
+if you cannot install software, unpack it into your own folder, and point the installer at it
+with `-StudioDir`.
 
 ## When it does not work
 

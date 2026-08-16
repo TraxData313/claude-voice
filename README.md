@@ -65,6 +65,7 @@ tool either way. Mind the space: `/voice on`, never `/voice_on`.
 | `set abby` | change voice. Any unambiguous substring: `set ab` works |
 | `repeat` | say the last answer again. `repeat-all` for the whole thing |
 | `stop` | cut off what is playing. The voice stays on (`break` works too) |
+| `volume 40` | how loud, 0 to 100 — audible mid-sentence |
 | `list` | every voice available |
 | `panel` | the window below |
 | `help` | every command, grouped |
@@ -76,19 +77,26 @@ go stale.
 
 <p align="center">
   <img src="docs/panel.png" width="390"
-       alt="The claude-voice panel: Max's portrait beside the line being spoken, turn off, stop and skip, a queue, a clickable history, and a tick per session">
+       alt="The Abby for Claude panel: Abby's portrait and the voice picker beside the line she is speaking, turn off, skip line and skip all, a volume slider, a queue, a clickable history, a tick per session, and Abby herself along the bottom">
 </p>
 
-`/voice panel` opens it. It floats on top, owns nothing, and asks the engine what is
-happening twice a second:
+Two ways in, and they open the same window: **`/voice panel`** from Claude Code or a
+terminal, and the **Abby for Claude** icon the installer leaves on your Desktop — no
+terminal needed, and it is how you get the window back after closing it. Either way it
+floats on top, owns nothing, and asks the engine what is happening twice a second:
 
 - **who is speaking**, what they are saying, and which project it came from — click the
   portrait to swap voice
-- **turn off · stop · skip** — the master switch, silence, or just this line
+- **turn off · skip line · skip all** — the master switch, this sentence, or this sentence
+  and everything queued behind it
+- **volume** — this app's own slider in the Windows mixer, so it takes effect in the middle
+  of a sentence rather than at the next one
 - **history — click any line to hear it again**, played from the audio you already heard, so
   there is no wait
 - **a tick per session** — untick one and that conversation stops being read aloud
 - voice, portrait size, **dark** and **on top**
+- and **Abby along the bottom**, as large as the window can show her whole — whoever is
+  actually speaking
 
 ## The voices
 

@@ -37,6 +37,7 @@ command — it is `/voice on`, never `/voice_on`.
 
 | command | does |
 |---|---|
+| `volume <0-100>` | How loud. It is this app's own slider in the Windows mixer. |
 | `max <chars>` | How much of a summary to read. Default 600. |
 | `narrate on|off` | Whether the short lines said mid-work are spoken. |
 | `watch on|off` | Follow sessions directly. Off means relying on hooks alone. |
@@ -51,7 +52,7 @@ command — it is `/voice on`, never `/voice_on`.
 
 ## Also worth knowing
 
-- Aliases: `repeat` = `replay, again`; `repeat-all` = `replay-all, all`.
+- Aliases: `repeat` = `replay, again`; `repeat-all` = `replay-all, all`; `volume` = `vol, loud`.
 - The voice is **one setting shared by every session**. Change it anywhere and it
   changes everywhere at once, including sessions already open, and it survives a
   reboot.

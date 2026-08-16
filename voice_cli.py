@@ -14,6 +14,7 @@ and make new ones.
     python voice_cli.py replay [n]          # say the last answer again (or the nth back)
     python voice_cli.py replay-all [n]      # the whole message, not just its summary
     python voice_cli.py narrate on|off      # speak the short lines said mid-work
+    python voice_cli.py volume <0-100>     # how loud, applied mid-sentence
     python voice_cli.py source embedding|icl
     python voice_cli.py max <chars>
     python voice_cli.py clone <sample.wav> --name "Ada"   # add a voice of your own
@@ -49,6 +50,7 @@ def cmd_status(state, _args):
     print(f"  voice output : {'ON' if state['enabled'] else 'off'}")
     print(f"  voice        : {_voice_label(state)}")
     print(f"  source       : {state['source']}")
+    print(f"  volume       : {_volume_percent(state)}%")
     print(f"  max chars    : {state['maxChars']}")
     print(f"  engine       : {engine}  (port {state['port']})")
     if health and health.get("watching"):
@@ -298,6 +300,33 @@ def cmd_source(state, args):
     print(f"Source set to {args[0]}.")
 
 
+def cmd_volume(state, args):
+    """How loud, 0 to 100. With nothing to set, says where it is."""
+    if not args:
+        print(f"Volume {_volume_percent(state)}%.")
+        return
+    want = args[0].strip().rstrip("%")
+    if not want.isdigit():
+        raise SystemExit("usage: voice_cli.py volume <0-100>")
+    level = max(0, min(100, int(want)))
+    # The engine holds the actual slider, because the slider belongs to the
+    # process making the noise. Tell it, and let it write the setting down.
+    # With no engine there is nothing to be loud, and the number waits.
+    try:
+        voice_lib.post(state["port"], "/volume", {"level": level / 100.0}, timeout=5)
+        print(f"Volume {level}%.")
+    except Exception:
+        voice_lib.patch_state(volume=level / 100.0)
+        print(f"Volume {level}% -- saved. The engine is not running to be loud yet.")
+
+
+def _volume_percent(state):
+    try:
+        return max(0, min(100, int(round(float(state.get("volume", 1.0)) * 100))))
+    except (TypeError, ValueError):
+        return 100
+
+
 def cmd_max(state, args):
     if not args or not args[0].isdigit():
         raise SystemExit("usage: voice_cli.py max <chars>")
@@ -418,6 +447,7 @@ HELP = [
         ("stop", "", "Cut off what is playing now. The voice stays on. ('break' works too.)"),
     ]),
     ("Tuning what you hear", [
+        ("volume", "<0-100>", "How loud. It is this app's own slider in the Windows mixer."),
         ("max", "<chars>", "How much of a summary to read. Default 600."),
         ("narrate", "on|off", "Whether the short lines said mid-work are spoken."),
         ("watch", "on|off", "Follow sessions directly. Off means relying on hooks alone."),
@@ -429,7 +459,8 @@ HELP = [
     ]),
 ]
 
-ALIASES = {"repeat": "replay, again", "repeat-all": "replay-all, all"}
+ALIASES = {"repeat": "replay, again", "repeat-all": "replay-all, all",
+           "volume": "vol, loud"}
 
 
 def cmd_help(state, args):
@@ -499,6 +530,7 @@ COMMANDS = {
     "list": cmd_list, "set": cmd_set, "say": cmd_say,
     "stop": cmd_stop, "break": cmd_stop, "shush": cmd_stop,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,
+    "volume": cmd_volume, "vol": cmd_volume, "loud": cmd_volume,
     "clone": cmd_clone,
     # Named several ways on purpose. This gets typed from memory while
     # listening, so the word that comes to mind should simply work rather than

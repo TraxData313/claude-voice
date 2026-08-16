@@ -70,6 +70,11 @@ def main():
         icon.save(os.path.join(HERE, f"{a.voice_id}-{size}.png"))
         if size == 256:
             icon.save(os.path.join(HERE, f"{a.voice_id}.png"))
+            # The desktop shortcut needs a real .ico. One file holds every
+            # size, and Windows takes the one it wants: 16px in a menu, 48
+            # on the desktop, 256 when the icons are set to huge.
+            icon.save(os.path.join(HERE, f"{a.voice_id}.ico"),
+                      sizes=[(s, s) for s in (256, 128, 64, 48, 32, 16)])
         print(f"  wrote {a.voice_id}-{size}.png")
 
 

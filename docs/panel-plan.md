@@ -245,3 +245,46 @@ went: clicking a line in the history says it again, from the audio it was heard 
 covers nearly everything play was for. `POST /play` is still there for the one case a click
 cannot cover — re-saying a line that was cut halfway, in full, since history holds only the
 part that was actually heard.
+
+**The buttons changed once more, and the names now carry the difference.** *Stop* and *skip*
+never said what set them apart, which is the queue: they are *skip line* — give up on this
+sentence, keep the ones behind it — and *skip all*, which empties the queue as well. Neither
+is called stop, because neither pauses anything: there is no place kept to come back to.
+*Skip line* is the everyday one, so it sits nearest the switch.
+
+**Volume is Windows' own, not a gain applied to the samples.** `winsound` plays a wav at
+whatever level it was written at, and scaling the samples would only reach the *next*
+sentence — the one already sounding would carry on, and every wav kept for replay would be
+stuck at the level it was written with. Windows keeps a volume per application, the slider
+in the mixer under our own name, and setting that is instant, applies mid-sentence, and
+applies to replayed audio too. Reaching it is `win_volume.py`: ctypes against the Core Audio
+vtables, because there is no Python binding and no `pip install` in this project. Two things
+to know — the vtable slot numbers *are* the contract, counted from 3 because 0 to 2 are
+always IUnknown's; and not every non-zero HRESULT is a failure, which is why the return type
+is declared `HRESULT` and ctypes is left to tell the difference.
+
+**The panel drives it through the engine, never directly.** The mixer slider belongs to the
+process making the noise, and that is the engine, not the window. So the slider POSTs
+`/volume` and the engine both applies it and writes it down — the same shape as every other
+control here. The panel echoes what `/state` reports, except while it is being dragged; and
+an engine too old to mention volume at all is left alone rather than assumed to be at full,
+which otherwise dragged the slider back to 100% the moment it was let go.
+
+**Abby along the bottom.** A full picture of her, whoever is speaking — she is the face of
+the thing rather than a readout of anything, and the window says whose voice it is in three
+other places. She is shown *whole*: scaled to one of the sizes Tk can actually reach, never
+stretched, clipped a little at the sides so she reaches both edges rather than floating in a
+margin, and never cropped top or bottom. Two rules make her behave. She takes only the room
+that is spare once every row has what it asked for — asking for a share of the window took
+it from the lists instead, and the queue and history simply left the window. And the
+window's own minimum reserves enough height for a picture worth looking at, so she always
+has somewhere to be. `docs/art/abby-384.png` and `-640.png` are the sources; two widths,
+because whole-number scaling from those two reaches roughly every 40 pixels across the range
+a panel is ever that wide.
+
+**The controls moved to the top, and the bottom became about her.** The voice dropdown sits
+directly under the portrait, where the name used to be printed — the dropdown says the name
+anyway, and that is already where you click to change voice — with the size box beside it,
+which is the only place that box has ever explained what it sizes. That empties the old foot
+row: the engine's state joined the credit line, and the bottom of the window is now the
+picture and who made the thing, with nothing in it to operate.
