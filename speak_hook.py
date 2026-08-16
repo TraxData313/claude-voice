@@ -126,13 +126,19 @@ def main():
         payload = {}
 
     event = payload.get("hook_event_name") or "Stop"
+
+    # Log before deciding anything. The whole point of this file is to tell
+    # "Claude Code never called us" apart from "we ran and chose to stay quiet",
+    # and a trace that sits below the early returns cannot do that.
+    trace(f"fired: {event}")
+
     state = voice_lib.load_state()
     if not state.get("enabled"):
+        trace("  voice is off")
         return
     if event != "Stop" and not state.get("narrate", True):
+        trace("  narration is off")
         return
-
-    trace(f"fired: {event}")
     text = payload.get("text") or last_assistant_text(payload.get("transcript_path"))
     if not text.strip():
         return

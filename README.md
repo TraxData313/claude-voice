@@ -113,9 +113,28 @@ Read `logs\hook.log` **first**. One line goes in per hook invocation, so an empt
 means Claude Code never ran the hook at all — a different problem from the hook running
 and failing. `logs\speak-server.log` has the engine's side, including model load errors.
 
-The most common cause of silence is the hook not finding Python. It runs without a shell
-profile, so anything conda-activated or Store-aliased is invisible to it; `install.ps1`
-writes the absolute interpreter path for exactly this reason.
+Two causes account for almost all silence, and the log tells them apart.
+
+**Entries in `hook.log`, but nothing spoken** — the hook ran. The line says what it
+decided; check `speak-server.log` for the engine's side.
+
+**No entries at all** — Claude Code never called it. Either the session predates the
+config (hooks load at session start, so restart), or the hooks block was rejected. Two
+things get it rejected:
+
+- *The interpreter cannot be found.* Hooks run without a shell profile, so anything
+  conda-activated or Store-aliased is invisible; `install.ps1` writes the absolute path
+  for this reason.
+- *An entry is missing the field its event expects.* `PreToolUse` matches on tool name and
+  wants a `matcher`; `Stop` fires once per turn and takes none. One malformed entry can
+  invalidate the whole block, so a bad `PreToolUse` will silence `Stop` along with it.
+
+If the log stays empty after a restart with both of those correct, the hook may not be
+loading from the project at all — try installing it into your user settings instead:
+
+```powershell
+.\install.ps1 -ProjectDir $env:USERPROFILE
+```
 
 ## How it fits together
 

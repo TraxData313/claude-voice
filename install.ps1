@@ -94,32 +94,47 @@ $hookScript = Join-Path $repo "speak_hook.py"
 $command = if ("$PythonExe$hookScript" -match '\s') { "`"$PythonExe`" `"$hookScript`"" }
            else { "$PythonExe $hookScript" }
 
+# On an object with no properties at all, PSObject.Properties.Name is null in
+# PowerShell 5.1 and calling .Contains() on it throws -- which is precisely the
+# fresh-install case. Ask the property bag directly instead.
+function Has-Prop($obj, $name) { return $null -ne $obj.PSObject.Properties[$name] }
+
 if (Test-Path $settingsPath) {
     $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
 } else {
     $settings = [PSCustomObject]@{}
 }
-if (-not $settings.PSObject.Properties.Name.Contains("hooks")) {
+if (-not (Has-Prop $settings "hooks")) {
     $settings | Add-Member -NotePropertyName hooks -NotePropertyValue ([PSCustomObject]@{})
 }
 
 # Stop catches the finished answer; PreToolUse catches the short lines said
 # mid-work, which Stop never sees because the turn has not ended.
 foreach ($event in @("Stop", "PreToolUse")) {
-    $entry = [PSCustomObject]@{
-        hooks = @([PSCustomObject]@{ type = "command"; command = $command; timeout = 15 })
+    # PreToolUse entries are matched against the tool name and want a "matcher";
+    # Stop fires once per turn and takes none. An entry missing the field its
+    # event expects can invalidate the whole hooks block, silencing both.
+    if ($event -eq "PreToolUse") {
+        $entry = [PSCustomObject]@{
+            matcher = "*"
+            hooks = @([PSCustomObject]@{ type = "command"; command = $command; timeout = 15 })
+        }
+    } else {
+        $entry = [PSCustomObject]@{
+            hooks = @([PSCustomObject]@{ type = "command"; command = $command; timeout = 15 })
+        }
     }
 
     # Keep any hooks on this event that are not ours; replace ours if present.
     $existing = @()
-    if ($settings.hooks.PSObject.Properties.Name.Contains($event)) {
+    if (Has-Prop $settings.hooks $event) {
         $existing = @($settings.hooks.$event | Where-Object {
             -not ($_.hooks | Where-Object { $_.command -like "*speak_hook.py*" })
         })
     }
     $merged = @($existing) + @($entry)
 
-    if ($settings.hooks.PSObject.Properties.Name.Contains($event)) {
+    if (Has-Prop $settings.hooks $event) {
         $settings.hooks.$event = $merged
     } else {
         $settings.hooks | Add-Member -NotePropertyName $event -NotePropertyValue $merged
