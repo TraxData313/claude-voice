@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="https://traxdata313.github.io/claude-voice/" title="Hear her speak">
-    <img src="docs/art/abby.jpg" width="620" alt="Abby">
+    <img src="docs/Abby-Full-Size.png" width="620" alt="Abby">
   </a>
 </p>
 
