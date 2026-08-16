@@ -1,0 +1,71 @@
+name: Something is wrong
+description: It went quiet, spoke wrongly, crashed, or the panel misbehaved.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Silence has no error message, which is why two of the fields below are worth
+        more than the description: the **version** says which code is actually running,
+        and the **hook log** says whether Claude Code ever called this at all.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The number `/voice status` prints. "unknown" is an answer too — it means this copy predates version numbers.
+      placeholder: 1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: shape
+    attributes:
+      label: What kind of wrong
+      description: Roughly. The right guess saves a round trip; the wrong one costs nothing.
+      options:
+        - Nothing was spoken at all
+        - It spoke, then stopped early or cut off mid-sentence
+        - Wrong voice, or the wrong language
+        - The sound itself was wrong — buzzing, garbled, doubled, overlapping
+        - The panel
+        - Installing or setting up
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What you did, and what you expected instead
+      description: A single answer that should have been spoken and was not is a better report than a general description of the silence.
+    validations:
+      required: true
+
+  - type: textarea
+    id: hooklog
+    attributes:
+      label: The last few lines of logs\hook.log
+      description: >
+        One line is written per hook call. An empty file means Claude Code never ran
+        the hook at all, which is an entirely different problem from the hook running
+        and failing — so "the file is empty" is itself the answer, and worth saying.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: machine
+    attributes:
+      label: Windows and graphics card
+      description: The model matters mainly when the engine is slow or will not load at all.
+      placeholder: Windows 11 26200, RTX 4070
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before opening this
+      options:
+        - label: I read [when it goes quiet](https://github.com/TraxData313/claude-voice/blob/main/docs/troubleshooting.md)
+        - label: The engine was actually running — `/voice status` said so
+        - label: I restarted Claude Code after the last setup run (hooks are read once, at session start)

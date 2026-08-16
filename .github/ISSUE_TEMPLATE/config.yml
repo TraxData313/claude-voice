@@ -1,0 +1,13 @@
+# Blank issues are off so that a report arrives with the version and the hook log
+# already in it. Anything that is not a bug or an idea has somewhere better to go,
+# and both places are one click away right here.
+blank_issues_enabled: false
+
+contact_links:
+  - name: It went quiet — read this first
+    url: https://github.com/TraxData313/claude-voice/blob/main/docs/troubleshooting.md
+    about: Silence has no error message. Most of them are one of a handful of causes, and this walks through them in order.
+
+  - name: A question, or showing what you made
+    url: https://github.com/TraxData313/claude-voice/discussions
+    about: Does it work on my card, can it speak my language, here is the voice I cloned. Anything that is not yet a bug belongs here.

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>claude-voice — hear the voices</title>
+<title>Abby for Claude</title>
 <meta name="description" content="Listen to Abby and Max, the two voices that ship with claude-voice: Claude Code reads its answers aloud on your own machine, with no cloud, no API key and no audio leaving the computer.">
 <link rel="canonical" href="https://traxdata313.github.io/claude-voice/">
 <link rel="icon" href="icons/abby-48.png">
@@ -144,8 +144,55 @@
     Abby and Max look the way they do. The characters are ours; the debt is to the style.</p>
     <p>created by <a href="https://github.com/TraxData313">TraxData313</a> ·
     <a href="https://github.com/TraxData313/claude-voice">GitHub repo</a></p>
+    <p>This page counts visits with <a href="https://www.goatcounter.com/">GoatCounter</a>:
+    no cookies, no accounts, nothing stored that could point back at you. The program
+    itself still speaks entirely on your own machine.</p>
   </footer>
 
 </div>
+
+<!-- GitHub Pages keeps no logs an owner can read, so a visit is only counted if
+     the page counts it itself. GoatCounter sets no cookies and keeps no personal
+     data, which is why there is no consent banner here and nothing to consent to.
+
+     REPLACE your-code-here (both lines) with the code chosen when signing up at
+     goatcounter.com — until then these requests resolve to nothing and no visit
+     is ever recorded. -->
+<script data-goatcounter="https://your-code-here.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+<noscript><img alt="" src="https://your-code-here.goatcounter.com/count?p=/no-script"></noscript>
+
+<script>
+  // A view alone cannot tell a reader from a passer-by. Two things can: whether a
+  // voice was actually listened to, and whether the reader went on to the repo.
+  // Each is counted at most once per visit, so replaying Abby is not a second
+  // listener and does not flatter the numbers.
+  window.addEventListener('load', function () {
+    function count(path, title) {
+      if (window.goatcounter && window.goatcounter.count) {
+        window.goatcounter.count({ path: path, title: title, event: true });
+      }
+    }
+
+    document.querySelectorAll('audio').forEach(function (player) {
+      var counted = false;
+      player.addEventListener('play', function () {
+        if (counted) return;
+        counted = true;
+        var who = (player.getAttribute('src') || '').split('/').pop().replace('.wav', '');
+        count('listened-' + who, 'Played a sample: ' + who);
+      });
+    });
+
+    var left = false;
+    document.querySelectorAll('a[href*="TraxData313/claude-voice"]').forEach(function (link) {
+      link.addEventListener('click', function () {
+        if (left) return;
+        left = true;
+        count('to-the-repo', 'Went on to the repository');
+      });
+    });
+  });
+</script>
 </body>
 </html>

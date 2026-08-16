@@ -1,0 +1,42 @@
+name: An idea
+description: Something it should do, or should do differently.
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Worth knowing before you write: this speaks on your own machine, and keeping it
+        that way — no cloud, no API key, no account, nothing leaving the computer — outranks
+        any feature. An idea that needs a server is not a small change here; it is a
+        different project.
+
+  - type: textarea
+    id: want
+    attributes:
+      label: What you want it to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What you are doing when you want it
+      description: >
+        The situation matters more than the solution. Knowing when you reached for
+        something often turns up a simpler answer than the one being asked for.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part
+      options:
+        - The voices themselves — cloning, quality, languages
+        - What gets spoken, and how it is written
+        - The panel
+        - Commands and settings
+        - Installing and updating
+        - Somewhere else, or not sure
+    validations:
+      required: true
