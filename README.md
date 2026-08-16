@@ -139,8 +139,8 @@ Two ship with it, both the author's own — original characters, borrowed from n
 
 | | | |
 |---|---|---|
-| <img src="docs/icons/abby-256.png" width="150" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and warm. Calm, never in a hurry — the voice for careful work, tricky debugging, and being talked through something gently. |
-| <img src="docs/icons/max-256.png" width="150" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — the voice for grinding through a long list. |
+| <img src="docs/art/abby.jpg" width="300" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and warm. Calm, never in a hurry — the voice for careful work, tricky debugging, and being talked through something gently. |
+| <img src="docs/art/max.jpg" width="300" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — the voice for grinding through a long list. |
 
 ▶ **[Hear them both](https://traxdata313.github.io/claude-voice/)** — GitHub will not play
 audio inside a README, so the two samples live on a page of their own.
