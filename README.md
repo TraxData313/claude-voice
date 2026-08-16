@@ -55,6 +55,32 @@ resumes where it stopped if the connection drops.
 **No administrator rights anywhere**, so it goes on a locked-down work laptop as easily as
 your own. **[By hand, other builds, every-project install →](docs/install.md)**
 
+## Or let Claude Code install it
+
+```
+/plugin marketplace add TraxData313/claude-voice
+/plugin install claude-voice@claude-voice
+```
+
+That puts `/claude-voice:voice` in your hands immediately. It does **not** fetch the engine
+and the model — that is the 3 GB below — so the first run says so and points you at
+`setup.ps1`, once. After that the plugin updates itself with `/plugin update`.
+
+## What it needs
+
+| | |
+|---|---|
+| **Windows** | the engine is a Windows build; there is no macOS or Linux one |
+| **An NVIDIA card** | both engine builds are CUDA builds, and there is no CPU build to fall back to |
+| **~4 GB of video memory** | **an estimate, not a measurement.** The models are 2.2 GB of weights and want room to work in. Only a 16 GB card has actually been run, so if you try it on a small one, say how it went |
+| **~3 GB of disk** | 0.8 GB of engine, 2.2 GB of models |
+| **Python** | fetched for you if you have none. Standard library only — no pip, no virtual environment |
+| **No admin rights** | at any point |
+
+While it runs, the engine holds about 350 MB of ordinary memory and does not grow with use.
+The first model load takes 40–60 seconds; after that she stays warm and the first words of
+an answer arrive in about a second.
+
 ## Usage cheatsheet
 
 `/voice <thing>` in Claude Code, or `python voice_cli.py <thing>` in a terminal — the same

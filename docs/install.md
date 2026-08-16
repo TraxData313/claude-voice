@@ -19,6 +19,34 @@ where it stopped rather than starting again.
 **No administrator rights are needed at any point** — [why that is true, and what to do on a
 locked-down laptop](#no-administrator-rights-needed).
 
+## What your machine needs
+
+| | |
+|---|---|
+| **Windows** | the engine is a Windows build; there is no macOS or Linux one |
+| **An NVIDIA card** | both Studio builds below are CUDA builds. There is no CPU build to fall back to, and nothing here checks before it starts downloading — so on other hardware this fails at model load rather than at the door |
+| **~4 GB of video memory** | **an estimate, not a measurement.** The talker is 1.94 GB and the tokenizer 0.27 GB, and both are loaded onto the card with room to work in. Only a 16 GB card has actually been run. If you try a smaller one, please [say how it went](https://github.com/TraxData313/claude-voice/issues) — it is the one number here nobody has established |
+| **~3 GB of disk** | 0.81 GB of unpacked engine, 2.2 GB of models |
+| **Python** | fetched for you if you have none. Standard library only |
+
+While it runs the engine holds about 350 MB of ordinary memory, and that figure does not
+grow with use — it was measured flat across a thousand generations. The first model load
+takes 40–60 seconds; afterwards she stays warm and the first words arrive in about a second.
+
+## Or install it as a plugin
+
+Claude Code can carry the `/voice` command itself:
+
+```
+/plugin marketplace add TraxData313/claude-voice
+/plugin install claude-voice@claude-voice
+```
+
+This installs the command as `/claude-voice:voice` and keeps it updated with `/plugin
+update`. It does **not** fetch the engine or the model, because a plugin install is not the
+place to pull down 3 GB — the first run tells you so and points you at `setup.ps1`. Run that
+once and everything works.
+
 ## Or do it yourself
 
 One command does everything the paragraph above describes:
