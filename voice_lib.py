@@ -45,11 +45,28 @@ DEFAULTS = {
     "watch": True,
     # Pause between one message and the next, so the seam is audible.
     "gapSeconds": 0.45,
-    # Name the session when the speaker changes: 'title', 'project', or 'off'.
-    "sessionLabel": "title",
+    # Say where a line came from when the speaker changes, and only then.
+    # 'project' is the folder you are working in and is two words; 'title' is
+    # the conversation's own name and is a sentence; 'off' says nothing.
+    "sessionLabel": "project",
     # After a restart the watcher resumes where it left off, but will not read
     # anything older than this -- catching up after a crash, not after a night.
     "catchupSeconds": 300,
+
+    # --- the panel --------------------------------------------------------
+    # How many past utterances keep their audio, so replaying one is instant
+    # and costs no synthesis at all.
+    "historyKeep": 40,
+    # Transcripts the panel has muted, as the watcher spells their paths.
+    "mutedSessions": [],
+    # Where the panel last sat, written when it closes.
+    "panelGeometry": "",
+    # Whether it floats over everything else. Its own tick box writes this.
+    "panelTopmost": True,
+    # Dark colours in the panel. Its own tick box writes this too.
+    "panelDark": False,
+    # How big the speaker's portrait is drawn, in pixels.
+    "panelFace": 128,
 }
 
 
@@ -67,6 +84,20 @@ def save_state(state):
     with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
         json.dump(state, fh, indent=2)
         fh.write("\n")
+
+
+def patch_state(**changes):
+    """Change a few keys without writing back a stale copy of the rest.
+
+    Four processes now hold a config in memory -- the engine loaded one when it
+    started, the panel polls, the CLI and the hook read one per run -- and
+    saving any of those wholesale would quietly undo whatever the others
+    changed since. So re-read, edit, write.
+    """
+    state = load_state()
+    state.update(changes)
+    save_state(state)
+    return state
 
 
 def voice_roots(state=None):
@@ -429,6 +460,21 @@ def announce_voice(voice, path=None):
     return True
 
 
+def set_voice(voice_id, state=None):
+    """Switch voices: config, and the note every new session reads at startup.
+
+    Both the CLI's 'set' and the panel's dropdown come through here, so the two
+    cannot drift into doing different halves of the job.
+
+    Returns (voice, announced) -- announced is False when CLAUDE.md has no
+    markers to write between, which is not an error, just nothing to do.
+    """
+    state = state or load_state()
+    voice, _ = resolve(voice_id, state.get("source"), state)
+    patch_state(voice=voice["id"])
+    return voice, announce_voice(voice)
+
+
 def post(port, path, payload=None, timeout=5):
     import urllib.request
 
@@ -472,6 +518,27 @@ def start_server(state, wait=0):
             return True
         time.sleep(1.0)
     return bool(server_alive(port))
+
+
+def start_panel(state=None):
+    """Open the panel window, detached from whatever opened it.
+
+    Same shape as start_server, and for the same reason: whoever ran the
+    command should get their prompt back, and the window should outlive it.
+    Its stderr goes to a log because a Tk window that fails to appear leaves
+    nothing on screen to read.
+    """
+    import subprocess
+
+    state = state or load_state()
+    os.makedirs(LOG_DIR, exist_ok=True)
+    log = open(os.path.join(LOG_DIR, "panel.log"), "a", encoding="utf-8")
+    DETACHED = 0x00000008 | 0x08000000          # DETACHED_PROCESS | CREATE_NO_WINDOW
+    subprocess.Popen(
+        [_python(), os.path.join(ROOT, "panel.py"), "--port", str(state["port"])],
+        stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+        creationflags=DETACHED, close_fds=True, cwd=ROOT)
+    return True
 
 
 def _python():

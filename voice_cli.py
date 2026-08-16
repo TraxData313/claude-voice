@@ -3,6 +3,8 @@ The switch and the dial: turn Claude's voice on or off, choose whose it is,
 and make new ones.
 
     python voice_cli.py on|off|toggle       # the button
+    python voice_cli.py on --panel          # ...and open the window with it
+    python voice_cli.py panel               # what is playing, and the switches
     python voice_cli.py status
     python voice_cli.py list [filter]       # what is available to sound like
     python voice_cli.py set <voice-id>      # accepts any unambiguous substring
@@ -65,10 +67,12 @@ def cmd_status(state, _args):
             print(line)
 
 
-def cmd_on(state, _args):
+def cmd_on(state, args):
     state["enabled"] = True
     voice_lib.save_state(state)
     print(f"Voice ON -- {_voice_label(state)}")
+    if args and args[0].lstrip("-") == "panel":
+        cmd_panel(state, [])
     if voice_lib.server_alive(state["port"]):
         print("Engine already warm.")
         return
@@ -136,11 +140,12 @@ def _persona_lines(state):
 def cmd_set(state, args):
     if not args:
         raise SystemExit("usage: voice_cli.py set <voice-id>")
-    voice, _ = voice_lib.resolve(args[0], state["source"], state)
+    # The panel's dropdown comes through the same function, so the two cannot
+    # end up doing different halves of the job.
+    voice, announced = voice_lib.set_voice(args[0], state)
     state["voice"] = voice["id"]
-    voice_lib.save_state(state)
     print(f"Voice set to {_voice_label(state)}")
-    if voice_lib.announce_voice(voice):
+    if announced:
         print("  New sessions will know they are speaking as "
               f"{voice['name']} without being asked.")
 
@@ -265,6 +270,18 @@ def cmd_start(state, _args):
           "Did not come up in time -- check logs/speak-server.log")
 
 
+def cmd_panel(state, _args):
+    """Open the little window that shows what is being said, and steers it."""
+    try:
+        import tkinter                                    # noqa: F401
+    except ImportError:
+        raise SystemExit("this Python has no tkinter, so the panel cannot open")
+    voice_lib.start_panel(state)
+    print("Panel opened -- it floats on top. Closing it changes nothing else.")
+    if not voice_lib.server_alive(state["port"]):
+        print("  The engine is not running; the panel has a button to start it.")
+
+
 def cmd_kill(state, _args):
     try:
         voice_lib.post(state["port"], "/quit", timeout=3)
@@ -383,10 +400,11 @@ REPO_URL = "https://github.com/TraxData313/claude-voice"
 # emits docs/commands.md from it, so the documentation cannot drift from the tool.
 HELP = [
     ("Turning it on and off", [
-        ("on", "", "Start speaking. Loads the engine if it is cold (40-60s the first time)."),
+        ("on", "[--panel]", "Start speaking. Loads the engine if it is cold (40-60s the first time)."),
         ("off", "", "Stop speaking. The engine stays warm, so 'on' is instant."),
         ("toggle", "", "Whichever of the two you are not."),
         ("status", "", "Voice, engine, and whether it is following your sessions."),
+        ("panel", "", "A small window on top: what is playing, the queue, and the switches."),
     ]),
     ("Choosing a voice", [
         ("list", "[filter]", "Every voice available. Filter by name or culture."),
@@ -477,6 +495,7 @@ def cmd_narrate(state, args):
 
 COMMANDS = {
     "on": cmd_on, "off": cmd_off, "toggle": cmd_toggle, "status": cmd_status,
+    "panel": cmd_panel, "window": cmd_panel,
     "list": cmd_list, "set": cmd_set, "say": cmd_say,
     "stop": cmd_stop, "break": cmd_stop, "shush": cmd_stop,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,

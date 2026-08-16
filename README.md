@@ -22,6 +22,17 @@ It speaks **two** things, and the difference is the whole design:
 
 Short answers are read whole. Nothing is repeated, nothing talks over anything else.
 
+<p align="center">
+  <img src="docs/panel.png" width="390"
+       alt="The claude-voice panel: Abby's portrait beside the line being spoken, stop, play and skip, a queue, a clickable history, and a tick per session">
+</p>
+
+<p align="center">
+  <em><strong>Abby</strong>, mid-sentence. The panel shows what is being said and which
+  conversation it came from, what is waiting behind it, and everything just said —
+  <br>click any line to hear it again. <a href="#the-panel">More about it below ↓</a></em>
+</p>
+
 ## Try it in five minutes
 
 Windows only. Two things have to be installed by hand first — both are ordinary installers,
@@ -96,16 +107,21 @@ go stale.
 
 ### The panel
 
-`/voice panel` opens a plain little window that floats over everything — a tick box turns
-that off — and shows what the voice is actually doing:
+`/voice panel` opens the window pictured at the top of this page. It floats over
+everything — a tick box turns that off — and shows what the voice is actually doing:
 
-- the line being spoken, and which session it came from
-- **stop**, **play** (say that line again from the top) and **skip** (drop it, keep the rest)
+- the line being spoken, headed by the project and conversation it came from, with the
+  speaker's portrait and name beside it. **Click the portrait to swap voice**
+- **turn off / turn on** — the master switch, the same one `/voice off` throws
+- **stop** — silence, and drop everything waiting. **skip** — abandon this line only and
+  go straight on to the next one
 - what is queued behind it
 - everything said recently — **click a line to hear it again**, played from the audio it
   was heard as, so there is nothing to re-synthesise and no wait
-- a tick per session: untick one and that conversation stops being read aloud
-- the voice, as a dropdown
+- a tick per session, named *project · conversation*: untick one and that conversation
+  stops being read aloud
+- the voice as a dropdown, a portrait size (pick one or type a number), and tick boxes
+  for **dark** and **on top**
 
 It holds nothing of its own. It asks the engine what is happening twice a second and turns
 every click into a request, so closing it changes nothing, and opening it before the engine
@@ -117,8 +133,8 @@ Two ship with it, both the author's own — original characters, borrowed from n
 
 | | | |
 |---|---|---|
-| <img src="docs/icons/abby-96.png" width="88" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and warm. Calm, never in a hurry — the voice for careful work, tricky debugging, and being talked through something gently. |
-| <img src="docs/icons/max-96.png" width="88" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — the voice for grinding through a long list. |
+| <img src="docs/icons/abby-256.png" width="150" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and warm. Calm, never in a hurry — the voice for careful work, tricky debugging, and being talked through something gently.<br>▶ **[Hear Abby](docs/samples/abby.wav?raw=1)** |
+| <img src="docs/icons/max-256.png" width="150" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — the voice for grinding through a long list.<br>▶ **[Hear Max](docs/samples/max.wav?raw=1)** |
 
 Switch any time with `/voice set abby` or `/voice set max`. The manner changes tone, never
 substance: neither voice will cheer a result that has not been checked.

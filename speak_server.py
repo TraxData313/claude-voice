@@ -10,6 +10,17 @@ behind a tiny HTTP API on localhost:
     POST /health  {"ready": true, "speaking": false, ...}
     POST /quit    shut the process down
 
+The panel (panel.py) drives the rest, and owns no state of its own -- it draws
+whatever /state last said and turns every click into one of these:
+
+    POST /state         now playing, queue, history, sessions, voices
+    POST /enabled       {"on": false} -- the master switch, as 'voice off' does
+    POST /skip          drop this line, keep the queue
+    POST /play          say the current line again from its start
+    POST /replay-id     {"id": 16} -- play kept audio, synthesising nothing
+    POST /mute-session  {"path": "...jsonl", "muted": true}
+    POST /set-voice     {"voice": "max"}
+
 Two threads do the work. The engine thread owns the QwenEngine and never lets
 anyone else touch it -- a JNIEnv pointer belongs to the thread that made the
 JVM, so calling generate() from an HTTP worker would be undefined behaviour.
@@ -19,6 +30,8 @@ makes speech start on the first sentence instead of the last.
 """
 
 import argparse
+import collections
+import itertools
 import json
 import os
 import queue
@@ -35,6 +48,9 @@ import voice_lib
 from qwen_engine import Engine, write_wav
 
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "claude-voice")
+# Played wavs move here instead of being deleted, so hearing something again
+# costs nothing. Only the last historyKeep utterances are kept.
+HISTORY_DIR = os.path.join(CACHE_DIR, "history")
 
 
 def log(msg):
@@ -42,13 +58,39 @@ def log(msg):
 
 
 class Job:
-    __slots__ = ("chunks", "voice", "kwargs", "cancelled")
+    """One utterance: the chunks it was split into, and where it came from.
 
-    def __init__(self, chunks, voice, kwargs):
-        self.chunks = chunks
+    The metadata is not decoration. The panel draws its queue and its history
+    out of these fields, and saying a line again needs to know both its words
+    and whose voice said them.
+    """
+
+    __slots__ = ("id", "chunks", "voice", "kwargs", "text", "session", "project",
+                 "when", "cancelled")
+    _ids = itertools.count(1)
+
+    def __init__(self, chunks, voice, kwargs, text=None, session=None, project=None):
+        self.id = next(Job._ids)
+        self.chunks = list(chunks)
         self.voice = voice
         self.kwargs = kwargs
+        # What was said, without the session name the watcher may have prefixed
+        # -- the label is shown in its own column rather than read as the line.
+        self.text = text if text is not None else " ".join(self.chunks)
+        self.session = session
+        self.project = project
+        self.when = time.time()
         self.cancelled = False
+
+    def as_dict(self):
+        return {
+            "id": self.id,
+            "text": self.text[:200],
+            "session": self.session,
+            "project": self.project,
+            "voice": self.voice,
+            "when": time.strftime("%H:%M", time.localtime(self.when)),
+        }
 
 
 class Speaker:
@@ -57,12 +99,18 @@ class Speaker:
         self.jobs = queue.Queue()
         self.play_q = queue.Queue(maxsize=2)
         self.lock = threading.Lock()
-        self.current = None
+        self.current = None           # being synthesised
+        self.playing = None           # actually coming out of the speakers
+        self.history = collections.deque()
+        self.hist_lock = threading.Lock()
         self.ready = threading.Event()
         self.error = None
         self.speaking = False
         self.spoken = 0
         os.makedirs(CACHE_DIR, exist_ok=True)
+        # Last run's wavs are orphans: the deque that knew which utterance each
+        # one belonged to died with that process.
+        _empty_dir(HISTORY_DIR)
         threading.Thread(target=self._engine_loop, name="engine", daemon=True).start()
         threading.Thread(target=self._play_loop, name="player", daemon=True).start()
 
@@ -82,11 +130,100 @@ class Speaker:
 
     def cancel(self):
         with self.lock:
-            if self.current:
-                self.current.cancelled = True
+            for job in (self.current, self.playing):
+                if job:
+                    job.cancelled = True
         self._drain(self.jobs)
         self._drain(self.play_q)
         winsound.PlaySound(None, winsound.SND_PURGE)
+
+    def skip_current(self):
+        """Drop the line being spoken and let the queue carry on.
+
+        cancel() empties everything, which is what 'stop' means and not what
+        'skip' means: not wanting to hear this line is no reason to throw away
+        the three waiting behind it.
+        """
+        with self.lock:
+            job = self.playing or self.current
+            if job is None:
+                return False
+            job.cancelled = True
+        held = []
+        while True:
+            try:
+                item = self.play_q.get_nowait()
+            except queue.Empty:
+                break
+            if item[0] is job:
+                if not item[2]:
+                    _unlink(item[1])
+            else:
+                held.append(item)
+        for item in held:        # never more than was taken out, so it cannot block
+            self.play_q.put(item)
+        winsound.PlaySound(None, winsound.SND_PURGE)
+        return True
+
+    def repeat_current(self):
+        """Say the current line again from its start.
+
+        This is the 'play' half of a pause that cannot really pause: winsound
+        has no way to resume a wav it stopped, so the honest thing to offer is
+        starting the line over rather than pretending to have kept the place.
+        """
+        with self.lock:
+            job = self.playing or self.current
+        if job is None:
+            with self.hist_lock:
+                job = self.history[-1]["job"] if self.history else None
+        if job is None or not job.chunks:
+            return None
+        again = Job(job.chunks, job.voice, job.kwargs, job.text, job.session)
+        self.submit(again, barge=True)
+        return again
+
+    def replay(self, job_id):
+        """Play a kept utterance again, straight from its wavs.
+
+        Nothing is synthesised: the audio is the same audio, so this is
+        instant however long the line was.
+        """
+        with self.hist_lock:
+            rec = next((r for r in self.history if r["job"].id == job_id), None)
+            wavs = list(rec["wavs"]) if rec else []
+        if not wavs:
+            return None
+        src = rec["job"]
+        self.cancel()            # asking for this one is asking for it now
+        again = Job(src.chunks, src.voice, src.kwargs, src.text, src.session)
+        # The play queue is deliberately short, so feeding it blocks -- and an
+        # HTTP handler must not. Hand it to a thread that only ever enqueues.
+        threading.Thread(target=self._feed, args=(again, wavs),
+                         name="replay", daemon=True).start()
+        return again
+
+    def snapshot(self, keep=12):
+        """Everything the panel draws, taken in one pass."""
+        with self.lock:
+            cur = self.playing or self.current
+        # Peeking inside a Queue is reaching past its front door, so hold its
+        # own mutex while doing it.
+        with self.jobs.mutex:
+            waiting = list(self.jobs.queue)
+        with self.play_q.mutex:
+            ahead = [item[0] for item in self.play_q.queue]
+        queued, seen = [], {id(cur)}
+        for job in ahead + waiting:
+            if id(job) in seen:
+                continue
+            seen.add(id(job))
+            queued.append(job.as_dict())
+        with self.hist_lock:
+            past = [r["job"] for r in self.history]
+        history = [j.as_dict() for j in reversed(past) if j is not cur][:keep]
+        return {"current": cur.as_dict() if cur else None,
+                "queue": queued, "history": history}
 
     def status(self):
         return {
@@ -106,8 +243,56 @@ class Speaker:
                 item = q.get_nowait()
             except queue.Empty:
                 return
-            if isinstance(item, tuple):
-                _unlink(item[1])
+            if isinstance(item, tuple) and not item[2]:
+                _unlink(item[1])         # a history wav is not ours to delete
+
+    # A shade longer than the clip: PlaySound takes a moment to get going, and
+    # clipping the tail off every chunk would be heard as a stutter.
+    TAIL = 0.2
+
+    def _play(self, job, path):
+        """Play one chunk, and come back the instant it is cancelled.
+
+        Asynchronously, and deliberately so. A synchronous PlaySound cannot be
+        interrupted at all: a purge from another thread does not cut it, it
+        queues up behind it and returns once the clip has finished of its own
+        accord -- which quietly made 'stop' mean 'stop after this sentence',
+        measurably so on a long one. Played async, the same purge cuts within a
+        twentieth of a second, and the wav's own header says how long to wait
+        for one that nobody cuts.
+        """
+        winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC
+                           | winsound.SND_NODEFAULT)
+        end = time.monotonic() + _wav_seconds(path) + self.TAIL
+        while time.monotonic() < end:
+            if job.cancelled:
+                winsound.PlaySound(None, winsound.SND_PURGE)
+                return
+            time.sleep(0.05)
+
+    def _feed(self, job, wavs):
+        for path in wavs:
+            if job.cancelled or not os.path.exists(path):
+                return
+            self.play_q.put((job, path, True))
+
+    def _keep(self, job, path):
+        """Move a chunk that has been heard into the history ring."""
+        with self.hist_lock:
+            rec = next((r for r in self.history if r["job"] is job), None)
+            if rec is None:
+                rec = {"job": job, "wavs": []}
+                self.history.append(rec)
+                limit = max(1, int(self.state.get("historyKeep", 40)))
+                while len(self.history) > limit:
+                    for wav in self.history.popleft()["wavs"]:
+                        _unlink(wav)
+            dest = os.path.join(HISTORY_DIR, f"{job.id}-{len(rec['wavs'])}.wav")
+            try:
+                os.replace(path, dest)
+            except OSError:
+                return _unlink(path)
+            rec["wavs"].append(dest)
 
     def _engine_loop(self):
         try:
@@ -144,7 +329,7 @@ class Speaker:
                 if job.cancelled:
                     _unlink(path)
                     break
-                self.play_q.put((job, path))       # blocks while the player is behind
+                self.play_q.put((job, path, False))    # blocks while the player is behind
             with self.lock:
                 if self.current is job:
                     self.current = None
@@ -152,7 +337,7 @@ class Speaker:
     def _play_loop(self):
         last = None
         while True:
-            job, path = self.play_q.get()
+            job, path, keep = self.play_q.get()
             # A beat between one message and the next. The seam is useful --
             # it is how you hear that a new line has started rather than the
             # same one continuing -- so make it deliberate instead of leaving
@@ -160,16 +345,28 @@ class Speaker:
             if last is not None and job is not last:
                 time.sleep(self.state.get("gapSeconds", 0.45))
             last = job
+            played = False
             try:
                 if not job.cancelled:
+                    with self.lock:
+                        self.playing = job
                     self.speaking = True
-                    winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_NODEFAULT)
+                    self._play(job, path)
                     self.spoken += 1
+                    played = True
             except Exception as exc:
                 log(f"playback failed: {exc}")
             finally:
                 self.speaking = False
-                _unlink(path)
+                with self.lock:
+                    if self.playing is job:
+                        self.playing = None
+                if keep:
+                    pass                      # already in the ring, and shared
+                elif played:
+                    self._keep(job, path)     # heard once, so worth keeping
+                else:
+                    _unlink(path)             # cancelled before it was ever heard
 
 
 def _tidy_label(label, words=6):
@@ -186,6 +383,27 @@ def _tidy_label(label, words=6):
 def _unlink(path):
     try:
         os.remove(path)
+    except OSError:
+        pass
+
+
+def _wav_seconds(path, default=6.0):
+    """How long a clip runs, from its own header. Cheap, and exact."""
+    import wave
+
+    try:
+        with wave.open(path) as fh:
+            return fh.getnframes() / float(fh.getframerate() or 24000)
+    except Exception:
+        return default
+
+
+def _empty_dir(path):
+    os.makedirs(path, exist_ok=True)
+    try:
+        for entry in os.scandir(path):
+            if entry.is_file():
+                _unlink(entry.path)
     except OSError:
         pass
 
@@ -219,7 +437,11 @@ class TranscriptWatcher(threading.Thread):
         self.offsets = self._load_offsets()
         self.dirty = False
         self.labels = {}        # transcript -> what to call that session aloud
+        self.projects = {}      # transcript -> the folder it is being run in
         self.last_source = None
+        # Sessions the panel has silenced. Kept in config too, so muting one and
+        # restarting the engine does not un-mute it behind your back.
+        self.muted = set(voice_lib.load_state().get("mutedSessions") or [])
 
     def _load_offsets(self):
         try:
@@ -257,12 +479,52 @@ class TranscriptWatcher(threading.Thread):
             if not proj.is_dir():
                 continue
             for f in os.scandir(proj.path):
-                if f.name.endswith(".jsonl") and f.stat().st_mtime > cutoff:
-                    yield f.path, f.stat().st_size
+                if not f.name.endswith(".jsonl"):
+                    continue
+                st = f.stat()
+                if st.st_mtime > cutoff:
+                    yield f.path, st.st_size, st.st_mtime
+
+    def sessions(self, limit=10):
+        """Who is talking at the moment, newest first, and who is muted.
+
+        Called from HTTP handler threads, so it only reads. Labels are already
+        cached by the sweep; a session first seen here is read once and then
+        remembered like any other.
+        """
+        if not os.path.isdir(self.PROJECTS):
+            return []
+        try:
+            rows = sorted(self._transcripts(), key=lambda r: r[2], reverse=True)
+        except OSError:
+            return []
+        out = []
+        for path, _size, mtime in rows[:limit]:
+            label = self.labels[path] if path in self.labels else self._ensure_label(path)
+            out.append({
+                "path": path,
+                "label": label or f"session {os.path.basename(path)[:8]}",
+                "project": self.projects.get(path),
+                "muted": path in self.muted,
+                "when": time.strftime("%H:%M", time.localtime(mtime)),
+            })
+        return out
+
+    def set_muted(self, path, muted):
+        """Silence one session, or let it speak again."""
+        if muted:
+            self.muted.add(path)
+        else:
+            self.muted.discard(path)
+        voice_lib.patch_state(mutedSessions=sorted(self.muted))
+        log(f"watcher: {'muted' if muted else 'unmuted'} "
+            f"{self.labels.get(path) or os.path.basename(path)}")
 
     def _sweep(self):
         state = voice_lib.load_state()
-        for path, size in self._transcripts():
+        # Adopt the config's list each sweep, so editing it by hand works too.
+        self.muted = set(state.get("mutedSessions") or [])
+        for path, size, _mtime in self._transcripts():
             seen = self.offsets.get(path)
             if seen is None:
                 # Never seen this file: start at its end rather than reading a
@@ -311,7 +573,11 @@ class TranscriptWatcher(threading.Thread):
                         ai = e.get("aiTitle") or ai
         except OSError:
             pass
-        label = custom or ai or (os.path.basename(cwd) if cwd else None)
+        # Which project this session is in. Two sessions can carry near-enough
+        # the same title in different repos, and then the title alone tells you
+        # nothing about which one is talking.
+        self.projects[path] = os.path.basename(cwd) if cwd else None
+        label = custom or ai or self.projects[path]
         self.labels[path] = _tidy_label(label)
         return self.labels[path]
 
@@ -359,9 +625,19 @@ class TranscriptWatcher(threading.Thread):
             return
 
         speech, what = voice_lib.speech_for(text, state)
+        if not speech:
+            return
+        # Checked before the dedupe, not after: a muted session should not be
+        # able to use up the record of what was said and silence another
+        # session that happens to say the same thing.
+        if path in self.muted:
+            # Say so in the log. Silence with no trace is indistinguishable
+            # from the voice having broken again, and that is the one failure
+            # this project keeps having to re-learn.
+            return log(f"watcher: muted <{self.labels.get(path)}> {speech[:40]}...")
         # Dedupe on the words themselves, before any session name is added, so
         # the same message is not said twice just because it was announced.
-        if not speech or voice_lib.already_spoken(speech):
+        if voice_lib.already_spoken(speech):
             return
         try:
             voice, kwargs = voice_lib.resolve(state.get("voice"), state.get("source"), state)
@@ -369,24 +645,54 @@ class TranscriptWatcher(threading.Thread):
             return log(f"watcher: {exc}")
 
         # Two sessions talking through one voice are impossible to tell apart.
-        # Name the session, but only when it changes -- announcing every line
+        # Name the source, but only when it changes -- announcing every line
         # would be worse than the confusion it is fixing.
+        #
+        # The project, by default, not the conversation's title: 'qwen voices'
+        # says where you are in one or two words, while a generated title is a
+        # sentence and a listener who has heard it once does not need it again.
         label = self.labels.get(path)
+        mode = state.get("sessionLabel", "project")
+        spoken = _tidy_label(self.projects.get(path)) if mode == "project" else label
         announced = ""
-        if (state.get("sessionLabel", "title") != "off" and label
+        if (mode != "off" and spoken
                 and self.last_source is not None and self.last_source != path):
-            announced = f"{label}. "
+            announced = f"{spoken}. "
         self.last_source = path
 
         pieces = voice_lib.chunks(announced + speech)
         if pieces:
-            self.speaker.submit(Job(pieces, voice["id"], kwargs))   # queued, never barging
+            job = Job(pieces, voice["id"], kwargs, text=speech, session=label,
+                      project=self.projects.get(path))
+            self.speaker.submit(job)                                # queued, never barging
             log(f"watcher: {what} [{voice['id']}] {len(pieces)} chunk(s) "
-                f"{'<' + label + '> ' if announced else ''}{speech[:40]}...")
+                f"{'<' + announced.strip() + '> ' if announced else ''}{speech[:40]}...")
+
+
+_VOICES = {"when": 0.0, "rows": []}
+
+
+def _voice_list(state, ttl=15.0):
+    """The catalogue, rebuilt occasionally rather than on demand.
+
+    The panel asks twice a second and a hundred voices is a hundred directory
+    reads; nobody adds a voice that fast.
+    """
+    now = time.monotonic()
+    if now - _VOICES["when"] > ttl or not _VOICES["rows"]:
+        try:
+            _VOICES["rows"] = [{"id": v["id"], "name": v["name"],
+                                "culture": v["culture"], "sex": v["sex"]}
+                               for v in voice_lib.catalog(state)]
+        except OSError:
+            _VOICES["rows"] = []
+        _VOICES["when"] = now
+    return _VOICES["rows"]
 
 
 class Handler(BaseHTTPRequestHandler):
     speaker = None
+    watcher = None
     watching = False
     server_version = "ClaudeVoice/1.0"
 
@@ -414,9 +720,68 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/health":
             return self._reply(200, {**sp.status(), "watching": Handler.watching})
 
+        if route == "/state":
+            # Everything the panel draws, in one round trip. It owns no state
+            # of its own; this is the whole of what it knows.
+            state = voice_lib.load_state()
+            return self._reply(200, {
+                **sp.status(), **sp.snapshot(),
+                "watching": Handler.watching,
+                "sessions": Handler.watcher.sessions() if Handler.watcher else [],
+                "voices": _voice_list(state),
+                "voice": state.get("voice"),
+                "source": state.get("source"),
+                "enabled": bool(state.get("enabled")),
+            })
+
         if route == "/stop":
             sp.cancel()
             return self._reply(200, {"stopped": True})
+
+        if route == "/enabled":
+            # The master switch, same as 'voice on' and 'voice off': the setting
+            # itself, and silence now if it is going off. The watcher re-reads
+            # the config every sweep, so it takes effect within the second.
+            on = bool(payload.get("on"))
+            voice_lib.patch_state(enabled=on)
+            if not on:
+                sp.cancel()
+            log(f"voice turned {'on' if on else 'off'}")
+            return self._reply(200, {"enabled": on})
+
+        if route == "/skip":
+            return self._reply(200, {"skipped": sp.skip_current()})
+
+        if route == "/play":
+            job = sp.repeat_current()
+            return self._reply(200, {"playing": job.as_dict() if job else None})
+
+        if route == "/replay-id":
+            jid = payload.get("id")
+            job = sp.replay(jid) if isinstance(jid, int) else None
+            if job is None:
+                return self._reply(404, {"error": f"nothing kept for id {jid}"})
+            log(f"replay {jid}: {job.text[:60]}...")
+            return self._reply(200, {"playing": job.as_dict()})
+
+        if route == "/mute-session":
+            if not Handler.watcher:
+                return self._reply(409, {"error": "not following sessions"})
+            path = payload.get("path") or ""
+            if not path:
+                return self._reply(400, {"error": "no path"})
+            muted = bool(payload.get("muted"))
+            Handler.watcher.set_muted(path, muted)
+            return self._reply(200, {"path": path, "muted": muted})
+
+        if route == "/set-voice":
+            try:
+                voice, announced = voice_lib.set_voice(payload.get("voice"))
+            except LookupError as exc:
+                return self._reply(404, {"error": str(exc)})
+            log(f"voice set to {voice['id']}")
+            return self._reply(200, {"voice": voice["id"], "name": voice["name"],
+                                     "announced": announced})
 
         if route == "/quit":
             sp.cancel()
@@ -445,7 +810,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._reply(400, {"error": "nothing speakable"})
             # An explicit request through the API is the user asking for this
             # now, so it takes the floor.
-            sp.submit(Job(pieces, voice["id"], kwargs), barge=True)
+            sp.submit(Job(pieces, voice["id"], kwargs, text=text,
+                          session=payload.get("session")), barge=True)
             log(f"speak [{voice['id']}] {len(pieces)} chunk(s): {text[:60]}...")
             return self._reply(202, {"queued": len(pieces), "voice": voice["id"]})
 
@@ -480,7 +846,8 @@ def main():
 
     Handler.speaker = Speaker(state)
     if state.get("watch", True):
-        TranscriptWatcher(Handler.speaker).start()
+        Handler.watcher = TranscriptWatcher(Handler.speaker)
+        Handler.watcher.start()
         Handler.watching = True
     log(f"listening on http://127.0.0.1:{args.port} (pid {os.getpid()})")
     try:

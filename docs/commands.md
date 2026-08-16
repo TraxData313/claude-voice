@@ -10,10 +10,11 @@ command — it is `/voice on`, never `/voice_on`.
 
 | command | does |
 |---|---|
-| `on` | Start speaking. Loads the engine if it is cold (40-60s the first time). |
+| `on [--panel]` | Start speaking. Loads the engine if it is cold (40-60s the first time). |
 | `off` | Stop speaking. The engine stays warm, so 'on' is instant. |
 | `toggle` | Whichever of the two you are not. |
 | `status` | Voice, engine, and whether it is following your sessions. |
+| `panel` | A small window on top: what is playing, the queue, and the switches. |
 
 ## Choosing a voice
 

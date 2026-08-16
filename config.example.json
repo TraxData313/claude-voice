@@ -14,6 +14,9 @@
   "narrate": true,
   "narrateMaxChars": 240,
 
+  "_historyKeep": "How many past utterances keep their audio, so the panel can replay one instantly. They live in %TEMP% and are cleared when the engine restarts.",
+  "historyKeep": 40,
+
   "enabled": false,
   "voice": "abby",
   "source": "embedding",

@@ -1,5 +1,10 @@
 # The panel — build plan
 
+> **Built.** `panel.py` and the API behind it exist. The plan is kept as written because it
+> still describes the shape of the thing; what actually happened — including the one
+> assumption that turned out to be wrong — is at the bottom, under *What changed in the
+> building*. Read that before changing anything here.
+
 **This page is addressed to Claude.** The user will open a fresh session and ask you to
 build this. Everything you need is here; the conversation that decided it is not, so do
 not guess beyond what is written. Where this plan and the code disagree, read the code —
@@ -172,3 +177,71 @@ imports it.
 
 Half a day, roughly. If something here turns out wrong in practice, prefer the smaller
 change and note it in this file — the next session reads this too.
+
+## What changed in the building
+
+Everything above was built as described. These are worth knowing before touching it.
+
+**`stop` did not cut the line, and now does.** The plan assumed stopping already worked and
+only `play` had to be invented. It did not: the player called `winsound.PlaySound` *synchronously*,
+and a synchronous PlaySound cannot be interrupted at all. A purge from another thread does
+not cut it — measured, it queues up behind it and returns when the clip ends of its own
+accord, up to half a minute later. So `stop` had always meant "drop the queue and wait out
+this sentence", quietly, and `/voice stop` mid-sentence would time out and print *"Engine
+not running."* at you, which is the worst possible thing for it to say. Playback is now
+asynchronous, with the wait driven by the wav's own header and broken by cancellation; a
+purge then cuts within about a twentieth of a second. Measured before and after: 5.8s, then
+0.12s. Do not put the synchronous call back — the fake pause depends on this.
+
+**The play queue carries a third field.** Items are `(job, path, keep)`. A replay plays
+history's own files, and those must not be deleted when the queue is drained; anything
+draining that queue has to respect the flag.
+
+**Replaying and skipping needed different verbs.** `cancel()` empties everything and is
+what `stop` means; `skip_current()` cancels the current job only and hands the play queue
+back its other items. They are easy to confuse — `skip` that drains the queue is a bug the
+user will read as lines going missing.
+
+**The lists are Treeviews, not Listboxes.** A Tk Listbox holds text and nothing else, so no
+row of one can carry a picture. That decided it once the icons arrived, and it also gave
+the rows real columns instead of padding every line to a fixed width. Two consequences
+worth knowing: each row is *named* after its utterance id, so a click reads the id straight
+off the row with no lookup table; and the `#0` column has to be wider than the picture,
+because Treeview adds its own indent in front of it and the time beside it gets sat on
+otherwise.
+
+**Tick boxes are the classic Tk widget, not ttk's.** ttk's is drawn by the theme, and clam —
+the only theme that accepts colour instructions at all — draws its *ticked* state as a black
+cross. Under a heading that says "ticked means heard", that reads as precisely the opposite
+of what it means. The old plain widget draws a real tick and takes its colours directly.
+
+**Things the sketch did not have**, added on request while it was being built: *on top* and
+*dark* tick boxes (`panelTopmost`, `panelDark`); the portrait beside the now-playing line
+with the voice's name under it, clickable to swap between the two shipped voices, and
+resizable from a box that takes a preset or a typed number (`panelFace`); 24px portraits on
+every row; the session rows named *project · conversation*, because two sessions in
+different repos can carry near enough the same title; and a credit line at the very bottom,
+packed first among the bottom-up widgets so that it is the last thing a shrinking window
+gives up.
+
+**Two things about scaling the portrait.** Tk scales by whole numbers only — `zoom`
+multiplies, `subsample` divides — so an arbitrary size is reached by doing both, and 160
+comes from the 256px file as five up and eight down. And the rule for *which* file to
+start from is quality, not arithmetic: a file drawn at that exact size wins, then coming
+down from a larger one, then going up from a smaller one. Picking the cheapest sum instead
+drew 192 by doubling the 96px file, and it looked precisely like a doubled 96px file.
+
+**Dark mode is a change of ttk theme, not just colours.** The native Windows theme draws
+real Windows widgets and ignores most colour it is given, so dark switches to `clam`, which
+does as it is told. Two consequences: every style has to be set again on the way in, since
+ttk keeps its settings per theme and not per widget; and clam's own maps have to be
+overridden state by state, because its default hover made a white button under white text.
+
+**The buttons are not the three in the sketch.** They were stop / play / skip; they are now
+*turn off* / *stop* / *skip*. The master switch is the control actually reached for most,
+and it needed the one route the plan said the engine deliberately did not have — `/enabled`,
+which writes the setting and silences what is playing, exactly as `voice off` does. *Play*
+went: clicking a line in the history says it again, from the audio it was heard as, which
+covers nearly everything play was for. `POST /play` is still there for the one case a click
+cannot cover — re-saying a line that was cut halfway, in full, since history holds only the
+part that was actually heard.
