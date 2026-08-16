@@ -1,0 +1,23 @@
+{
+  "name": "claude-voice",
+  "displayName": "claude-voice",
+  "version": "1.1.0",
+  "description": "Claude Code reads its answers aloud in a voice you choose, entirely on your own machine. A local Qwen-TTS model does the speaking: no cloud, no API key, no account, and no audio leaving the computer. Windows, NVIDIA.",
+  "author": {
+    "name": "TraxData313",
+    "url": "https://github.com/TraxData313"
+  },
+  "homepage": "https://traxdata313.github.io/claude-voice/",
+  "repository": "https://github.com/TraxData313/claude-voice",
+  "license": "Unlicense",
+  "keywords": [
+    "text-to-speech",
+    "tts",
+    "voice",
+    "qwen",
+    "local",
+    "offline",
+    "windows",
+    "accessibility"
+  ]
+}

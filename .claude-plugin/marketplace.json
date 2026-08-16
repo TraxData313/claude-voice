@@ -1,0 +1,22 @@
+{
+  "name": "claude-voice",
+  "description": "Gives Claude Code a speaking voice that runs on your own machine. One plugin, two voices, and the means to clone more.",
+  "owner": {
+    "name": "TraxData313",
+    "url": "https://github.com/TraxData313"
+  },
+  "plugins": [
+    {
+      "name": "claude-voice",
+      "source": {
+        "source": "github",
+        "repo": "TraxData313/claude-voice"
+      },
+      "version": "1.1.0",
+      "description": "Claude Code reads its answers aloud in a voice you choose, entirely on your own machine. No cloud, no API key, no audio leaving the computer. Windows, NVIDIA.",
+      "author": {
+        "name": "TraxData313"
+      }
+    }
+  ]
+}

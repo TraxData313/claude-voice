@@ -204,7 +204,10 @@ if (-not $WhatIf) {
 
     $cmdDir = Join-Path $claudeDir "commands"
     New-Item -ItemType Directory -Force -Path $cmdDir | Out-Null
-    $template = (Read-Utf8 (Join-Path $repo "commands\voice.md")).Replace("__PYTHON__", $PythonExe).Replace("__REPO__", $repo.Replace('\','/'))
+    # templates\, not commands\: Claude Code reads a plugin's commands\ folder as
+    # real commands, and this file still carries its __PYTHON__ placeholders --
+    # left there, installing the plugin would hand the user a broken /voice.
+    $template = (Read-Utf8 (Join-Path $repo "templates\voice.md")).Replace("__PYTHON__", $PythonExe).Replace("__REPO__", $repo.Replace('\','/'))
     Write-Utf8 (Join-Path $cmdDir "voice.md") $template
     Say "slash command : $(Join-Path $cmdDir 'voice.md')" "Green"
 }
