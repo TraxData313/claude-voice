@@ -293,7 +293,7 @@ def cmd_clone(state, args):
     """Turn a recording into a voice this can speak with.
 
     Use a clean 20-40s mono clip of ONE person talking, no music, no second
-    speaker. Whose voice you are entitled to clone is your call -- see VOICES.md.
+    speaker. Whose voice you are entitled to clone is your call -- see docs/voices.md.
     """
     import argparse
     import json
@@ -380,7 +380,7 @@ def cmd_watch(state, args):
 REPO_URL = "https://github.com/TraxData313/claude-voice"
 
 # The one description of every command. `help` prints it and `help --markdown`
-# emits CHEATSHEET.md from it, so the documentation cannot drift from the tool.
+# emits docs/commands.md from it, so the documentation cannot drift from the tool.
 HELP = [
     ("Turning it on and off", [
         ("on", "", "Start speaking. Loads the engine if it is cold (40-60s the first time)."),
@@ -430,11 +430,11 @@ def cmd_help(state, args):
     print(f"\n  The voice is one setting shared by every session: change it here and it\n"
           f"  changes everywhere. Full details, and how it all works:\n"
           f"      {REPO_URL}\n"
-          f"      {os.path.join(voice_lib.ROOT, 'CHEATSHEET.md')}\n")
+          f"      {os.path.join(voice_lib.ROOT, 'docs', 'commands.md')}\n")
 
 
 def _help_markdown():
-    """Write CHEATSHEET.md. Writing the file here rather than printing it keeps
+    """Write docs/commands.md. Writing the file here rather than printing it keeps
     the em dashes intact -- redirecting stdout on Windows encodes to the console
     codepage and quietly mangles anything outside it."""
     out = [
@@ -461,7 +461,7 @@ def _help_markdown():
         "  itself. `status` will say so, and `on` brings it back.",
         f"\nFull description of how it works: {REPO_URL}",
     ]
-    path = os.path.join(voice_lib.ROOT, "CHEATSHEET.md")
+    path = os.path.join(voice_lib.ROOT, "docs", "commands.md")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(out) + "\n")
     print(f"Wrote {path}")

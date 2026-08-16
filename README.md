@@ -1,233 +1,120 @@
-# claude-voice
+<p align="center">
+  <img src="docs/banner.svg" alt="claude-voice — Claude Code, out loud. Locally." width="820">
+</p>
 
-Claude Code reads its answers aloud, locally, in a voice you choose.
+<p align="center">
+  <em>Your terminal grew a voice. It runs on your own machine and tells nobody about it.</em>
+</p>
 
-No cloud, no API key, no audio leaving the machine. A local Qwen-TTS model does the
-speaking, and it follows your sessions by reading the transcripts Claude Code writes to
-disk — so it needs no cooperation from the client, no hooks, and no restart. (Hooks are
-supported too, and installed by default; if your client runs them they simply get there
-first. The two share a record of what has been said, so nothing is spoken twice.)
+---
 
-It speaks two things. The short lines said **while it works** ("let me check whether that
-exists") go out as they happen, so you can follow along without watching. When a long
-answer finishes, it reads the **TL;DR** and not the whole thing — an answer full of paths
-and flags is written for eyes that skip around, so the ear gets the summary and the
-detail stays on screen where you can look at it properly. Short answers are read in full,
-because there is nothing to summarise.
+Claude Code reads its answers aloud, in a voice you choose, using a local Qwen-TTS model.
+No cloud, no API key, no account, no audio leaving the machine. Unplug the network and it
+carries on talking.
 
-## What you need
+It speaks **two** things, and the difference is the whole design:
 
-- **Windows.** Playback uses `winsound` and the engine bridge loads a Windows DLL.
-- **[Qwen-TTS Studio](https://github.com/Danmoreng/qwen-tts-studio)**, with a talker model
-  downloaded through it. Setting it up is the only fiddly part — see below.
-- **Python 3.9+** — standard library only. Nothing to `pip install`.
-- **Claude Code.**
+- **The short lines said while it works** — "now I'm checking whether that exists" — go out
+  as they happen, so you can follow along without watching the screen.
+- **The summary at the end.** A long answer is read as its `## TL;DR` and not in full,
+  because an answer stuffed with paths and flags is written for eyes that skip around. The
+  detail stays on screen where you can look at it properly.
 
-No separate Java is needed: Studio ships its own JVM, and that is the one this boots.
+Short answers are read whole. Nothing is repeated, nothing talks over anything else.
 
-### Installing Qwen-TTS Studio
+## Try it in five minutes
 
-Grab a Windows build from its
-[Releases page](https://github.com/Danmoreng/qwen-tts-studio/releases). Each release comes
-as either an **MSI installer** or a **portable ZIP** you can extract anywhere, in two
-flavours:
-
-| variant | when |
-|---|---|
-| `windows-cuda-bundled` | the safe default — larger, carries its own CUDA runtime |
-| `windows-cuda-system` | smaller, but needs NVIDIA's CUDA runtime already installed; falls back to CPU without it |
-
-Then launch it once. The Welcome screen offers to download GGUF models; take
-**`qwen-talker-1.7b-base`**. That size matters — it produces the 2048-dimension embeddings
-this expects, while the 0.6b model gives 1024 and will not work with voices made by the
-larger one. Models land in `~\.qwen-tts-studio\models`, and you can fetch more later from
-the Setup tab.
-
-That is all the GUI is needed for. `install.ps1` looks for Studio in the usual places
-(`Downloads`, `Program Files`, `%LOCALAPPDATA%\Programs`); if you extracted the ZIP
-somewhere else, pass `-StudioDir` and point it at the folder holding `app\` and `runtime\`.
-
-Studio itself has no CLI, so this drives its engine directly: it boots that bundled JVM
-in-process and calls the JNI methods sitting behind the GUI. See `qwen_engine.py` for the
-details, including the two constants that must be exactly right.
-
-*(Qwen-TTS Studio is a third-party desktop app for Alibaba's
-[Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) models — the app and the models come from
-different people.)*
-
-## Install
+You need **Windows**, **Python 3.9+** (standard library only — nothing to `pip install`),
+and **[Qwen-TTS Studio](https://github.com/Danmoreng/qwen-tts-studio)** with a talker model.
 
 ```powershell
-git clone <this-repo> claude-voice
+git clone https://github.com/TraxData313/claude-voice
 cd claude-voice
-.\install.ps1
+.\install.ps1                 # finds Python and Studio, writes config, adds /voice
 ```
 
-That finds Python and Studio, writes `config.json`, installs the `Stop` hook into
-`.claude\settings.json`, and adds the `/voice` command. Use `-WhatIf` to see what it
-would do, `-ProjectDir C:\code\my-project` to make Claude speak in a different project,
-and `-StudioDir` / `-PythonExe` if either is somewhere unusual.
-
-**Then restart Claude Code** — hooks are only read at session start.
-
-To speak in **every** project rather than one, install into your user settings instead:
-
-```powershell
-.\install.ps1 -ProjectDir $env:USERPROFILE
-```
-
-Do one or the other, not both. Hooks defined in both places all fire, so you get two
-processes racing for every event.
+Then, in Claude Code:
 
 ```
 /voice on
 ```
 
-The first model load takes 40–60 seconds; after that the engine stays warm and answers
-begin speaking almost immediately.
+That is it. First load takes 40–60 seconds; after that the engine stays warm and answers
+start speaking almost at once.
 
-## Using it
+> **Getting Studio ready.** Take a build from its
+> [Releases page](https://github.com/Danmoreng/qwen-tts-studio/releases) — the
+> `windows-cuda-bundled` one unless you already have NVIDIA's CUDA runtime. Launch it once
+> and let the Welcome screen fetch **`qwen-talker-1.7b-base`**. The size is not a free
+> choice: it produces 2048-dimension embeddings, and the 0.6b model gives 1024 and will not
+> work with voices made by the larger one. No separate Java needed — Studio ships its own,
+> and that is the one this drives.
+>
+> To speak in **every** project rather than one, install into your user settings:
+> `.\install.ps1 -ProjectDir $env:USERPROFILE`. Do one or the other, not both.
 
-```powershell
-python voice_cli.py on          # or off / toggle / status
-python voice_cli.py list        # every voice available
-python voice_cli.py set abby
-python voice_cli.py say "trying a line"
-python voice_cli.py replay      # say the last answer again; replay 3 for the third back
-python voice_cli.py stop        # shut up mid-sentence
-python voice_cli.py kill        # unload the model and free the memory
-python voice_cli.py narrate off # only speak finished answers, not the running commentary
-python voice_cli.py max 900     # read a bit more of each answer
-```
+## The controls
 
-`/voice <args>` inside Claude Code is the same thing — note the space, `/voice on` rather
-than `/voice_on`.
+`/voice <thing>` in Claude Code, or `python voice_cli.py <thing>` in a terminal — the same
+tool either way. Mind the space: `/voice on`, never `/voice_on`.
 
-**Can't remember a command?** `/voice help` prints the lot, grouped and explained.
-[CHEATSHEET.md](CHEATSHEET.md) is the same list to read at leisure — generated from the
-tool itself, so it cannot drift out of date.
+| | |
+|---|---|
+| `on` / `off` | the switch. `off` leaves the engine warm, so `on` is instant |
+| `set abby` | change voice. Any unambiguous substring: `set ab` works |
+| `repeat` | say the last answer again. `repeat-all` for the whole thing, not the summary |
+| `stop` | cut off what is playing. The voice stays on (`break` works too) |
+| `list` | every voice available |
+| `help` | all seventeen commands, grouped |
 
-**There is no play button next to each message.** Claude Code has no API for adding
-controls to the transcript, so `replay` is how you hear something a second time.
+**[Full command list →](docs/commands.md)** — generated from the tool itself, so it cannot
+go stale.
 
-Lines queue rather than interrupt each other, so nothing gets cut off mid-word; only
-`say` and `replay` take the floor, because those are you asking for something *now*.
-`stop` clears the queue entirely.
+## The voices
 
-Each message is a separate synthesis, and two takes of the same voice are never quite
-identical, so the timbre shifts a little from one message to the next. That seam is worth
-having — it is how you hear that a new line has started — so there is a deliberate pause
-at it (`gapSeconds`). Within a single message the opposite is true, and the chunking is
-arranged to cross as few seams as possible: only the first piece is short, to get speech
-going, and the rest is spoken in one take.
-
-## Voices
-
-Two voices ship with this repo: **Abby** and **Max**, both the author's own. See
-[VOICES.md](VOICES.md) for what may go in that folder and what may not — the short version
-is that a speaker embedding *is* a clone of a real person's voice, and shipping one you
-did not record is not yours to give away.
-
-Adding your own is one command. Use a clean 20–40 second mono clip of one person talking:
+Two ship with it: **Abby**, cute and slightly nerdy, and **Max**, brave and driving. Both
+belong to the author. Adding your own is one command and a clean 20–40 second clip of one
+person talking:
 
 ```powershell
 python voice_cli.py clone C:\path\to\sample.wav --name "Ada"
 python voice_cli.py set ada
 ```
 
-Voices you may keep but not publish can live outside the repo entirely — point
-`extraVoicesDirs` in `config.json` at any folder with the same
-`<sex>\<culture>\<id>` layout, and they show up in `list` marked *local only*.
+A speaker embedding **is** a clone of a real person's voice. Whose you may publish, and
+whose you may only keep, is worth two minutes of your time before you add one:
+**[the rules →](docs/voices.md)**
 
-## Writing answers that get spoken well
+Voices you may keep but not share never need to enter the repo at all — point
+`extraVoicesDirs` at any folder and they show up marked *local only*.
 
-Only long answers need a summary. A one-line reply, or a line of narration before a
-command, is already the right size for an ear and gets read as it is. Put this in your
-project's `CLAUDE.md` — or in `~\.claude\CLAUDE.md` to cover every project at once:
+## Where the detail lives
 
-> Answers are read aloud. The short lines said between commands are spoken as written and
-> heard with no screen to explain them, so write each as a whole sentence in the present
-> tense, saying what you are doing and why: "Now I'm adding the missing test." Never a
-> caption — "Now the missing test." has no verb and lands as an unfinished thought. End
-> **substantial** answers with a `## TL;DR` section written for the ear: no file names,
-> paths, commands or line numbers, plain sentences in the order *what changed, does it
-> work, what do I do next*, five sentences at most. Short answers need no TL;DR at all.
-
-| source | sees | speaks |
-|---|---|---|
-| the watcher | every assistant message, as it lands on disk | the TL;DR if there is one, otherwise the message |
-| `PreToolUse` hook | before each command, mid-turn | the narration line above it |
-| `Stop` hook | when a turn ends | the TL;DR, or the whole answer if there is none |
-
-All three dedupe against a shared record of what was said recently, so a line spoken
-during the work is not repeated in the summary, and the watcher and a hook seeing the
-same message only say it once.
-
-The watcher is what makes this dependable. Hooks only run if the client chooses to run
-them, and there is no way to find out from the outside whether it did — which looks
-exactly like the voice being broken. Turn it off with `voice_cli.py watch off` if you
-would rather rely on hooks alone.
-
-It follows **every** session touched in the last fifteen minutes, not just the one in
-front of you. That is usually what you want — open a second Claude Code window and it
-speaks there too, with nothing to switch on. But two busy sessions will take turns
-through one voice, which is worth knowing before you wonder who is talking.
-
-## When nothing is spoken
-
-Read `logs\hook.log` **first**. One line goes in per hook invocation, so an empty file
-means Claude Code never ran the hook at all — a different problem from the hook running
-and failing. `logs\speak-server.log` has the engine's side, including model load errors.
-
-Two causes account for almost all silence, and the log tells them apart.
-
-**Entries in `hook.log`, but nothing spoken** — the hook ran. The line says what it
-decided; check `speak-server.log` for the engine's side.
-
-**No entries at all** — Claude Code never called it. Either the session predates the
-config (hooks load at session start, so restart), or the hooks block was rejected. Two
-things get it rejected:
-
-- *The interpreter cannot be found.* Hooks run without a shell profile, so anything
-  conda-activated or Store-aliased is invisible; `install.ps1` writes the absolute path
-  for this reason.
-- *An entry is missing the field its event expects.* `PreToolUse` matches on tool name and
-  wants a `matcher`; `Stop` fires once per turn and takes none. One malformed entry can
-  invalidate the whole block, so a bad `PreToolUse` will silence `Stop` along with it.
-- *The file starts with a byte-order mark.* `Out-File -Encoding utf8` writes one in
-  PowerShell 5.1, and three invisible bytes at the top of `settings.json` are enough for a
-  strict JSON parser to reject the entire file. Nothing reports this; the hooks simply
-  never run. Check with `Get-Content settings.json -Encoding Byte -TotalCount 3` — `239
-  187 191` is the BOM. `install.ps1` writes without one.
-
-If the log stays empty after a restart with both of those correct, the hook may not be
-loading from the project at all — try installing it into your user settings instead:
-
-```powershell
-.\install.ps1 -ProjectDir $env:USERPROFILE
-```
-
-## How it fits together
-
-| file | what it does |
+| | |
 |---|---|
-| `speak_server.py` | holds one warm engine behind a localhost HTTP API |
-| `speak_hook.py` | the `Stop` hook: last answer → TL;DR → the server |
-| `voice_cli.py` | the switch, the picker, and `clone` |
-| `voice_lib.py` | config, voice catalogue, markdown→speech |
-| `qwen_engine.py` | the JNI bridge into Studio's engine |
+| **[How it works →](docs/how-it-works.md)** | the engine, the watcher, and the JNI bridge into an app with no CLI |
+| **[Writing for the ear →](docs/writing-for-the-ear.md)** | the TL;DR contract, and why captions sound wrong aloud |
+| **[When it goes quiet →](docs/troubleshooting.md)** | silence has no error message. Start here |
+| **[Commands →](docs/commands.md)** | all of them, grouped |
+| **[Voices →](docs/voices.md)** | what may go in that folder, and what may not |
 
-Three things in here are less obvious than they look, and all three cost real time to
-find:
+## Three things that cost real time to find
 
-- **A JNIEnv pointer belongs to the thread that made the JVM.** The engine therefore
-  lives on one dedicated thread and HTTP handlers only enqueue work.
-- **`SO_REUSEADDR` means something else on Windows.** `HTTPServer` sets it, and Windows
-  then lets a *second* process bind a port already in use rather than failing — two
-  engines, two model loads, every sentence spoken twice.
-- **The embedding extractor and the ICL encoder cannot share a process.** Loading the ICL
-  encoder tears the talker model down underneath the engine.
+Kept here because they will not be obvious to the next person either.
+
+**Hooks are not dependable, so this does not need them.** A hook runs only if the client
+chooses to run it, and nothing from outside can tell whether it did — which looks exactly
+like the voice being broken. Claude Code writes every turn to a transcript on disk
+regardless, so that is what gets followed. No hooks, no restart, every session at once.
+
+**A JNIEnv pointer belongs to the thread that made the JVM.** The engine lives on one
+dedicated thread and everything else only enqueues. Calling `generate()` from a request
+thread is undefined behaviour, not a race you get away with.
+
+**`SO_REUSEADDR` means something else on Windows.** `HTTPServer` sets it, and Windows then
+lets a *second* process bind a port already in use rather than failing — two engines, two
+model loads, every sentence spoken twice.
 
 ## Licence
 
-Code is MIT. Voices are not code — see [VOICES.md](VOICES.md).
+Code is MIT. Voices are not code — see **[docs/voices.md](docs/voices.md)**.

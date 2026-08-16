@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="claude-voice: Claude Code, out loud, locally">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#12141c"/>
+      <stop offset="100%" stop-color="#1b2030"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#5eead4"/>
+      <stop offset="55%" stop-color="#7dd3fc"/>
+      <stop offset="100%" stop-color="#c4b5fd"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%">
+      <stop offset="0%" stop-color="#5eead4" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#5eead4" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="300" rx="18" fill="url(#bg)"/>
+  <ellipse cx="250" cy="150" rx="230" ry="140" fill="url(#glow)"/>
+
+  <!-- the machine -->
+  <g transform="translate(70,58)">
+    <rect x="0" y="0" width="330" height="184" rx="14" fill="#0b0e15" stroke="#3d4763" stroke-width="3"/>
+    <rect x="18" y="18" width="294" height="126" rx="8" fill="#070a10" stroke="#232c42" stroke-width="2"/>
+    <!-- waveform on screen -->
+    <path d="M34 81 L58 81 L68 47 L82 115 L96 60 L110 100 L124 34 L138 128 L152 68 L166 92 L180 55 L194 108 L208 74 L222 81 L296 81"
+          fill="none" stroke="url(#wave)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="40" cy="162" r="6" fill="#5eead4"/>
+    <rect x="58" y="157" width="120" height="10" rx="5" fill="#232c42"/>
+    <rect x="238" y="157" width="74" height="10" rx="5" fill="#232c42"/>
+  </g>
+
+  <!-- speaker, because it talks back -->
+  <g transform="translate(430,110)" stroke="#5eead4" stroke-width="4" fill="none" stroke-linecap="round">
+    <path d="M0 22 L18 22 L40 2 L40 62 L18 42 L0 42 Z" fill="#5eead4" fill-opacity="0.18"/>
+    <path d="M54 16 a26 26 0 0 1 0 32"/>
+    <path d="M68 4 a44 44 0 0 1 0 56" opacity="0.7"/>
+    <path d="M82 -8 a62 62 0 0 1 0 80" opacity="0.4"/>
+  </g>
+
+  <text x="560" y="128" font-family="Consolas,Menlo,monospace" font-size="58" font-weight="700" fill="#e8ecf6">claude-voice</text>
+  <text x="562" y="172" font-family="Consolas,Menlo,monospace" font-size="24" fill="#7dd3fc">Claude Code, out loud. Locally.</text>
+  <text x="562" y="212" font-family="Consolas,Menlo,monospace" font-size="18" fill="#8b96b0">no cloud &#183; no API key &#183; nothing leaves the machine</text>
+
+  <g transform="translate(562,232)">
+    <rect x="0" y="0" width="230" height="30" rx="6" fill="#0b0e15" stroke="#2a3350" stroke-width="2"/>
+    <text x="12" y="21" font-family="Consolas,Menlo,monospace" font-size="16" fill="#5eead4">/voice on</text>
+    <rect x="150" y="9" width="9" height="14" fill="#5eead4"/>
+  </g>
+</svg>
