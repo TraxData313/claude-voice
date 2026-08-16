@@ -13,6 +13,8 @@ new ones are cloned from a 20-40 second recording of one person talking.
 Languages: English and Russian are tested and both sound right, including
 Russian read by a voice cloned from English. The model is multilingual and the
 text pipeline is script-agnostic, so most other languages are expected to work.
+A less widely spoken language may be mistaken for the bigger one it shares an
+alphabet with: Bulgarian reads fluently but in a Russian accent.
 
 ## Pages
 

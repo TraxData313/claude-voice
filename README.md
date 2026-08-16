@@ -186,9 +186,13 @@ Voices you may keep but not share never need to enter the repo at all — point
 |---|---|
 | <img src="docs/flags/us.svg" height="13" alt="US"> **English** | tested — both voices were cloned from it |
 | <img src="docs/flags/ru.svg" height="13" alt="RU"> **Russian** | tested — Abby reads it genuinely well, cloned from English though she is |
+| <img src="docs/flags/bg.svg" height="13" alt="BG"> **Bulgarian** | reads, but in a **Russian accent** — the model takes it for odd Russian |
 | 🌐 **most others** | **should read normally.** The model underneath is multilingual, and nothing in between cares which alphabet it is handed |
 
-Try one: write a line in it and listen.
+Try one: write a line in it and listen. Bulgarian is the shape of the failure to expect from a
+less widely spoken language: it comes out fluent but wearing its bigger neighbour's accent,
+because the model recognises the alphabet before it recognises the language. The words are
+right; the voice is reading them as though they were Russian.
 
 ```powershell
 python voice_cli.py say "Сейчас я проверю, как это звучит."
