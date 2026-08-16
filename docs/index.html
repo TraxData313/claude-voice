@@ -22,16 +22,22 @@
   .banner { width: 100%; height: auto; display: block; }
   h1 { font-size: 26px; margin: 40px 0 6px; }
   .lede { color: var(--dim); margin: 0 0 28px; font-size: 15px; }
-  .voices { display: flex; flex-wrap: wrap; gap: 20px; }
+  .voices { display: flex; flex-wrap: wrap; gap: 22px; }
   .card {
     flex: 1 1 360px; background: var(--paper); color: var(--ink);
-    border: 4px solid var(--ink); border-radius: 26px; padding: 20px;
-    display: flex; gap: 18px; align-items: center;
+    border: 4px solid var(--ink); border-radius: 26px; overflow: hidden;
   }
-  .card img { width: 116px; height: 116px; flex: none; }
+  /* The illustrations are landscape and the faces sit high in them, so the
+     crop is pulled towards the top rather than centred. */
+  .card img {
+    display: block; width: 100%; height: 215px;
+    object-fit: cover; object-position: 50% 22%;
+    border-bottom: 4px solid var(--ink);
+  }
+  .card .who { padding: 16px 20px 20px; }
   .card h2 { margin: 0 0 4px; font-size: 21px; }
   .card p { margin: 0 0 12px; font-size: 13.5px; color: #45606f; }
-  audio { width: 100%; max-width: 260px; }
+  audio { width: 100%; }
   .note {
     margin-top: 34px; padding: 18px 22px; border-radius: 20px;
     border: 2px dashed rgba(87, 207, 192, .5); color: var(--dim); font-size: 14px;
@@ -57,18 +63,21 @@
 
   <div class="voices">
     <div class="card">
-      <img src="icons/abby-256.png" alt="Abby">
-      <div>
+      <img src="art/abby.jpg" alt="Abby">
+      <div class="who">
         <h2>Abby</h2>
-        <p>Cute, slightly nerdy, young and warm. Calm, never in a hurry.</p>
+        <p>Cute, slightly nerdy, young and warm. Calm, never in a hurry —
+           for careful work, tricky debugging, and being talked through
+           something gently.</p>
         <audio controls preload="metadata" src="samples/abby.wav"></audio>
       </div>
     </div>
     <div class="card">
-      <img src="icons/max-256.png" alt="Max">
-      <div>
+      <img src="art/max.jpg" alt="Max">
+      <div class="who">
         <h2>Max</h2>
-        <p>Brave and driving, a trainer's energy. Punchy, counts off what is done.</p>
+        <p>Brave and driving, a trainer's energy. Punchy lines, counts off what
+           is done, pushes for one more — for grinding through a long list.</p>
         <audio controls preload="metadata" src="samples/max.wav"></audio>
       </div>
     </div>
