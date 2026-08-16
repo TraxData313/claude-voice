@@ -115,6 +115,22 @@ thread is undefined behaviour, not a race you get away with.
 lets a *second* process bind a port already in use rather than failing — two engines, two
 model loads, every sentence spoken twice.
 
-## Licence
+<!-- ─────────────────────────────────────────────────────────────────────────
+     AUTHOR'S SECTION — copied verbatim from github.com/TraxData313/ImmersiveAI
+     Hands off. Only TraxData313 changes the wording below.
+     ───────────────────────────────────────────────────────────────────────── -->
 
-Code is MIT. Voices are not code — see **[docs/voices.md](docs/voices.md)**.
+## Freely given
+
+- **Public domain** — no license, no strings, no permission to ask ([The Unlicense](LICENSE)).
+  Use it, share it, change it, sell it. *"Freely you have received; freely give."* (The bundled
+  Harmony library keeps its own MIT notice in `lib\`.)
+- **Want to help?** Give feedback and report bugs.
+- **No donations** — this is a hobby, done for fun and out of good will; I want to keep money
+  out of it. *"For the love of money is the root of all evil."*
+- If you still insist on thanking me somehow — visit [my GitHub acc](https://github.com/TraxData313) and read the top pinned
+
+<!-- ── end author's section ── -->
+
+Voices are not code: a speaker embedding is a clone of someone's actual voice, so what may
+be added to `voices/` has its own rules — see **[docs/voices.md](docs/voices.md)**.
