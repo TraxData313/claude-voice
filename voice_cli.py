@@ -167,6 +167,14 @@ def _replay(state, args, full):
     Claude Code has no API for that -- so this is how you re-hear one."""
     n = int(args[0]) if args and args[0].lstrip("-").isdigit() else 1
     texts = _transcript_texts(os.getcwd())
+
+    # Count answers, not utterances. The newest thing said is often a one-line
+    # "let me check that" written before a command, and replaying seven seconds
+    # of that is never what "say it again" meant.
+    answers = [t for t in texts
+               if voice_lib.extract_summary(t) or len(voice_lib.clean_text(t, 0)) >= 200]
+    texts = answers or texts
+
     if n < 1 or n > len(texts):
         raise SystemExit(f"only {len(texts)} answers in this session")
 
@@ -338,10 +346,14 @@ COMMANDS = {
     "on": cmd_on, "off": cmd_off, "toggle": cmd_toggle, "status": cmd_status,
     "list": cmd_list, "set": cmd_set, "say": cmd_say, "stop": cmd_stop,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,
-    "clone": cmd_clone, "replay": cmd_replay, "again": cmd_replay,
-    # Spelled several ways on purpose: it is typed from memory, mid-listen.
+    "clone": cmd_clone,
+    # Named several ways on purpose. This gets typed from memory while
+    # listening, so the word that comes to mind should simply work rather than
+    # send you to the help text.
+    "replay": cmd_replay, "again": cmd_replay, "repeat": cmd_replay,
     "replay-all": cmd_replay_all, "replay_all": cmd_replay_all,
     "replayall": cmd_replay_all, "all": cmd_replay_all,
+    "repeat-all": cmd_replay_all, "repeat_all": cmd_replay_all,
     "narrate": cmd_narrate,
 }
 
@@ -353,7 +365,12 @@ def main():
         print(__doc__)
         return
     if cmd not in COMMANDS:
-        raise SystemExit(f"unknown command '{cmd}'. Try: {', '.join(COMMANDS)}")
+        # A list of twenty words is not an answer to "I typed the wrong one".
+        import difflib
+        near = difflib.get_close_matches(cmd, COMMANDS, n=2, cutoff=0.5)
+        hint = f" Did you mean: {' or '.join(near)}?" if near else \
+               f" Try: {', '.join(sorted(set(COMMANDS)))}"
+        raise SystemExit(f"unknown command '{cmd}'.{hint}")
     COMMANDS[cmd](voice_lib.load_state(), args)
 
 
