@@ -390,6 +390,43 @@ def speech_for(text, state):
     return spoken, kind
 
 
+CLAUDE_MD = os.path.expanduser(os.path.join("~", ".claude", "CLAUDE.md"))
+_MARK_OPEN = "<!-- current-voice -->"
+_MARK_CLOSE = "<!-- /current-voice -->"
+
+
+def announce_voice(voice, path=None):
+    """Write the current voice into the note every session loads at startup.
+
+    That file is read once when a session begins, so a session cannot discover
+    a voice chosen later without being asked to go and look. Keeping one marked
+    line up to date means it simply knows, with nothing to run.
+
+    Only the text between the markers is touched. No markers, no edit.
+    """
+    path = path or CLAUDE_MD
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return False
+    start, end = text.find(_MARK_OPEN), text.find(_MARK_CLOSE)
+    if start == -1 or end == -1 or end < start:
+        return False
+
+    persona = (voice.get("persona") or "").rstrip(".")
+    line = (f"{_MARK_OPEN}\nThe voice is currently **{voice['name']}**"
+            + (f" — {persona}." if persona else ".")
+            + f" That is you: if the\nuser calls you {voice['name']}, they mean you, "
+              "so answer to it.\n")
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text[:start] + line + text[end:])
+    except OSError:
+        return False
+    return True
+
+
 def post(port, path, payload=None, timeout=5):
     import urllib.request
 

@@ -140,8 +140,9 @@ def cmd_set(state, args):
     state["voice"] = voice["id"]
     voice_lib.save_state(state)
     print(f"Voice set to {_voice_label(state)}")
-    for line in _persona_lines(state):
-        print(line)
+    if voice_lib.announce_voice(voice):
+        print("  New sessions will know they are speaking as "
+              f"{voice['name']} without being asked.")
 
 
 def cmd_say(state, args):
