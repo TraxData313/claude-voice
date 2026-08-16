@@ -8,10 +8,7 @@
   "plugins": [
     {
       "name": "claude-voice",
-      "source": {
-        "source": "github",
-        "repo": "TraxData313/claude-voice"
-      },
+      "source": "./",
       "version": "1.1.0",
       "description": "Claude Code reads its answers aloud in a voice you choose, entirely on your own machine. No cloud, no API key, no audio leaving the computer. Windows, NVIDIA.",
       "author": {
