@@ -412,7 +412,7 @@ def apply_update(state=None, say=print):
     if notes:
         say("")
         for line in notes.splitlines():
-            say("  " + plain(line))
+            say(("  " + plain(line)).rstrip())     # blank lines are blank, not two spaces
 
     # --- and now the part everyone forgets --------------------------------
     say("")
