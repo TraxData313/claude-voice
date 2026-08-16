@@ -33,9 +33,7 @@ totally free: no cloud, no API key, no account, no audio ever leaving the comput
 the network and she carries on talking.
 
 She speaks the short lines *while* it works, and reads a long answer as its `## TL;DR`
-rather than in full — detail is written for eyes that skip around. The installer teaches
-Claude that contract in `~\.claude\CLAUDE.md`, so every session writes a summary worth
-hearing without being asked.
+rather than in full — and the installer teaches Claude to write one.
 **[How she decides what to say →](docs/writing-for-the-ear.md)**
 
 ## Easy install
@@ -47,16 +45,12 @@ Clone https://github.com/TraxData313/claude-voice here, then follow docs/tour.md
 in it: set it up, turn it on, and give me the spoken tour.
 ```
 
-That is the whole of it. Claude clones the repo, checks you have Python and installs it if
-you have not, fetches the speech engine and the ~2.4 GB of model that drives it, installs,
-opens the panel, switches it on, and then tells you *out loud* how to change voice, how to
-shush it mid-sentence, and how to turn it off.
+That is the whole of it. Claude fetches Python if you lack it, then the engine and its
+model, installs, opens the panel and switches it on — then tells you *out loud* how to
+drive it. Ten minutes, nearly all of it download.
 
-**No administrator rights anywhere.** Nothing elevates, nothing wants to, and the one part
-that ships as an installer is unpacked rather than installed — so this goes on a locked-down
-work laptop as easily as your own. Expect ten minutes, nearly all of it download.
-
-**[Doing it by hand, other builds, every-project install →](docs/install.md)**
+**No administrator rights anywhere**, so it goes on a locked-down work laptop as easily as
+your own. **[By hand, other builds, every-project install →](docs/install.md)**
 
 ## Usage cheatsheet
 
@@ -84,23 +78,16 @@ go stale.
        alt="The Abby for Claude panel: Abby's portrait and the voice picker beside the line she is speaking, turn off, skip line and skip all, a volume slider, a queue, a clickable history, a tick per session, and Abby herself along the bottom">
 </p>
 
-Two ways in, and they open the same window: **`/voice panel`** from Claude Code or a
-terminal, and the **Abby for Claude** icon the installer leaves on your Desktop — no
-terminal needed, and it is how you get the window back after closing it. Either way it
-floats on top, owns nothing, and asks the engine what is happening twice a second:
+**`/voice panel`**, or the **Abby for Claude** icon the installer leaves on your Desktop —
+no terminal needed. It floats on top, owns nothing, and asks the engine what is happening
+twice a second:
 
 - **who is speaking**, what they are saying, and which project it came from — click the
   portrait to swap voice
-- **turn off · skip line · skip all** — the master switch, this sentence, or this sentence
-  and everything queued behind it
-- **volume** — this app's own slider in the Windows mixer, so it takes effect in the middle
-  of a sentence rather than at the next one
-- **history — click any line to hear it again**, played from the audio you already heard, so
-  there is no wait
-- **a tick per session** — untick one and that conversation stops being read aloud
-- voice, portrait size, **dark** and **on top**
-- and **Abby along the bottom**, as large as the window can show her whole — whoever is
-  actually speaking
+- **turn off · skip line · skip all**, and a **volume** slider that bites mid-sentence
+- **history — click any line to hear it again**, from the audio you already heard
+- **a tick per session** — untick one and it stops being read aloud
+- voice, portrait size, **dark**, **on top**, and Abby herself along the bottom
 
 ## The voices
 
