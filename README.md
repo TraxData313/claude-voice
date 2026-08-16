@@ -113,8 +113,7 @@ is running gives you a button to start one.
 
 ## The voices
 
-Two ship with it, both the author's own — original characters, drawn here, borrowed from
-nobody:
+Two ship with it, both the author's own — original characters, borrowed from nobody:
 
 | | | |
 |---|---|---|
@@ -143,7 +142,7 @@ Voices you may keep but not share never need to enter the repo at all — point
 | | |
 |---|---|
 | **[Setup and tour →](docs/tour.md)** | what Claude follows when you ask it to set this up for you |
-| **[The panel →](docs/panel-plan.md)** | build plan for the floating control window — not built yet |
+| **[The panel →](docs/panel-plan.md)** | the floating control window: how it was built, and what changed on the way |
 | **[How it works →](docs/how-it-works.md)** | the engine, the watcher, and the JNI bridge into an app with no CLI |
 | **[Writing for the ear →](docs/writing-for-the-ear.md)** | the TL;DR contract, and why captions sound wrong aloud |
 | **[When it goes quiet →](docs/troubleshooting.md)** | silence has no error message. Start here |
