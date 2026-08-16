@@ -30,7 +30,7 @@ command — it is `/voice on`, never `/voice_on`.
 | `repeat [n]` | Say the last answer's summary again. 'repeat 3' for three answers back. |
 | `repeat-all [n]` | Say the whole of that answer, not just its summary. |
 | `say <text>` | Speak a line of your own, right now. |
-| `stop` | Shut up immediately and drop anything queued. |
+| `stop` | Cut off what is playing now. The voice stays on. ('break' works too.) |
 
 ## Tuning what you hear
 

@@ -172,6 +172,17 @@ class Speaker:
                 _unlink(path)
 
 
+def _tidy_label(label, words=6):
+    """Short enough to hear as a name rather than a sentence."""
+    if not label:
+        return None
+    label = label.replace("_", " ").replace("-", " ").strip()
+    parts = label.split()
+    if len(parts) > words:
+        parts = parts[:words]
+    return " ".join(parts).rstrip(".,:;")
+
+
 def _unlink(path):
     try:
         os.remove(path)
@@ -207,6 +218,8 @@ class TranscriptWatcher(threading.Thread):
         # indistinguishable from the voice quietly breaking again.
         self.offsets = self._load_offsets()
         self.dirty = False
+        self.labels = {}        # transcript -> what to call that session aloud
+        self.last_source = None
 
     def _load_offsets(self):
         try:
@@ -269,9 +282,38 @@ class TranscriptWatcher(threading.Thread):
             # Config is re-read every sweep so 'voice off' takes effect at once.
             if not state.get("enabled") or not state.get("watch", True):
                 continue
+            self._ensure_label(path)
             for line in chunk.splitlines():
-                self._consider(line, state)
+                self._consider(line, state, path)
         self._save_offsets()
+
+    def _ensure_label(self, path):
+        """What to call this session out loud, read once from the transcript.
+
+        A title the user set wins over the one Claude generated; failing both,
+        the project folder. Titles arrive as their own entries and can appear
+        before we start following a file, so the whole file is scanned once.
+        """
+        if path in self.labels:
+            return self.labels[path]
+        custom = ai = cwd = None
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    try:
+                        e = json.loads(line)
+                    except ValueError:
+                        continue
+                    cwd = cwd or e.get("cwd")
+                    if e.get("type") == "custom-title":
+                        custom = e.get("customTitle") or custom
+                    elif e.get("type") == "ai-title":
+                        ai = e.get("aiTitle") or ai
+        except OSError:
+            pass
+        label = custom or ai or (os.path.basename(cwd) if cwd else None)
+        self.labels[path] = _tidy_label(label)
+        return self.labels[path]
 
     @staticmethod
     def _too_old(entry, state):
@@ -290,7 +332,7 @@ class TranscriptWatcher(threading.Thread):
 
     # Not _handle: threading.Thread keeps a _handle attribute of its own on the
     # instance, and it shadows any method of that name.
-    def _consider(self, line, state):
+    def _consider(self, line, state, path):
         line = line.strip()
         if not line:
             return
@@ -298,6 +340,12 @@ class TranscriptWatcher(threading.Thread):
             entry = json.loads(line)
         except ValueError:
             return                                  # a half-written final line
+        # A session can be renamed mid-flight; keep up with it.
+        if entry.get("type") in ("custom-title", "ai-title"):
+            new = _tidy_label(entry.get("customTitle") or entry.get("aiTitle"))
+            if new:
+                self.labels[path] = new
+            return
         if entry.get("type") != "assistant" or self._too_old(entry, state):
             return
         msg = entry.get("message") or {}
@@ -311,16 +359,30 @@ class TranscriptWatcher(threading.Thread):
             return
 
         speech, what = voice_lib.speech_for(text, state)
+        # Dedupe on the words themselves, before any session name is added, so
+        # the same message is not said twice just because it was announced.
         if not speech or voice_lib.already_spoken(speech):
             return
         try:
             voice, kwargs = voice_lib.resolve(state.get("voice"), state.get("source"), state)
         except LookupError as exc:
             return log(f"watcher: {exc}")
-        pieces = voice_lib.chunks(speech)
+
+        # Two sessions talking through one voice are impossible to tell apart.
+        # Name the session, but only when it changes -- announcing every line
+        # would be worse than the confusion it is fixing.
+        label = self.labels.get(path)
+        announced = ""
+        if (state.get("sessionLabel", "title") != "off" and label
+                and self.last_source is not None and self.last_source != path):
+            announced = f"{label}. "
+        self.last_source = path
+
+        pieces = voice_lib.chunks(announced + speech)
         if pieces:
             self.speaker.submit(Job(pieces, voice["id"], kwargs))   # queued, never barging
-            log(f"watcher: {what} [{voice['id']}] {len(pieces)} chunk(s) {speech[:45]}...")
+            log(f"watcher: {what} [{voice['id']}] {len(pieces)} chunk(s) "
+                f"{'<' + label + '> ' if announced else ''}{speech[:40]}...")
 
 
 class Handler(BaseHTTPRequestHandler):

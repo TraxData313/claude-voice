@@ -397,7 +397,7 @@ HELP = [
         ("repeat", "[n]", "Say the last answer's summary again. 'repeat 3' for three answers back."),
         ("repeat-all", "[n]", "Say the whole of that answer, not just its summary."),
         ("say", "<text>", "Speak a line of your own, right now."),
-        ("stop", "", "Shut up immediately and drop anything queued."),
+        ("stop", "", "Cut off what is playing now. The voice stays on. ('break' works too.)"),
     ]),
     ("Tuning what you hear", [
         ("max", "<chars>", "How much of a summary to read. Default 600."),
@@ -477,7 +477,8 @@ def cmd_narrate(state, args):
 
 COMMANDS = {
     "on": cmd_on, "off": cmd_off, "toggle": cmd_toggle, "status": cmd_status,
-    "list": cmd_list, "set": cmd_set, "say": cmd_say, "stop": cmd_stop,
+    "list": cmd_list, "set": cmd_set, "say": cmd_say,
+    "stop": cmd_stop, "break": cmd_stop, "shush": cmd_stop,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,
     "clone": cmd_clone,
     # Named several ways on purpose. This gets typed from memory while
