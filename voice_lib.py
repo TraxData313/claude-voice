@@ -45,6 +45,9 @@ DEFAULTS = {
     "watch": True,
     # Pause between one message and the next, so the seam is audible.
     "gapSeconds": 0.45,
+    # After a restart the watcher resumes where it left off, but will not read
+    # anything older than this -- catching up after a crash, not after a night.
+    "catchupSeconds": 300,
 }
 
 

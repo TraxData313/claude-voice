@@ -195,12 +195,36 @@ class TranscriptWatcher(threading.Thread):
 
     PROJECTS = os.path.expanduser(os.path.join("~", ".claude", "projects"))
     FRESH_SECONDS = 15 * 60      # ignore transcripts nobody has touched lately
+    OFFSETS = os.path.join(voice_lib.LOG_DIR, "watch-offsets.json")
 
     def __init__(self, speaker, interval=0.7):
         super().__init__(name="watcher", daemon=True)
         self.speaker = speaker
         self.interval = interval
-        self.offsets = {}
+        # Remembered across restarts. Without this, an engine that dies takes
+        # every message written while it was gone with it -- the watcher would
+        # resume at the end of the file and never mention them, which is
+        # indistinguishable from the voice quietly breaking again.
+        self.offsets = self._load_offsets()
+        self.dirty = False
+
+    def _load_offsets(self):
+        try:
+            with open(self.OFFSETS, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError):
+            return {}
+
+    def _save_offsets(self):
+        if not self.dirty:
+            return
+        try:
+            os.makedirs(voice_lib.LOG_DIR, exist_ok=True)
+            with open(self.OFFSETS, "w", encoding="utf-8") as fh:
+                json.dump(self.offsets, fh)
+            self.dirty = False
+        except OSError:
+            pass
 
     def run(self):
         if not os.path.isdir(self.PROJECTS):
@@ -228,7 +252,11 @@ class TranscriptWatcher(threading.Thread):
         for path, size in self._transcripts():
             seen = self.offsets.get(path)
             if seen is None:
-                self.offsets[path] = size      # start at the end, not the beginning
+                # Never seen this file: start at its end rather than reading a
+                # whole conversation aloud. A remembered offset, by contrast, is
+                # resumed from -- that is the point of remembering it.
+                self.offsets[path] = size
+                self.dirty = True
                 continue
             if size <= seen:
                 self.offsets[path] = min(seen, size)   # truncated or rewritten
@@ -237,11 +265,28 @@ class TranscriptWatcher(threading.Thread):
                 fh.seek(seen)
                 chunk = fh.read()
                 self.offsets[path] = fh.tell()
+                self.dirty = True
             # Config is re-read every sweep so 'voice off' takes effect at once.
             if not state.get("enabled") or not state.get("watch", True):
                 continue
             for line in chunk.splitlines():
                 self._consider(line, state)
+        self._save_offsets()
+
+    @staticmethod
+    def _too_old(entry, state):
+        """Skip a backlog. Catching up after a crash is worth it; reciting what
+        was said while the machine was off overnight is not."""
+        stamp = entry.get("timestamp")
+        if not stamp:
+            return False
+        try:
+            from datetime import datetime, timezone
+            when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - when).total_seconds()
+        except ValueError:
+            return False
+        return age > state.get("catchupSeconds", 300)
 
     # Not _handle: threading.Thread keeps a _handle attribute of its own on the
     # instance, and it shadows any method of that name.
@@ -253,7 +298,7 @@ class TranscriptWatcher(threading.Thread):
             entry = json.loads(line)
         except ValueError:
             return                                  # a half-written final line
-        if entry.get("type") != "assistant":
+        if entry.get("type") != "assistant" or self._too_old(entry, state):
             return
         msg = entry.get("message") or {}
         if msg.get("role") != "assistant":
