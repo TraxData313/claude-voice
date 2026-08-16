@@ -81,8 +81,17 @@ def load_state():
 
 
 def save_state(state):
+    """Write down only what differs from the defaults.
+
+    Saving the whole merged dict looks harmless and is not: every default gets
+    frozen into the file the first time anything is saved, so improving a
+    default later never reaches anyone who has already run the tool. That is
+    exactly how 'sessionLabel' went on announcing the session title after the
+    default had moved to the project name.
+    """
+    lean = {k: v for k, v in state.items() if k not in DEFAULTS or DEFAULTS[k] != v}
     with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
-        json.dump(state, fh, indent=2)
+        json.dump(lean, fh, indent=2)
         fh.write("\n")
 
 
