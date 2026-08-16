@@ -12,3 +12,7 @@ in the repo that shows their faces comes from these two files:
 They are kept here at full size so the derived copies can always be made again.
 Both are original characters, the author's own, borrowed from nobody — the same
 rule as the voices themselves. See [voices.md](../voices.md).
+
+The look is a nod to **Genndy Tartakovsky** — *Samurai Jack* above all, and the
+painted backgrounds that go with it. A style, admired and followed; the
+characters are not his and there is no connection to him or to the show.

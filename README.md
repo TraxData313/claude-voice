@@ -145,6 +145,10 @@ Two ship with it, both the author's own — original characters, borrowed from n
 ▶ **[Hear them both](https://traxdata313.github.io/claude-voice/)** — GitHub will not play
 audio inside a README, so the two samples live on a page of their own.
 
+> *With thanks to **Genndy Tartakovsky**, whose* Samurai Jack *is why they look the way they
+> do — the flat shapes, the spare linework, those painted backgrounds. The characters are
+> ours; the debt is to the style, and to the spirit of the thing.*
+
 Switch any time with `/voice set abby` or `/voice set max`. The manner changes tone, never
 substance: neither voice will cheer a result that has not been checked.
 
