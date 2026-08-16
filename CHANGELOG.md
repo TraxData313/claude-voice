@@ -6,6 +6,42 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.2.0 — 2026-08-16
+
+**She installs herself as a plugin now, and she says things in shorter bites.**
+
+Everything up to here assumed you would clone a repository and read the instructions. Claude
+Code has a plugin system and a directory to be listed in, and what this already had — a
+slash command — is exactly what a plugin carries.
+
+- **Installable.** `/plugin marketplace add TraxData313/claude-voice`, then `/plugin install
+  claude-voice@claude-voice`. This repository is both the plugin and its own catalogue, so
+  nobody waits on a review queue to get it. Passes `claude plugin validate --strict`.
+- **`/claude-voice:setup`** fetches the engine and the model — the 3 GB a plugin download
+  cannot carry. It says what it is about to pull down *before* it starts, takes `--whatif`,
+  and refuses to run itself unasked, because a skill that can start a 3 GB download has no
+  business being something a model reaches for on its own.
+- **It names the hardware before the download, not after.** Both engine builds are CUDA
+  builds and there is no CPU one, so on AMD, Intel graphics or a Mac this fails at model
+  load. That is a terrible place to learn it, and now the README, the install guide and the
+  site all say so at the door.
+- **The video-memory figure is published as an estimate and labelled one.** The models are
+  2.2 GB of weights, so ~4 GB is arithmetic plus room to work — but only a 16 GB card has
+  ever run this, and pretending otherwise would be inventing a number. Reports from smaller
+  cards welcome; it is the one figure here nobody has established.
+- **Summaries are short bullets now, not paragraphs.** Heard once and in order, a sentence
+  that runs on has lost its own beginning by the time it ends. The note also says plainly
+  that an answer *without* a summary is not summarised but recited, start to finish, which
+  was the actual reason listening got tiring.
+- **A thirty-second demo, with sound**, on the pages — both voices, the panel, and what
+  installing looks like. It only downloads if you press play.
+- `commands\voice.md` moved to `templates\`. It was never a command; it is the template the
+  installer fills in. But `commands\` at a plugin root is read as *real* commands, so
+  leaving it there would have shipped a `/voice` still saying `__PYTHON__`.
+
+Running this one needs `setup.ps1` again, and Claude Code restarted afterwards: the notes
+it installs have changed, and hooks and slash commands are read once, at session start.
+
 ## 1.1.0 — 2026-08-16
 
 **She stays the same person the whole way through an answer now, and she has stopped buzzing.**

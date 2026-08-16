@@ -1,18 +1,18 @@
 {
-  "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md.",
+  "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
 
-  "version": "1.1.0",
+  "version": "1.2.0",
   "date": "2026-08-16",
 
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "She stays the same person the whole way through an answer now, and she has stopped buzzing.",
+  "headline": "She installs herself as a plugin now, and she says things in shorter bites.",
 
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "An answer is one generation now, spoken as it is made, so the voice no longer changes partway through.",
-    "She starts talking sooner. The first words arrive in about a second instead of two.",
-    "A clip that babbles past its own text is thrown away and made again. That was the buzzing.",
-    "Long answers are read out in full rather than cut short, and a cut now says that it happened."
+    "Claude Code can install her itself now, in two commands, instead of you cloning a repository.",
+    "A setup step fetches the engine and the model, and says what it is about to download before it starts.",
+    "Summaries come as short bullets rather than paragraphs, which is easier to take in by ear.",
+    "The page finally says what your machine needs: Windows, an NVIDIA card, and about three gigabytes."
   ],
 
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
