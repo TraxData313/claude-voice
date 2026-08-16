@@ -24,21 +24,35 @@ Short answers are read whole. Nothing is repeated, nothing talks over anything e
 
 ## Try it in five minutes
 
-Paste this into a new Claude Code session. That is the whole install.
+Windows only. Two things have to be installed by hand first — both are ordinary installers,
+and Claude does the rest.
+
+**1. Python** — [python.org/downloads/windows](https://www.python.org/downloads/windows/).
+Tick **"Add python.exe to PATH"** in the installer. Nothing else is needed: this uses the
+standard library only, so there is nothing to `pip install`.
+*(Already have [Miniconda](https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe)
+or Anaconda? That works too — the installer records the full path to your `python.exe`,
+so a conda install that is not on PATH is fine.)*
+
+**2. Qwen-TTS Studio** — from its
+[Releases page](https://github.com/Danmoreng/qwen-tts-studio/releases). Take the
+`windows-cuda-bundled` build unless you already have NVIDIA's CUDA runtime; either the MSI
+or the portable ZIP. **Then launch it once** and let the Welcome screen download
+**`qwen-talker-1.7b-base`**. That step is the one thing nobody can do for you, and the size
+matters: it produces 2048-dimension embeddings, while the 0.6b model gives 1024 and will
+not work with voices made by the larger one. No separate Java needed — Studio ships its own.
+
+**3. Then paste this into a new Claude Code session.** That is the whole of the rest.
 
 ```
 Clone https://github.com/TraxData313/claude-voice here, then follow docs/tour.md
 in it: set it up, turn it on, and give me the spoken tour.
 ```
 
-It clones the repo, checks what you already have, installs it, switches it on — and then
-*tells you out loud* how to change voice, how to shush it mid-sentence, how to turn it off,
-and where the rest of the commands live. If something is missing it will say so plainly
+It clones the repo, checks what you have, installs it, switches it on — and then *tells you
+out loud* how to change voice, how to shush it mid-sentence, how to turn it off, and where
+the rest of the commands live. If either of the two above is missing, it will say so plainly
 rather than pretending it worked.
-
-You need **Windows**, **Python 3.9+** (standard library only — nothing to `pip install`),
-and **[Qwen-TTS Studio](https://github.com/Danmoreng/qwen-tts-studio)** with a talker model.
-Only the last one needs you: Studio has to be launched once by hand to download the model.
 
 <details>
 <summary>Or do it yourself</summary>
@@ -59,16 +73,8 @@ First load takes 40–60 seconds; after that the engine stays warm and answers s
 speaking almost at once.
 </details>
 
-> **Getting Studio ready.** Take a build from its
-> [Releases page](https://github.com/Danmoreng/qwen-tts-studio/releases) — the
-> `windows-cuda-bundled` one unless you already have NVIDIA's CUDA runtime. Launch it once
-> and let the Welcome screen fetch **`qwen-talker-1.7b-base`**. The size is not a free
-> choice: it produces 2048-dimension embeddings, and the 0.6b model gives 1024 and will not
-> work with voices made by the larger one. No separate Java needed — Studio ships its own,
-> and that is the one this drives.
->
-> To speak in **every** project rather than one, install into your user settings:
-> `.\install.ps1 -ProjectDir $env:USERPROFILE`. Do one or the other, not both.
+> **Speaking in every project** rather than just this one: install into your user settings
+> with `.\install.ps1 -ProjectDir $env:USERPROFILE`. Do one or the other, not both.
 
 ## The controls
 
