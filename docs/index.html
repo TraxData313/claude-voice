@@ -102,6 +102,13 @@
   }
   .copy:hover { filter: brightness(1.1); }
   .copy.done { background: var(--paper); }
+  .demo { margin: 30px 0 0; }
+  .demo video {
+    display: block; width: 100%; height: auto;
+    border-radius: 14px; background: #000;
+    border: 3px solid var(--ink);
+  }
+  .demo figcaption { color: var(--dim); font-size: 13px; margin-top: 10px; text-align: center; }
   .shot { margin-top: 34px; text-align: center; }
   .shot img { max-width: 380px; width: 100%; border-radius: 12px; }
   .shot figcaption { color: var(--dim); font-size: 13px; margin-top: 10px; }
@@ -115,6 +122,20 @@
        arrives and the page below does not jump once it does. -->
   <img class="banner" src="banner.svg" width="820" height="240"
        alt="claude-voice — Claude Code, out loud. Locally.">
+
+  <!-- Served from here rather than from the release, because a release asset comes
+       back as application/octet-stream and whether a browser plays that is up to its
+       own sniffing. Pages sends video/mp4, which nothing has to guess about. The 6 MB
+       rides along in the plugin clone, which is nothing against the 3 GB of model.
+       preload="none": the poster is all anyone downloads unless they press play. -->
+  <figure class="demo">
+    <video controls playsinline preload="none" poster="og.png" width="1920" height="1080"
+           src="demo.mp4">
+      Your browser will not play this one.
+      <a href="demo.mp4">The same thirty seconds, to download</a>.
+    </video>
+    <figcaption>Thirty seconds, with sound: both voices, the panel, and what installing looks like.</figcaption>
+  </figure>
 
   <h1>Hear the voices</h1>
   <p class="lede">
@@ -234,11 +255,15 @@ in it: set it up, turn it on, and give me the spoken tour.</pre>
       }
     }
 
-    document.querySelectorAll('audio').forEach(function (player) {
+    document.querySelectorAll('audio, video').forEach(function (player) {
       var counted = false;
       player.addEventListener('play', function () {
         if (counted) return;
         counted = true;
+        if (player.tagName === 'VIDEO') {
+          count('watched-demo', 'Started the demo video');
+          return;
+        }
         var who = (player.getAttribute('src') || '').split('/').pop().replace('.wav', '');
         count('listened-' + who, 'Played a sample: ' + who);
       });
