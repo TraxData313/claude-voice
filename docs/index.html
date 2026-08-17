@@ -54,12 +54,45 @@
   * { box-sizing: border-box; }
   body {
     margin: 0; padding: 32px 20px 64px;
-    background: linear-gradient(160deg, var(--sky), var(--deep) 70%);
+    /* Held under the painting, so the page is the right colour for the half
+       second before a 190 KB background lands, and stays right if it never does. */
+    background: var(--deep);
     color: var(--paper);
     font: 16px/1.6 Verdana, "Trebuchet MS", sans-serif;
     min-height: 100vh;
   }
-  .wrap { max-width: 860px; margin: 0 auto; }
+  /* The painting, held still while the page scrolls over it. A fixed
+     pseudo-element rather than background-attachment: fixed, which iOS Safari
+     has never scrolled smoothly. The layers are given real z-indexes and the
+     column is lifted to 1, rather than the usual trick of pushing them to -1:
+     that one only works while body's own background propagates to the canvas,
+     and it stops the day anyone gives html a background. */
+  body::before, body::after { content: ""; position: fixed; inset: 0; z-index: 0; }
+  body::before {
+    background: url(art/garden.jpg) 50% 45% / cover no-repeat;
+  }
+  /* The scrim, which is doing legibility rather than decoration: the text is
+     near-white and the middle of the painting is bright mist, so without it the
+     lede and the notes sit on sky and vanish. */
+  body::after {
+    background:
+      /* A band of shade, kept wide enough to hold the 860px column and its
+         padding whatever the window does — hence pixels from the centre rather
+         than percentages, which narrow along with the window and somewhere
+         around 1200px leave the column's own edges standing on lit painting.
+         Past the band it thins towards the sides of a wide screen, so the
+         garden is actually seen rather than merely implied. On a narrow one
+         both stops land at 0 and the whole width is simply shaded. */
+      linear-gradient(90deg,
+        rgba(14, 42, 58, .28) 0,
+        rgba(16, 46, 62, .88) calc(50% - 470px),
+        rgba(16, 46, 62, .88) calc(50% + 470px),
+        rgba(14, 42, 58, .28) 100%),
+      /* and a little more weight towards the foot, where the painting keeps its
+         brightest flowers and the footer is at its smallest and dimmest. */
+      linear-gradient(rgba(14, 42, 58, 0), rgba(14, 42, 58, .34));
+  }
+  .wrap { position: relative; z-index: 1; max-width: 860px; margin: 0 auto; }
   .banner { width: 100%; height: auto; display: block; }
   h1 { font-size: 26px; margin: 40px 0 6px; }
   .lede { color: var(--dim); margin: 0 0 28px; font-size: 15px; }
