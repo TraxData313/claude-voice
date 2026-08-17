@@ -1305,11 +1305,81 @@ def place(root, geometry):
     root.geometry(geometry if on_screen else size)
 
 
+def raise_open_panel():
+    """Bring an open panel to the front. True if there was one to bring.
+
+    Every way in -- the Desktop shortcut, `voice_cli.py panel`, the update's own
+    restart -- just spawns this file, and nothing here ever asked whether a
+    window was already up. So a second double click gave you a second identical
+    window instead of the one you meant to look at.
+
+    Keyed on the window rather than on a pidfile or a named mutex, because the
+    window is the thing being duplicated. reopen_panel destroys this one before
+    it spawns its replacement, so the replacement finds nothing to raise even
+    though the old process is still winding down -- which a pid would have got
+    wrong, and would have left an update unable to reopen its own panel.
+    """
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        user32 = ctypes.WinDLL("user32")
+        # Window handles are pointer-sized. ctypes hands back a C int unless it
+        # is told otherwise, and a truncated handle is a window that quietly
+        # cannot be found -- so every signature is spelled out.
+        user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+        user32.FindWindowW.restype = wintypes.HWND
+        user32.GetForegroundWindow.argtypes = []
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, wintypes.LPDWORD]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32.IsIconic.argtypes = [wintypes.HWND]
+        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+
+        hwnd = user32.FindWindowW(None, APP_NAME)
+        if not hwnd:
+            return False
+
+        SW_RESTORE = 9
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+
+        # SetForegroundWindow refuses a caller that is not already in front, and
+        # a double click on the Desktop leaves Explorer holding that -- so on its
+        # own it would raise nothing and the click would look ignored. Borrowing
+        # the foreground thread's input queue for the length of the call is the
+        # documented way to be allowed.
+        here = ctypes.windll.kernel32.GetCurrentThreadId()
+        front = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), None)
+        lent = bool(front) and front != here and bool(
+            user32.AttachThreadInput(front, here, True))
+        try:
+            user32.SetForegroundWindow(hwnd)
+        finally:
+            if lent:
+                user32.AttachThreadInput(front, here, False)
+        return True
+    except (OSError, AttributeError, ValueError):
+        # Never let raising a window stop a window from opening.
+        return False
+
+
 def main():
     state = voice_lib.load_state()
     ap = argparse.ArgumentParser(description="The claude-voice panel.")
     ap.add_argument("--port", type=int, default=state["port"])
+    ap.add_argument("--force", action="store_true",
+                    help="open a window even if one is already up")
     args = ap.parse_args()
+
+    if not args.force and raise_open_panel():
+        # A no-op under pythonw, where stdout is None; the point of the click was
+        # the window, and that is now in front of them.
+        print(f"{APP_NAME} was already open -- brought it to the front.")
+        return
 
     root = tk.Tk()
     place(root, state.get("panelGeometry"))

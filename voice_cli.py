@@ -291,7 +291,10 @@ def cmd_panel(state, _args):
     except ImportError:
         raise SystemExit("this Python has no tkinter, so the panel cannot open")
     voice_lib.start_panel(state)
-    print("Panel opened -- it floats on top. Closing it changes nothing else.")
+    # "is up" rather than "opened", because the spawn is detached and cannot say
+    # which of the two happened: panel.py raises a window that is already there
+    # instead of adding a second one, and either way there is now a panel.
+    print("Panel is up -- it floats on top. Closing it changes nothing else.")
     if not voice_lib.server_alive(state["port"]):
         print("  The engine is not running; the panel has a button to start it.")
 

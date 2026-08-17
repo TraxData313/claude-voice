@@ -6,6 +6,35 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.3.1 — 2026-08-17
+
+**Her icon opens the window you already have, instead of a second one just like it.**
+
+Nothing had ever asked whether a panel was up. Every way in — the Desktop shortcut,
+`voice_cli.py panel`, the update's own restart — spawns `panel.py`, and `main()` built a
+`tk.Tk()` regardless. Click the icon with the window already open and you got two of them,
+both live, both polling the engine, and no way to tell which was which.
+
+- **Keyed on the window, not on a pidfile or a named mutex.** The window is the thing being
+  duplicated, and asking about it directly gets the awkward case right for free:
+  `reopen_panel` destroys its own window *before* spawning the replacement, so the
+  replacement finds nothing to raise while the old process is still winding down. A pid
+  would have called that "already running" and left an update unable to reopen its panel.
+- **Raising it takes more than `SetForegroundWindow`.** Windows refuses that call from a
+  process that is not already in front, and a double click on the Desktop leaves Explorer
+  holding the foreground — so on its own, the click would have looked ignored. It
+  un-minimises first, then borrows the foreground thread's input queue for the length of
+  the call, which is the documented way to be allowed.
+- **Every handle signature is spelled out.** Window handles are pointer-sized and ctypes
+  hands back a C int unless told otherwise. A truncated handle is not an error; it is a
+  window that quietly cannot be found, which here would have read as the fix not working.
+- **`--force` opens a second one anyway.** The guard is about the accidental double, not
+  about forbidding two.
+- **`voice_cli.py panel` says "Panel is up" rather than "Panel opened".** The spawn is
+  detached and cannot know which of the two happened, and only one of them is opening.
+
+A pull is enough for this one. Nothing it changes is installed outside the folder.
+
 ## 1.3.0 — 2026-08-17
 
 **She knows whose voice she is speaking in now, and lets a little of it show.**
