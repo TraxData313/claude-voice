@@ -1047,6 +1047,14 @@ def main():
         log(f"cannot bind port {args.port} ({exc}); another engine is probably up")
         return
 
+    # A pull brings in a new speaking-notes.md and installs nothing, so the note
+    # a session reads at startup would go on teaching last month's rules until
+    # somebody ran setup.ps1 by hand. An update restarts the engine anyway, so
+    # this is the one place that reliably runs after a pull and before the next
+    # session begins. Costs two small reads when there is nothing to do.
+    if voice_lib.sync_notes(state=state):
+        log("speaking notes in CLAUDE.md were out of date; refreshed")
+
     Handler.speaker = Speaker(state)
     if state.get("watch", True):
         Handler.watcher = TranscriptWatcher(Handler.speaker)

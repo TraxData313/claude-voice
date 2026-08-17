@@ -6,6 +6,67 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.3.0 — 2026-08-17
+
+**She knows whose voice she is speaking in now, and lets a little of it show.**
+
+Every session already read one line saying which voice was set. A name is trivia: a session
+told only *"the voice is Abby"* still writes as though handing finished text to a component
+further down the line. This replaces the line with a short block that says what is actually
+happening, and then trusts the session to judge it.
+
+- **Playing the part a little is the default.** The voice is the face the user meets, so a
+  bit of its manner belongs in what they hear, without overdoing it. The block says outright
+  that none of it is a rule and that plain Claude is a fine answer if that is what is wanted
+  — the point is to describe the situation rather than issue an instruction.
+- **The manner comes from the persona string, not from the block.** It says "a calm voice
+  can be calming, a bright one can be bright" and points at the description above it, so a
+  voice you clone tomorrow works as well as the two that shipped.
+- **What keeps that safe is scope, not restraint.** It belongs to the `## TL;DR` and the
+  short lines between tool calls, and nowhere near the body of an answer. Personas describe
+  a *voice*, not a manner — Max's reads "brave, driving, motivating", and a session that
+  took that for a writing instruction would deliver a stack trace as a pep talk.
+- **The old line was ambiguous rather than silent.** "Cute, slightly nerdy American girl"
+  sat next to *"that is you"* with nothing saying whether it described the timbre or the
+  writer, so sessions resolved it differently from one day to the next. Unstable is worse
+  than either answer.
+- **`voice_cli.py status` says the same thing** as the block in `CLAUDE.md` rather than a
+  terser version of it. Two renderings of one persona had already drifted apart once.
+- **Voices with no persona get the identity paragraphs only.** Told to let a character
+  through with none described, a session invents one.
+- **The note reinstalls itself now, and this is the last release that needs setup for it.**
+  `~\.claude\CLAUDE.md` was copied out of `speaking-notes.md` at install time and nothing
+  ever put it back, so 1.2.0's new summary rule reached the repo and stopped there — every
+  session carried on reciting the old one. `voice_lib.sync_notes()` rewrites the block on
+  every engine start and after `/voice update --apply`. From here, changing how Claude is
+  told to write takes a pull and a restart.
+  - It only refreshes a block that is already there. No markers, no edit — deleting them is
+    still how you turn the note off, and nothing will put it back.
+  - It writes only when the result differs, so the engine-start check costs two small reads.
+  - **The block now says so itself**, in a comment at the top: generated, rewritten on
+    every voice change, put additions and overrides *below* the closing marker. That
+    warning is aimed at Claude more than at you. `CLAUDE.md` is exactly the file a session
+    writes to when it runs `/init` or is told to remember something, and nothing else in
+    there tells it that one stretch of the file is owned by an app. Quietly eating a note
+    somebody asked to be kept is a worse failure than any of this being out of date.
+  - `speaking-notes.md` came off the list of files that force a `setup.ps1`. It was the
+    worst one to leave to a hand-run installer, because a stale slash command breaks
+    visibly and a session following last month's rules looks exactly like a session.
+- **The panel's history says which project each line came from.** It showed the session
+  title only, and four rows reading "Review feature idea" say nothing about which repo was
+  talking — the answer was sitting in the session list at the bottom of the same window.
+  The project gets a column of its own rather than the `project · title` prefix used down
+  there: those rows are the full width of the window and have room to run a pair together,
+  while a history row does not, and a joined pair truncates into porridge. A column also
+  reads straight down, which is the actual question being asked of it.
+- **`docs/writing-for-the-ear.md` had been left behind by 1.2.0** and still taught summaries
+  as five plain sentences while the installed notes taught ten short bullets. Template and
+  guide now agree. The 600-character lesson survives, attached to the rule it actually
+  supports.
+
+Re-run setup for this one. A pull does not rewrite `~\.claude\CLAUDE.md`, which is the only
+place any of it takes effect.
+
 ## 1.2.0 — 2026-08-16
 
 **She installs herself as a plugin now, and she says things in shorter bites.**

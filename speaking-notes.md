@@ -1,4 +1,14 @@
 <!-- claude-voice -->
+<!-- GENERATED, and not by hand. claude-voice writes everything down to the closing
+     claude-voice marker from its own speaking-notes.md, and rewrites it whenever the
+     voice changes or the app updates. Nothing added in here survives that.
+
+     Adding to it, or overriding any of it: write below the closing marker. That part
+     is never touched, and saying "ignore the block above about X" there works fine.
+     Changing it for good: edit speaking-notes.md in the claude-voice repo, then
+     restart the engine. Both of those beat editing here, which only looks like it
+     worked until the next voice change. -->
+
 ## You are being read aloud
 
 Your answers are spoken out loud by claude-voice while the user listens. Write them to be

@@ -9,6 +9,7 @@ and voice_cli.py (the switch).
 import json
 import os
 import re
+import textwrap
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(ROOT, "config.json")
@@ -682,16 +683,141 @@ def question_speech(tool_input, max_chars=4000):
 
 
 CLAUDE_MD = os.path.expanduser(os.path.join("~", ".claude", "CLAUDE.md"))
+NOTES_PATH = os.path.join(ROOT, "speaking-notes.md")
 _MARK_OPEN = "<!-- current-voice -->"
 _MARK_CLOSE = "<!-- /current-voice -->"
+_NOTE_OPEN = "<!-- claude-voice -->"
+_NOTE_CLOSE = "<!-- /claude-voice -->"
+
+
+def _voice_block(voice):
+    """The text between the current-voice markers. See announce_voice."""
+    name = voice["name"]
+    persona = (voice.get("persona") or "").rstrip(".")
+    paras = [
+        f"The voice is currently **{name}**" + (f" — {persona}." if persona else "."),
+        f"Your lines are spoken out loud in that voice, so it is nice to play {name} a "
+        f"little. Don't be caught out when the user calls you that — to them it is your "
+        f"name, and answering to it costs nothing.",
+        f"The words are heard rather than read, so write them to be easy on the ear."
+        + (f" And they are heard as {name}, so let them sit in that spirit: take the manner "
+           f"from the description above and follow it without overdoing it. A calm voice can "
+           f"be calming. A bright one can be bright." if persona else ""),
+    ]
+    if persona:
+        paras.append(
+            f"Where it belongs is the part that is actually heard: the `## TL;DR` and the "
+            f"short lines between tool calls. Not the body of an answer — a character "
+            f"reading somebody a stack trace helps nobody. None of this is a rule to "
+            f"follow; if the user would rather have plain Claude, that is the answer. It is "
+            f"what is happening, so that you can judge it yourself.")
+    return _MARK_OPEN + "\n" + "\n\n".join(textwrap.fill(p, 90) for p in paras) + "\n"
+
+
+def _spliced(text, open_mark, close_mark, body):
+    """text with everything between the markers replaced. None if no markers.
+
+    The closing marker comes back off the original rather than out of `body`,
+    so a caller cannot lose it by forgetting to include it.
+    """
+    start, end = text.find(open_mark), text.find(close_mark)
+    if start == -1 or end == -1 or end < start:
+        return None
+    return text[:start] + body + text[end:]
+
+
+def sync_notes(path=None, state=None):
+    """Put the current speaking notes back into CLAUDE.md, voice block and all.
+
+    Everything else a release installs -- the slash command, the hooks, the
+    desktop shortcut -- needs the PowerShell installer run again. The note does
+    not: it is one marker-to-marker splice, which is already what announce_voice
+    does for the block inside it. So this is the one installed file that can put
+    itself right, and it is the one that matters most, because it is the whole
+    of what a session knows about being heard.
+
+    Which is the point. A release that changes how Claude is told to write used
+    to reach nobody until they read a line of output and went and ran setup.ps1
+    by hand, and the note is precisely the file whose staleness is invisible --
+    a session following last month's rules looks exactly like a session.
+
+    Two things it deliberately does not do. It will not create the block, only
+    refresh one that is already there: no markers, no edit, so deleting them is
+    still the whole of turning the note off and this will not undo that. And it
+    writes only when the result differs, so calling it on every engine start
+    costs two small reads and nothing else.
+
+    Note that this replaces the whole block, so hand edits inside the markers do
+    not survive an update. Put your own wording outside them; that has always
+    been the deal with install.ps1, and this only makes it happen sooner.
+    """
+    path = path or CLAUDE_MD
+    try:
+        with open(NOTES_PATH, encoding="utf-8") as fh:
+            template = fh.read().rstrip()
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return False
+
+    start, end = text.find(_NOTE_OPEN), text.find(_NOTE_CLOSE)
+    if start == -1 or end == -1 or end < start:
+        return False
+    # The template carries both of its own markers, so the tail resumes after
+    # the closing one -- and it is rstripped, so what follows the block is left
+    # exactly as it was. Anything else grows a blank line per call.
+    fresh = text[:start] + template + text[end + len(_NOTE_CLOSE):]
+
+    state = state or load_state()
+    try:
+        voice, _ = resolve(state["voice"], state.get("source"), state)
+    except LookupError:
+        voice = None                       # a voice that has since been deleted
+    if voice:
+        fresh = _spliced(fresh, _MARK_OPEN, _MARK_CLOSE, _voice_block(voice)) or fresh
+
+    if fresh == text:
+        return False
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(fresh)
+    except OSError:
+        return False
+    return True
 
 
 def announce_voice(voice, path=None):
     """Write the current voice into the note every session loads at startup.
 
     That file is read once when a session begins, so a session cannot discover
-    a voice chosen later without being asked to go and look. Keeping one marked
-    line up to date means it simply knows, with nothing to run.
+    a voice chosen later without being asked to go and look. Keeping this block
+    up to date means it simply knows, with nothing to run.
+
+    It says more than the name on purpose. A session told only "the voice is
+    Abby" still writes as though handing finished text to a component further
+    down the line; one told the answers are *said* in that voice, to somebody
+    listening, has a reason to write differently -- which is the point of the
+    notes above it. Given the situation instead of a rule, it can judge.
+
+    Playing the part a little is the default: the voice is the face the user
+    actually meets, and a session that knows whose face it is wearing does the
+    job better than one performing to order. It is told to take the manner from
+    the persona string rather than from anything written here, because the whole
+    point is that the user can add voices nobody anticipated -- "a calm voice
+    can be calming" adapts; a list of adjectives would not.
+
+    What keeps it from going wrong is scope, not restraint, because personas
+    describe a voice and not a manner. Max's reads "brave, driving, motivating",
+    and a session that took that for a writing instruction would deliver a stack
+    trace as a pep talk. Abby's is mild enough to hide the problem; his is not.
+    Hence: colour what is heard, leave the body of an answer alone.
+
+    No pronouns for the voice, deliberately -- this text is generated for every
+    voice in the catalogue, including ones nobody here has met.
+
+    Voices with no persona get the first two paragraphs only. "Let the character
+    through" reads as an instruction to invent one when there is nothing above
+    it to point at.
 
     Only the text between the markers is touched. No markers, no edit.
     """
@@ -701,18 +827,12 @@ def announce_voice(voice, path=None):
             text = fh.read()
     except OSError:
         return False
-    start, end = text.find(_MARK_OPEN), text.find(_MARK_CLOSE)
-    if start == -1 or end == -1 or end < start:
+    fresh = _spliced(text, _MARK_OPEN, _MARK_CLOSE, _voice_block(voice))
+    if fresh is None:
         return False
-
-    persona = (voice.get("persona") or "").rstrip(".")
-    line = (f"{_MARK_OPEN}\nThe voice is currently **{voice['name']}**"
-            + (f" — {persona}." if persona else ".")
-            + f" That is you: if the\nuser calls you {voice['name']}, they mean you, "
-              "so answer to it.\n")
     try:
         with open(path, "w", encoding="utf-8") as fh:
-            fh.write(text[:start] + line + text[end:])
+            fh.write(fresh)
     except OSError:
         return False
     return True

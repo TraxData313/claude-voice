@@ -1,5 +1,6 @@
-Wrote C:\Users\Trax\Documents\claude-voice\docs\commands.md
-` inside Claude Code, or
+# Commands
+
+Everything below works two ways: `/voice status` inside Claude Code, or
 `python voice_cli.py status` in a terminal. Mind the space in the slash
 command — it is `/voice on`, never `/voice_on`.
 

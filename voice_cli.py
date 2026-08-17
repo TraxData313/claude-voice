@@ -128,22 +128,27 @@ def cmd_list(state, args):
 
 
 def _persona_lines(state):
-    """The manner that goes with the current voice, for whoever is speaking as it."""
+    """The character that goes with the current voice, for whoever speaks as it.
+
+    'status' is what a session runs to find out where it stands, so it says the
+    same thing voice_lib.announce_voice writes into CLAUDE.md rather than a
+    terser version of it -- a session that read both should not come away with
+    two different ideas of how much of the character to let show.
+
+    ASCII only. This goes to a Windows console, where an em dash is a crash.
+    """
     try:
         voice, _ = voice_lib.resolve(state["voice"], state["source"], state)
     except LookupError:
         return []
     if not voice.get("persona"):
         return []
-    body = voice["persona"]
-    wrapped, line = [], "   "
-    for word in body.split():
-        if len(line) + len(word) + 1 > 76:
-            wrapped.append(line)
-            line = "   "
-        line += " " + word
-    wrapped.append(line)
-    return [f"  You are {voice['name']}. When the user calls you that, they mean you."] + wrapped
+    import textwrap
+    body = (f"You are {voice['name']} -- {voice['persona'].rstrip('.')}. Your lines are "
+            f"spoken out loud in that voice, so play the part a little and take the manner "
+            f"from that description. It belongs in the summary and the short lines between "
+            f"tool calls, not in the body of an answer.")
+    return ["  " + l for l in textwrap.fill(body, 74).splitlines()]
 
 
 def cmd_set(state, args):

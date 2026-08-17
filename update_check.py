@@ -47,11 +47,15 @@ CACHE_PATH = os.path.join(voice_lib.LOG_DIR, "update-check.json")
 CONTACT_LOG = os.path.join(voice_lib.LOG_DIR, "update.log")
 
 # Files a `git pull` brings in but does not install. The slash command and the
-# hooks were copied out of here into .claude at setup time, and the note into
-# ~\.claude\CLAUDE.md, so a release that changes any of them needs setup.ps1
-# run again before the change reaches anything.
-INSTALLED_FROM = ("commands/", "speaking-notes.md", "install.ps1", "setup.ps1",
-                  "make_shortcut.ps1")
+# hooks were copied out of here into .claude at setup time, so a release that
+# changes any of them needs setup.ps1 run again before the change reaches
+# anything.
+#
+# speaking-notes.md used to be on this list and no longer is: voice_lib.sync_notes
+# puts it back into ~\.claude\CLAUDE.md after a pull. It was the worst one to
+# leave to a hand-run installer, because a session quietly following last
+# month's rules looks exactly like a session.
+INSTALLED_FROM = ("commands/", "install.ps1", "setup.ps1", "make_shortcut.ps1")
 
 
 # --------------------------------------------------------------------------
@@ -413,6 +417,14 @@ def apply_update(state=None, say=print):
         say("")
         for line in notes.splitlines():
             say(("  " + plain(line)).rstrip())     # blank lines are blank, not two spaces
+
+    # The note is the one installed file that can reinstall itself. Done here as
+    # well as on engine start, so it still happens for somebody whose engine was
+    # not running when they updated.
+    if voice_lib.sync_notes(state=state):
+        say("")
+        say("Refreshed the speaking notes in ~\\.claude\\CLAUDE.md. Restart Claude")
+        say("Code to pick them up -- that file is read once, at session start.")
 
     # --- and now the part everyone forgets --------------------------------
     say("")

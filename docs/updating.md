@@ -147,10 +147,15 @@ It is deliberately timid, because the alternative is losing someone's work:
 - **A branch tracking nothing**, or a pull that will not fast-forward, stops it. Both mean
   this copy has a history of its own, and untangling that by hand is the only safe answer.
 - **It will not re-run the installer.** A `git pull` updates the repo, but the `/voice`
-  command, the hooks and the note in `~\.claude\CLAUDE.md` were *copied out* of it at setup
-  time. When a release changes one of those, `--apply` says to run `setup.ps1` again — and
-  then to restart Claude Code, because hooks and slash commands are read once, at session
-  start.
+  command and the hooks were *copied out* of it at setup time. When a release changes one of
+  those, `--apply` says to run `setup.ps1` again — and then to restart Claude Code, because
+  hooks and slash commands are read once, at session start.
+- **Except the note, which now reinstalls itself.** `~\.claude\CLAUDE.md` is rewritten from
+  `speaking-notes.md` by `--apply`, and again on every engine start, so a release that
+  changes how Claude is told to write reaches you by restarting Claude Code and nothing
+  else. It was the worst one to leave to a hand-run installer: a session quietly following
+  last month's rules looks exactly like a session.
+  **[What that block says →](writing-for-the-ear.md)**
 
 ## Releasing one (for whoever maintains this)
 
@@ -158,7 +163,8 @@ A release is two files and one commit:
 
 1. **`version.json`** — bump `version`, set `date`, write a `headline` that will be *read
    aloud*, and two or three `notes`. Set `needsSetup` to `true` if the release touches
-   `commands\`, `speaking-notes.md`, or either installer.
+   `commands\` or either installer. Not for `speaking-notes.md` any more — the note puts
+   itself back after a pull, so a release that only changes the wording needs no installer.
 2. **`CHANGELOG.md`** — a new `## <version> — <date>` section at the top. `--apply` prints
    this section to whoever just took the update, so write it for them rather than for git.
 

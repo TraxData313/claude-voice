@@ -826,20 +826,28 @@ class Panel:
 
     @staticmethod
     def _rows(parent, height, expand=False):
-        """A list of utterances: picture, time, session, words.
+        """A list of utterances: picture, time, project, session, words.
 
         A Treeview rather than a Listbox because a Listbox holds text and
         nothing else -- no row of it can carry a picture -- and because real
         columns line up without padding every line to a fixed width.
+
+        The project is its own column rather than a "project - session" prefix,
+        which is what the session list underneath does. Down there each row is
+        the full width of the window and there is room to run them together; up
+        here there is not, and a joined pair truncates into porridge. A column
+        of its own is also the thing you can read straight down when what you
+        actually want to know is which repo has been doing the talking.
         """
         tree = ttk.Treeview(parent, height=height, style="Voice.Treeview",
-                            columns=("when", "session", "text"), show="tree",
-                            selectmode="browse")
+                            columns=("when", "project", "session", "text"),
+                            show="tree", selectmode="browse")
         # Treeview adds its own indent in front of a row's picture, so this has
         # to be wider than the picture or the time beside it is sat on.
         tree.column("#0", width=ROW_ICON + 22, minwidth=ROW_ICON + 22, stretch=False)
         tree.column("when", width=44, minwidth=44, stretch=False, anchor="w")
-        tree.column("session", width=110, minwidth=60, stretch=False)
+        tree.column("project", width=92, minwidth=54, stretch=False)
+        tree.column("session", width=96, minwidth=54, stretch=False)
         tree.column("text", width=180, minwidth=80, stretch=True)
         tree.pack(fill="both" if expand else "x", expand=expand, padx=8)
         return tree
@@ -1181,18 +1189,22 @@ class Panel:
         self.act("/set-voice", {"voice": want})
 
     def fill(self, tree, key, jobs):
+        # "direct" is /voice say and the like, which belongs to no session and
+        # no folder -- an empty project column reads better there than the word
+        # repeated beside itself.
         rows = [(j["id"], j.get("voice"), j.get("when") or "",
+                 one_line(j.get("project") or "", 22),
                  one_line(j.get("session") or "direct", 22), one_line(j["text"], 200))
                 for j in jobs]
         if self.drawn.get(key) == rows:
             return                                # redrawing loses the selection
         self.drawn[key] = rows
         tree.delete(*tree.get_children())
-        for jid, voice, when, session, text in rows:
+        for jid, voice, when, project, session, text in rows:
             picture = self.icons.get(voice, ROW_ICON)
             # The utterance id is the row's own name, so a click needs no lookup
             # table to say which line was clicked.
-            tree.insert("", "end", iid=str(jid), values=(when, session, text),
+            tree.insert("", "end", iid=str(jid), values=(when, project, session, text),
                         image=picture or "",
                         text="" if picture else f" {initial(voice)}",
                         tags=() if picture else (voice or "?",))
