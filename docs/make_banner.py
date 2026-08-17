@@ -24,15 +24,31 @@ painting the docs page uses as its background. Recut it with:
     python -c "from PIL import Image; im = Image.open('art/garden.jpg'); \
       im.crop((0, 200, 1600, 200 + round(1600 / 3.5))).resize((1240, 354), \
       Image.LANCZOS).save('art/garden-banner.jpg', quality=72, optimize=True)"
+
+docs/banner.png is the same picture again, rasterised, and this script does not
+write it. Nothing in this repository uses it -- grep and you will find no
+reference at all -- which is exactly how it came to sit a version behind without
+anyone noticing. What uses it is the profile README at
+github.com/TraxData313/TraxData313, because that one has to reach the file
+across repositories over raw.githubusercontent, which serves an SVG as
+text/plain, and an <img> pointing at text/plain renders nothing.
+
+So the PNG is an orphan here kept alive by a reader somewhere else, and it has
+to be re-rendered by hand whenever the SVG changes. Running this script prints
+the command. Transparency is the part worth not losing: the corners outside the
+rounded frame must stay clear, or they show up as white notches against GitHub's
+dark theme. 1240px wide is a true 2x of the 620px the profile displays it at.
 """
 
 import base64
 import os
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORTRAIT = os.path.join(HERE, "icons", "abby-256.png")
 GARDEN = os.path.join(HERE, "art", "garden-banner.jpg")
 OUT = os.path.join(HERE, "banner.svg")
+PNG = os.path.join(HERE, "banner.png")
 
 W, H = 820, 240
 INK = "#12212e"          # the outline on everything, as a cartoon has
@@ -124,6 +140,38 @@ def main():
     with open(OUT, "w", encoding="utf-8") as fh:
         fh.write(svg)
     print(f"wrote {OUT} ({os.path.getsize(OUT) // 1024} KB)")
+    print(png_instructions())
+
+
+def png_instructions():
+    """Spell out how to re-render banner.png, with the paths filled in.
+
+    A browser is the only renderer here that certainly agrees with the browser
+    the picture is going to be viewed in, so Chrome does the rasterising. It
+    needs a page rather than the bare SVG: pointed at an .svg file directly it
+    inherits the default 8px body margin and the shot comes out shifted and
+    clipped. The page is written to the temp directory because it is scaffolding
+    and not something to commit.
+    """
+    page = os.path.join(tempfile.gettempdir(), "claude_voice_banner.html")
+    with open(page, "w", encoding="utf-8") as fh:
+        fh.write(
+            "<!doctype html><meta charset='utf-8'>"
+            "<style>html,body{margin:0;padding:0;background:transparent}"
+            f"img{{display:block;width:{W}px;height:{H}px}}</style>"
+            f"<img src='file:///{OUT.replace(os.sep, '/')}'>"
+        )
+    return (
+        f"\nbanner.png is NOT written by this script, and the profile README at\n"
+        f"github.com/TraxData313/TraxData313 reads it. Re-render and commit it\n"
+        f"too, or that page keeps showing the previous banner:\n\n"
+        f'  chrome --headless=new --disable-gpu --hide-scrollbars \\\n'
+        f'    --default-background-color=00000000 \\\n'
+        f'    --force-device-scale-factor=1.512 --window-size={W},{H} \\\n'
+        f'    --screenshot="{PNG}" "file:///{page.replace(os.sep, "/")}"\n\n'
+        f"--default-background-color=00000000 is the load-bearing flag: without\n"
+        f"it the transparent corners come back white."
+    )
 
 
 if __name__ == "__main__":
