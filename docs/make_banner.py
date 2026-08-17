@@ -6,9 +6,24 @@ imports it. Unlike make_icons it needs no Pillow, only the standard library.
 
     python docs/make_banner.py
 
-The portrait is embedded in the SVG rather than linked. GitHub serves an SVG in
-a README through an <img>, and an <img> loads no external references at all --
-a linked portrait would simply be a hole in the picture.
+The portrait and the garden are embedded in the SVG rather than linked. GitHub
+serves an SVG in a README through an <img>, and an <img> loads no external
+references at all -- a linked picture would simply be a hole in the banner.
+That is also the whole reason this file exists: GitHub strips every scrap of
+CSS out of a README, so the banner is the only surface on the repository page
+we get to paint. Whatever the garden is to do there, it has to do from in here.
+
+Embedding costs what it costs. The two together take the file to a little over
+200 KB, which is why the garden is written at 1240px for an 820px banner rather
+than a full 2x, and at quality 72: it sits under a scrim with a speech bubble
+over the middle of it, and none of that survives being seen.
+
+docs/art/garden-banner.jpg is cut from docs/art/garden.jpg, which is the same
+painting the docs page uses as its background. Recut it with:
+
+    python -c "from PIL import Image; im = Image.open('art/garden.jpg'); \
+      im.crop((0, 200, 1600, 200 + round(1600 / 3.5))).resize((1240, 354), \
+      Image.LANCZOS).save('art/garden-banner.jpg', quality=72, optimize=True)"
 """
 
 import base64
@@ -16,6 +31,7 @@ import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORTRAIT = os.path.join(HERE, "icons", "abby-256.png")
+GARDEN = os.path.join(HERE, "art", "garden-banner.jpg")
 OUT = os.path.join(HERE, "banner.svg")
 
 W, H = 820, 240
@@ -29,31 +45,42 @@ SKY = "#173d52"
 def main():
     with open(PORTRAIT, "rb") as fh:
         portrait = base64.b64encode(fh.read()).decode("ascii")
+    with open(GARDEN, "rb") as fh:
+        garden = base64.b64encode(fh.read()).decode("ascii")
 
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}"
      width="{W}" height="{H}" role="img"
      aria-label="claude-voice: Claude Code, out loud, locally. Abby speaking.">
   <defs>
+    <!-- The gradient that used to be the background, now the veil over it:
+         same two colours on the same diagonal, simply no longer opaque. The
+         white bubble and the teal type both have to stay readable against
+         whatever part of the painting they happen to land on. -->
     <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="{SKY}"/>
-      <stop offset="100%" stop-color="{DEEP}"/>
+      <stop offset="0%" stop-color="{SKY}" stop-opacity="0.58"/>
+      <stop offset="100%" stop-color="{DEEP}" stop-opacity="0.88"/>
     </linearGradient>
     <radialGradient id="glow">
       <stop offset="60%" stop-color="{TEAL}" stop-opacity="0.20"/>
       <stop offset="100%" stop-color="{TEAL}" stop-opacity="0"/>
     </radialGradient>
+    <clipPath id="frame">
+      <rect x="4" y="4" width="{W - 8}" height="{H - 8}" rx="30"/>
+    </clipPath>
   </defs>
 
-  <rect x="4" y="4" width="{W - 8}" height="{H - 8}" rx="30"
-        fill="url(#sky)" stroke="{INK}" stroke-width="5"/>
-
-  <!-- a few bubbles, because the alternative is a rectangle of nothing -->
-  <g fill="{TEAL}" opacity="0.13">
-    <circle cx="700" cy="52" r="30"/>
-    <circle cx="762" cy="150" r="18"/>
-    <circle cx="252" cy="206" r="14"/>
-    <circle cx="612" cy="212" r="9"/>
+  <!-- The garden, taken in to the frame's rounded corners. The stroke is drawn
+       after and outside the clip, because a clipped stroke loses its outer half
+       and the outline round everything here is the one thing holding the
+       cartoon together. -->
+  <g clip-path="url(#frame)">
+    <image x="4" y="4" width="{W - 8}" height="{H - 8}"
+           preserveAspectRatio="xMidYMid slice"
+           href="data:image/jpeg;base64,{garden}"/>
+    <rect x="4" y="4" width="{W - 8}" height="{H - 8}" fill="url(#sky)"/>
   </g>
+  <rect x="4" y="4" width="{W - 8}" height="{H - 8}" rx="30"
+        fill="none" stroke="{INK}" stroke-width="5"/>
 
   <!-- Abby, who is the face of this. The portrait brings its own rim, so it is
        drawn whole rather than clipped into another one. -->
