@@ -166,6 +166,44 @@ if ($PythonExe) {
     Say "python        : $PythonExe" "Green"
 }
 
+# --- git ------------------------------------------------------------------
+# Nothing here needs git to install, and none is fetched if there is none. The
+# only thing that wants it is `update --apply`, which pulls -- so this reports
+# and changes nothing. Putting a folder on somebody's PATH is not a speech
+# installer's decision to make.
+#
+# Tested against the *registry* PATH, not this process's, because the registry
+# one is what the panel gets: it starts from the Desktop shortcut and inherits
+# Explorer's environment. Claude Code hands its own children a PATH with a git of
+# its own prepended, so `Get-Command git` in that terminal answers yes on
+# machines where the panel answers no. Both true; only one of them is the panel's.
+$registryPath = @([Environment]::GetEnvironmentVariable('Path', 'User'),
+                  [Environment]::GetEnvironmentVariable('Path', 'Machine')) -join ';'
+$gitListed = @($registryPath -split ';' | Where-Object {
+    $_ -and (Test-Path -LiteralPath ($_.TrimEnd('\') + '\git.exe') -ErrorAction SilentlyContinue)
+}) | Select-Object -First 1
+
+if ($gitListed) {
+    Say "git           : $($gitListed.TrimEnd('\'))\git.exe" "Green"
+} else {
+    $gitFound = @("$env:LOCALAPPDATA\Programs\Git\cmd\git.exe",
+                  "$env:ProgramFiles\Git\cmd\git.exe",
+                  "${env:ProgramFiles(x86)}\Git\cmd\git.exe") |
+        Where-Object { Test-Path -LiteralPath $_ -ErrorAction SilentlyContinue } |
+        Select-Object -First 1
+    if ($gitFound) {
+        Say "git           : $gitFound" "Green"
+        Say "                not on the PATH the panel inherits. Updates work anyway --" "Yellow"
+        Say "                the updater looks in that folder itself. To list it properly," "Yellow"
+        Say "                which is your PATH and so your call:" "Yellow"
+        Say ("                [Environment]::SetEnvironmentVariable('Path', " +
+             "[Environment]::GetEnvironmentVariable('Path','User').TrimEnd(';') + " +
+             "';" + (Split-Path $gitFound) + "', 'User')") "DarkGray"
+    } else {
+        Say "git           : none -- everything works except 'update --apply', which pulls" "Yellow"
+    }
+}
+
 # --- Qwen-TTS Studio ------------------------------------------------------
 if (Test-Studio $StudioDir) {
     Say "studio        : already at $StudioDir" "Green"

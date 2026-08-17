@@ -105,7 +105,50 @@ not yours, so **ask, in one sentence, and take the answer**:
 Do not sell it, do not ask twice, and do not turn it on because it seems helpful. Somebody
 who chose an offline voice for a reason has already answered this.
 
-## 6. Worth mentioning once, then leaving alone
+## 6. Check git, before an update is something they try on their own
+
+Both ways of taking one — `update --apply` and the panel's button — shell out to git, and
+**the panel does not have your PATH.** It starts from the Desktop shortcut, so it inherits
+Explorer's environment, built from the registry at login; your terminal has whatever started
+it, and Claude Code hands its children a PATH with a git of its own prepended. So `git
+--version` working for *you* says nothing about the button. This has already happened to
+somebody: the button said *git is not on PATH* on a machine with git on it, while the same
+pull from the command line worked.
+
+Test the PATH they will get, not yours. `setup.ps1` prints this as its `git :` line, so if
+you have just run it, you have already seen the answer:
+
+```powershell
+@([Environment]::GetEnvironmentVariable('Path','User'),
+  [Environment]::GetEnvironmentVariable('Path','Machine')) -join ';' -split ';' |
+  Where-Object { $_ -and (Test-Path -LiteralPath ($_.TrimEnd('\') + '\git.exe')) }
+```
+
+- **A folder comes back** → nothing to do, and nothing to say.
+- **Nothing comes back, but git is installed** — look in `%LOCALAPPDATA%\Programs\Git\cmd`
+  and `%ProgramFiles%\Git\cmd` — then updates work regardless, because the updater looks in
+  those folders itself. Still worth one sentence, since everything else on that machine has
+  the same blind spot. **Ask before you touch their PATH**; if they want it listed:
+
+  ```powershell
+  [Environment]::SetEnvironmentVariable('Path',
+    [Environment]::GetEnvironmentVariable('Path','User').TrimEnd(';') + ';<that folder>', 'User')
+  ```
+
+  Only processes started afterwards see it, so tell them the panel needs reopening — and if
+  the shortcut still cannot see it, signing out and back in settles it for good.
+- **No git anywhere** → then this copy did not arrive by cloning, because that would have
+  needed git. It is a zip, or the plugin. Ask, in one sentence, rather than deciding for
+  them: *"there's no git here that I can find, so an update would be a zip download by hand
+  — want me to point you at installing it, so `/voice update` can do it for you?"* Yes →
+  <https://git-scm.com/download/win>, and say to leave **"Git from the command line and also
+  from 3rd-party software"** ticked, because that is the option that puts it on PATH. No →
+  drop it. Everything except pulling works without git, and the zip route is in
+  [updating.md](updating.md#if-you-have-no-git).
+
+Do not install git for them unasked, and do not edit their PATH unasked. Both are theirs.
+
+## 7. Worth mentioning once, then leaving alone
 
 - The voice is **one setting shared by every session**. Changing it anywhere changes it
   everywhere, and it survives a reboot.

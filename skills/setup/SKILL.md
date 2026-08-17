@@ -41,6 +41,15 @@ Then hand over:
 - `/claude-voice:voice panel` opens the window showing what is being said.
 - `/claude-voice:voice list` shows the voices; `set <name>` picks one.
 
+## Check the git line while you are here
+
+`setup.ps1` prints one. If it says git is installed but not on the PATH the panel inherits, or
+that there is none at all, that concerns `/voice update` and nothing else — the panel runs
+from a Desktop shortcut and does not have your PATH, so git working in your shell does not
+mean the update button will. What to do about each answer, and what to ask before touching
+anyone's PATH, is **[step 6 of the
+tour](https://github.com/TraxData313/claude-voice/blob/main/docs/tour.md)**.
+
 If setup fails, read what it printed rather than running it again — it skips whatever
 already succeeded, so a second run is cheap, but a failure that repeats has a cause
 worth naming. **[When it goes quiet →](https://github.com/TraxData313/claude-voice/blob/main/docs/troubleshooting.md)**

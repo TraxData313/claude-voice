@@ -6,6 +6,45 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.3.2 — 2026-08-17
+
+**Updating no longer depends on how git was installed — she goes and finds it herself.**
+
+The panel's update button said *git is not on PATH* on a machine with git on it, while the
+same pull from the command line worked. Both were telling the truth, and that is the whole of
+it: **a PATH belongs to a process.** The panel starts from the Desktop shortcut, so it
+inherits Explorer's — built from the registry at login. A terminal inherits whatever started
+it, and Claude Code hands its own children a PATH with a git of its own prepended. Git for
+Windows lists itself only if you ticked the box during install, so a machine can use git all
+day and have nothing about git in the registry.
+
+- **The updater asks PATH first, then looks.** `%LOCALAPPDATA%\Programs\Git\cmd`,
+  `%ProgramFiles%\Git\cmd`, the 32-bit folder and GitHub Desktop's bundled copy — newest
+  first where the folder is versioned. An entry somebody put on PATH is a choice, and it
+  still outranks every guess here.
+- **It names the git it used, but only when PATH did not name one.** That single line is the
+  explanation of why the button used to fail, printed at the moment somebody is wondering.
+- **The two failures now read differently.** No git anywhere is not the same as git that is
+  present and refusing to run in this folder, and the second quotes what git actually said.
+  The by-hand zip instructions no longer open with *"no git here"* in front of the case that
+  has nothing to do with git.
+- **`setup.ps1` reports git**, tested against the registry PATH rather than its own, because
+  the registry one is what the panel will get. Listed, installed but unlisted — with the one
+  line that lists it — or absent. It reports and changes nothing: putting a folder on
+  somebody's PATH is not a speech installer's decision to make.
+- **The tour tells whoever installs this to check, and to ask first.** A new step 6: the check
+  that tests the persistent PATH rather than the shell's, and what to do about each answer.
+  Ask before editing a PATH, ask before installing git, and if there is no git at all then
+  this copy did not arrive by cloning — so say that rather than guessing.
+- **Written down where it will be looked for**, in updating.md, troubleshooting.md and
+  *Things that cost real time to find*. Including why `setx PATH "%PATH%;..."` — the advice
+  you will find everywhere — is wrong twice: it truncates at 1024 characters, and `%PATH%`
+  there is the machine and user paths already joined, so it copies every machine entry into
+  your own.
+
+Worth re-running `setup.ps1` for this one, though nothing needs reinstalling — that is how the
+git line gets seen, and seeing it is the point.
+
 ## 1.3.1 — 2026-08-17
 
 **Her icon opens the window you already have, instead of a second one just like it.**

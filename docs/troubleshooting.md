@@ -74,6 +74,12 @@ very long message will still cross one or two.
 is being spoken will do it: the native layer reads the embedding file on every generation.
 Stop it first.
 
+**The panel said git is not on PATH, and git works fine in my terminal.** Both are true. The
+panel is started from the Desktop shortcut, so it inherits Explorer's PATH from the registry;
+your terminal inherits whatever started it, and Claude Code brings a git of its own for its
+children. The updater looks in the usual install folders now and pulls anyway —
+[listing it properly](updating.md#when-it-says-git-is-not-on-path) is one line, and worth it.
+
 **Two engines, everything said twice.** `HTTPServer` sets `SO_REUSEADDR`, which on Windows
 lets a *second* process bind a port already in use rather than failing. The server refuses
 the steal now, but a stray old process is worth ruling out — `status` reports the pid.

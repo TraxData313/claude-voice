@@ -138,6 +138,14 @@ reached nobody who had already run the tool. Only what differs from the defaults
 whether a line was worth speaking, and threw away Russian, Greek and Chinese as though they
 were punctuation. The test is for a letter or digit in any script.
 
+**A PATH is a property of a process, not of a machine.** The panel is spawned from the Desktop
+shortcut, so it gets Explorer's copy, built from the registry at login; a terminal gets
+whatever started it, and Claude Code prepends a git of its own for its children. So `git`
+resolved for the command line and not for the button on the same machine — and the button was
+the one telling somebody their machine had no git. Nothing that shells out now assumes PATH
+knows where a tool is: `update_check._git_exe` asks PATH first and then the folders git
+installs into.
+
 **A BOM is not invisible.** `install.ps1` writes UTF-8 without one, because Claude Code
 stops reading `settings.json` the moment it finds a BOM there — and PowerShell's `>`
 redirect adds one by default.

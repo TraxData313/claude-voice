@@ -107,6 +107,43 @@ python voice_cli.py update off
 
 Or set `"updateCheck": false` in `config.json`. `"updateCheckDays": 0` also means never.
 
+## When it says git is not on PATH
+
+The panel's button can say that while the very same pull works in your terminal, and both are
+telling the truth. **A PATH belongs to a process.** The panel is started from the Desktop
+shortcut, so it inherits Explorer's — built from the registry at login. A terminal inherits
+whatever started it, and Claude Code hands its own children a PATH with a git of its own
+prepended. Git for Windows lists itself only if you ticked the box during install, so a
+machine can use git all day and have nothing about git in the registry.
+
+The updater no longer takes PATH's word for it. With no `git` on PATH it looks in
+`%LOCALAPPDATA%\Programs\Git\cmd`, `%ProgramFiles%\Git\cmd`, the 32-bit folder and GitHub
+Desktop's bundled copy, and prints which one it used — so this now sorts itself out, and the
+line naming the folder is the explanation of why the button used to fail.
+
+Listing it properly is still worth doing, because every other tool on that machine shares the
+blind spot. `setup.ps1` reports it, and this is the same check and the fix:
+
+```powershell
+# what the panel sees. Nothing back means git is not on the registry PATH
+@([Environment]::GetEnvironmentVariable('Path','User'),
+  [Environment]::GetEnvironmentVariable('Path','Machine')) -join ';' -split ';' |
+  Where-Object { $_ -and (Test-Path -LiteralPath ($_.TrimEnd('\') + '\git.exe')) }
+
+# put it there -- your own hive, no admin. Then reopen the panel
+[Environment]::SetEnvironmentVariable('Path',
+  [Environment]::GetEnvironmentVariable('Path','User').TrimEnd(';') +
+  ';' + "$env:LOCALAPPDATA\Programs\Git\cmd", 'User')
+```
+
+Only processes started afterwards see it, and the shortcut counts as one once Explorer
+notices; signing out and in settles it if it does not.
+
+**Not `setx PATH "%PATH%;..."`,** which is the advice you will find everywhere and is wrong
+twice over: `setx` truncates at 1024 characters, and `%PATH%` there is the machine and user
+paths already joined — so it copies every machine entry into your user variable and you now
+have two divergent copies of the same list.
+
 ## If you have no git
 
 `--apply` needs git and a clone. Without either, it says so and stops rather than guessing:

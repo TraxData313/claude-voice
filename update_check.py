@@ -20,8 +20,10 @@ written to logs\\update.log with the time and the outcome, so "it stays quiet
 unless you ask" is a claim you can audit rather than one you have to believe.
 """
 
+import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -325,10 +327,59 @@ def changelog_section(version):
 # taking it
 # --------------------------------------------------------------------------
 
+# Where git is when PATH does not say, tried in this order and only after PATH
+# itself. `*` is allowed: GitHub Desktop keeps its copy under a versioned folder.
+#
+# The panel is the reason this list exists. The command line pulled and the
+# button said git was not on PATH, which is a confusing way to find out that the
+# two do not have the same PATH -- and both were telling the truth. The panel is
+# started from the Desktop shortcut, so its environment is Explorer's, built
+# from the registry at login; a terminal inherits whatever started it, and
+# Claude Code hands its children a PATH with a git of its own prepended. Git for
+# Windows only lists itself if you tick the box during install, so a machine can
+# have git, use git all day, and still have nothing about git in the registry.
+#
+# So: look in the places it lives. Refusing to update over a missing PATH entry
+# helps nobody, and the alternative was somebody being told to download a zip by
+# hand while git sat in a folder this could have named.
+GIT_GUESSES = (
+    r"%LOCALAPPDATA%\Programs\Git\cmd\git.exe",
+    r"%ProgramFiles%\Git\cmd\git.exe",
+    r"%ProgramFiles(x86)%\Git\cmd\git.exe",
+    r"%LOCALAPPDATA%\GitHubDesktop\app-*\resources\app\git\cmd\git.exe",
+)
+
+_GIT_EXE = ""       # "" is "not looked yet"; None is "looked, and there is none"
+
+
+def _git_exe():
+    """The git to run, or None if this machine has none. Looked up once.
+
+    PATH first, always: an entry somebody put there is a choice, and it outranks
+    anything guessed here.
+    """
+    global _GIT_EXE
+    if _GIT_EXE != "":
+        return _GIT_EXE
+    found = shutil.which("git")
+    if not found:
+        for guess in GIT_GUESSES:
+            # Reversed, so a versioned folder resolves to the newest of them.
+            hits = sorted(glob.glob(os.path.expandvars(guess)), reverse=True)
+            if hits:
+                found = hits[0]
+                break
+    _GIT_EXE = found or None
+    return _GIT_EXE
+
+
 def _git(*args, cwd=None):
     """Returns (ok, output). Git missing is a plain False, not a traceback."""
+    exe = _git_exe()
+    if not exe:
+        return False, "no git on this machine"
     try:
-        done = subprocess.run(["git", "-C", cwd or voice_lib.ROOT] + list(args),
+        done = subprocess.run([exe, "-C", cwd or voice_lib.ROOT] + list(args),
                               capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.SubprocessError) as exc:
         return False, str(exc)
@@ -338,8 +389,11 @@ def _git(*args, cwd=None):
 
 
 def _by_hand(say):
+    # Says no *why* of its own: both callers have just given one, and this used
+    # to open with "no git here" in front of the case that has nothing to do
+    # with git.
     say("")
-    say("No git here, so this cannot pull it in for you. By hand:")
+    say("Taking it by hand instead:")
     say(f"  1. Download {ZIP_URL}")
     say("  2. Unpack it and copy the contents over this folder, replacing what is there.")
     say("  3. Run setup.ps1 again, then: voice_cli.py kill, then start.")
@@ -363,11 +417,25 @@ def apply_update(state=None, say=print):
         _by_hand(say)
         return False
 
-    ok, _ = _git("rev-parse", "--git-dir")
-    if not ok:
-        say("git is not on PATH, or refused to run here.")
+    exe = _git_exe()
+    if not exe:
+        say("No git on this machine -- not on PATH, and not in the folders it")
+        say("usually installs into, so there is nothing here to pull with.")
         _by_hand(say)
         return False
+
+    ok, refused = _git("rev-parse", "--git-dir")
+    if not ok:
+        say(f"git is here ({exe}) but would not run in this folder:")
+        for line in refused.splitlines()[:5]:
+            say(f"  {line}")
+        return False
+
+    if not shutil.which("git"):
+        # Worth one line, once, on the machines where it is true: it is the whole
+        # explanation of why the panel's button used to fail while the same
+        # command worked in a terminal.
+        say(f"git is not on PATH -- using the one at {exe}.")
 
     # Modified tracked files only. Untracked ones are not in the way of a pull,
     # and telling somebody their own new voice folder is blocking an update
