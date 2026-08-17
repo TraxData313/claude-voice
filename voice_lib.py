@@ -632,6 +632,55 @@ def speech_for(text, state):
     return spoken, kind
 
 
+_RECOMMENDED = re.compile(r"\(\s*recommended\s*\)", re.I)
+_ORDINALS = ("First", "Second", "Third", "Fourth", "Fifth", "Sixth")
+_COUNTS = ("no", "one", "two", "three", "four", "five", "six")
+
+
+def _listed(items):
+    """'a, b or c' -- the way a person reads a short list out."""
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + " or " + items[-1]
+
+
+def question_speech(tool_input, max_chars=4000):
+    """What to say when a turn stops and waits for an answer.
+
+    An AskUserQuestion turn is a lone tool_use block: no text block anywhere in
+    the message, with the question, the options and their descriptions all
+    inside the tool's input. Both readers here look only at text blocks, so the
+    one message that stops the session dead until it is answered was the one
+    message never spoken -- and from the listener's side, a session that goes
+    quiet and stays quiet is indistinguishable from the voice breaking again.
+
+    Only the question and the option labels are said. The descriptions are
+    written for eyes that can compare them side by side; read out they are a
+    paragraph of trade-offs each, and by the third nobody remembers the first.
+    The labels are enough to know an answer is wanted and roughly what about --
+    the detail is on screen, where it can be re-read as often as it takes.
+    """
+    rows = [q for q in ((tool_input or {}).get("questions") or [])
+            if isinstance(q, dict) and (q.get("question") or "").strip()]
+    if not rows:
+        return ""
+
+    n = len(rows)
+    count = _COUNTS[n] if n < len(_COUNTS) else str(n)
+    parts = ["A question for you." if n == 1 else f"{count.capitalize()} questions for you."]
+    for i, q in enumerate(rows):
+        if n > 1 and i < len(_ORDINALS):
+            parts.append(_ORDINALS[i] + ".")
+        parts.append(q["question"].strip())
+        labels = [_RECOMMENDED.sub("recommended", o.get("label") or "").strip()
+                  for o in (q.get("options") or []) if isinstance(o, dict)]
+        labels = [l for l in labels if l]
+        if labels:
+            parts.append(("Any of: " if q.get("multiSelect") else "The options are: ")
+                         + _listed(labels) + ".")
+    return clean_text(" ".join(parts), max_chars)
+
+
 CLAUDE_MD = os.path.expanduser(os.path.join("~", ".claude", "CLAUDE.md"))
 _MARK_OPEN = "<!-- current-voice -->"
 _MARK_CLOSE = "<!-- /current-voice -->"

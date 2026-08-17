@@ -781,13 +781,27 @@ class TranscriptWatcher(threading.Thread):
         if msg.get("role") != "assistant":
             return
         content = msg.get("content")
+        blocks = content if isinstance(content, list) else []
         text = content if isinstance(content, str) else "\n".join(
-            b.get("text", "") for b in (content or [])
+            b.get("text", "") for b in blocks
             if isinstance(b, dict) and b.get("type") == "text")
-        if not text.strip():
-            return
+        if text.strip():
+            speech, what = voice_lib.speech_for(text, state)
+            self._say(speech, what, state, path)
 
-        speech, what = voice_lib.speech_for(text, state)
+        # A question is spoken as its own utterance rather than as a tail on the
+        # line before it, so that it matches what the PreToolUse hook says word
+        # for word and the dedupe can drop whichever of the two arrives second.
+        # Glued onto the narration it would match neither, and be heard twice.
+        for b in blocks:
+            if (isinstance(b, dict) and b.get("type") == "tool_use"
+                    and b.get("name") == "AskUserQuestion"):
+                self._say(voice_lib.question_speech(b.get("input"),
+                                                    state.get("maxChars", 4000)),
+                          "question", state, path)
+
+    def _say(self, speech, what, state, path):
+        """Queue one utterance from one session, if it is worth saying at all."""
         if not speech:
             return
         # Checked before the dedupe, not after: a muted session should not be

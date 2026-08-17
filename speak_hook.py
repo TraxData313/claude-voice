@@ -116,6 +116,24 @@ def main():
     if not state.get("enabled"):
         trace("  voice is off")
         return
+
+    # Deliberately above the narration switch rather than under it. Narration is
+    # chatter about work in progress and turning it off is a taste; a question
+    # halts the turn until it is answered, so somebody who wants the chatter off
+    # needs this one more than ever, not less. It is also the only speech here
+    # that must come from the tool's input -- the message carrying it has no
+    # text block at all. See voice_lib.question_speech.
+    if event == "PreToolUse" and payload.get("tool_name") == "AskUserQuestion":
+        speech = voice_lib.question_speech(payload.get("tool_input"),
+                                           state.get("maxChars", 4000))
+        if not speech:
+            trace("  question had nothing speakable")
+        elif voice_lib.already_spoken(speech):
+            trace("  question already spoken, skipping")
+        else:
+            speak(state, speech, "question")
+        return
+
     if event != "Stop" and not state.get("narrate", True):
         trace("  narration is off")
         return
