@@ -785,9 +785,22 @@ class TranscriptWatcher(threading.Thread):
         text = content if isinstance(content, str) else "\n".join(
             b.get("text", "") for b in blocks
             if isinstance(b, dict) and b.get("type") == "text")
+        # 'narrate' covers the short lines said while work is going on, and the
+        # watcher is handed no events to tell those from a finished answer --
+        # but the shape of the message says it plainly. Text sitting alongside
+        # tool calls is a line said before doing something; text on its own ends
+        # the turn. That is the same cut the hook makes between PreToolUse and
+        # Stop, and without it 'narrate off' silenced only the hook and left the
+        # watcher to say the very same line -- a switch that looked broken
+        # because it did nothing, rather than because it did the wrong thing.
+        mid_work = any(isinstance(b, dict) and b.get("type") == "tool_use"
+                       for b in blocks)
         if text.strip():
-            speech, what = voice_lib.speech_for(text, state)
-            self._say(speech, what, state, path)
+            if mid_work and not state.get("narrate", True):
+                log(f"watcher: narration off, not saying {text.strip()[:40]}...")
+            else:
+                speech, what = voice_lib.speech_for(text, state)
+                self._say(speech, what, state, path)
 
         # A question is spoken as its own utterance rather than as a tail on the
         # line before it, so that it matches what the PreToolUse hook says word
