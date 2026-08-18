@@ -461,3 +461,168 @@ hands them to the same `render_voices` the engine's reply goes through, so there
 path and not two. The first poll that gets an answer replaces it — that one can say who is
 *speaking*, rather than who would.
 
+
+**`auto start`: the window is a thing you open in order to be spoken to.** Most of the times
+it gets opened at all, the next two clicks were going to be the cog and the switch beside it,
+so a third tick box in the top strip does both as it opens. `panelAutostart`, off by default
+and off for anyone who does not tick it — opening a window should not quietly take three and
+a half gigabytes.
+
+- **It waits for the first poll rather than firing at startup.** Whether an engine is already
+  up is the whole difference between loading one and doing nothing, and nothing in the window
+  knows that until `/state` answers. Starting a second one would do no harm — `start_server`
+  checks the port before it launches anything — but the cog would sit there saying *loading
+  the model* for a minute over a model that was already loaded, and being right about that is
+  what the window is for.
+- **The voice is turned on by writing the config, not by posting to the engine.** At that
+  moment there may be no engine to post to: the one being started a line earlier is still
+  loading, and the config is what it reads as it comes up. An engine already running hears it
+  just as quickly, because the watcher re-reads that file every sweep. It is the same write
+  `/enabled` makes, which is why the two cannot disagree.
+- **Two words cannot say which engine or how much of it**, so the tick box has hover text like
+  the buttons do. It is also the only thing in that strip that is not about the window itself,
+  which is why it sits furthest from the two that are.
+
+**The two coloured switches stopped guessing their own size.** They are `tk.Button`s because
+ttk's cannot be green, and asking a `tk.Button` and a `ttk.Button` for the same three
+characters does not give you the same shape: measured, the skip button wanted 37 by 29 and the
+coloured pair 25 by 35 and 31 by 35 — narrower, taller, and not even matching each other. A
+row of four buttons where two are a different size reads as a mistake, because it is one.
+
+- **Measured, not guessed.** Most of that difference is the theme's own border and padding,
+  which is not a number we are told. So `_match_switches` reads `winfo_reqwidth` off the skip
+  button and hands it to the other two — and does it again on every theme switch, because the
+  themes do not agree either: 37 by 29 in `clam`, 39 by 31 in the native one.
+- **The transparent pixel is what makes it possible.** A Tk button showing an image takes its
+  width and height in screen pixels; one showing only text takes them in characters of its
+  font. So both wear a 1x1 transparent image, kept alive on the Panel because Tk silently
+  draws nothing for an image nobody holds a reference to. Their own padding goes to zero at
+  the same time — the box is now the size asked for, not that size plus a margin.
+- **It cannot be done from `_build`.** Measuring means letting Tk settle the layout, and
+  settling it half way through building the window delivers a `<Configure>` to a window whose
+  widgets do not all exist yet — a stack trace per event, into `logs/panel.log`. `apply_theme`
+  runs immediately after `_build` and again on every switch, so it is the one call site.
+- **The window's minimum width did not move**: 476 before, 476 after. The strip grew from 110
+  to 190 and the button row from 146 to 164, and neither of those is the row that sets it.
+Everything from here down was planned in one sitting and built in one: a settings window, a
+chip on the engine button, starting with Windows, and a memory readout. The plan itself is
+kept at [settings-window-plan.md](settings-window-plan.md), with a note at the top of what it
+turned out to be wrong about and which part of it was dropped.
+
+**The tick boxes went behind a cog, and the strip has one thing in it.** Three of them had
+gathered along the top, and each had to introduce itself in two words. *on top* is about the
+window; *auto start* is about three and a half gigabytes of model; nothing on screen said
+which was which, and there was no room for anything to. The strip was also the place a
+Settings would go if this window ever grew one, so it grew one, and the four settings moved
+in behind it where each of them gets a sentence.
+
+- **The description is the whole point.** A hover text had been standing in for the
+  explanation, and hover text can only be found by resting on a control you have already
+  decided not to press. A line of grey under the tick is read by whoever opened the dialog to
+  decide.
+- **A cog on the settings button, so a chip on the engine.** The cog had been the engine's,
+  which was always a compromise -- it said "something machinery" and nothing more precise.
+  Now the cog means what a cog means everywhere, and the engine gets `U+E950`, the chip:
+  what that button loads and hands back *is* a model. Drawn against a power symbol, a bolt
+  and a robot, and picked by eye.
+- **The chip does not want the point the cog needed.** The cog was drawn a point larger than
+  the media glyphs because Segoe MDL2 draws it small inside its own box, and at twelve it
+  read as the runt of a row of four. The chip is drawn nearly to the edges of that box, so
+  the same bump made it heavier than the square and the arrows beside it. Rendered at twelve,
+  thirteen and fourteen and looked at; twelve.
+- **The dialog is the typer's shape, because the typer had already paid for it.** One at a
+  time, Esc closes, opens over the panel rather than wherever the window manager fancied, and
+  floats with the panel -- which is usually on top of everything, so a window it opened and
+  then covered over would be a strange thing to have been handed. It also has the typer's one
+  piece of housekeeping: its grey labels join the list the theme repaints, so closing it has
+  to take them back out, or the next dark switch breaks half way through and leaves the rest
+  of the panel in the wrong colours.
+- **Unticking *on top* now reaches the dialog you unticked it in.** It did not, at first, and
+  a settings window still glued over everything immediately after reads as the tick not
+  having worked.
+- **The window's minimum width did not move: 348 before, 348 after.** It was expected to
+  drop, since the strip fell from 190 to 33 -- one button where three tick boxes were. It
+  turns out the strip was never what set it. The header asks 254, and 348 is a hand-measured
+  number for the longest thing the line above the words ever says. Measured again rather than
+  assumed, which is the only reason that is known.
+
+**The update controls went into the dialog, and the version number became the beacon.** The
+tick and the button moved; the *report* stayed in the footer -- what is in an update, how the
+last look went, and which version this is. Controls behind a cog, findings in plain sight.
+
+- **`auto-check for updates` can say what it means again.** In the footer it had to be
+  `auto-check`, because the longer label ate the room the line beside it needed. In a dialog
+  there is room, and the compromise can be given back.
+- **The version turns the link colour when there is something to take.** With the button
+  behind a cog, nothing on the face of the window would otherwise say an update exists -- and
+  that label was already the clickable way to the changelog, so the link colour is exactly
+  what it should turn to say so. Grey the rest of the time.
+- **A button that may not be on screen when its answer arrives.** A check runs on a thread,
+  and the dialog can be closed before it comes back. Rather than guard every `configure` with
+  a `winfo_exists`, what the button *would* say is kept on the panel: `say_on_button` writes
+  it down and only then tries the widget. So a dialog opened later opens already saying it,
+  and one opened while a check is still running finds the button greyed out and reading
+  *checking…*, which is where it left off. Tested by stubbing a three-second check, pressing
+  it, and closing the dialog underneath it.
+
+**`start with Windows`, and it has no setting behind it.** Windows opens whatever is in the
+Startup folder, so the folder *is* the setting. A config key beside it would be a second
+opinion capable of disagreeing with the only one that matters.
+
+- **The box is read back off the folder, never left where the click put it.** A shortcut that
+  could not be written leaves the tick unticked, which is the truth, rather than ticked, which
+  would be a promise. Tested by pointing it at a drive that does not exist.
+- **It writes the same shortcut the installer does**, through the same `WScript.Shell` COM
+  object `make_shortcut.ps1` uses -- pythonw so logging in does not also open a console
+  behind the panel, the repo as the working directory, and `abby.ico` so the login entry and
+  the Desktop icon are one thing in two places.
+- **The values go in through the environment, not the command line.** A repo path with a
+  space in it is the obvious way this breaks, and quoting PowerShell inside Python inside a
+  shell is three chances to get it wrong.
+- **A quarter of a second, measured, so it is done on the Tk thread.** A tick box that waits
+  on a thread for its answer is a tick box that is briefly wrong, and this one is only ever
+  pressed on purpose.
+- **The two ticks compose, and that is the point of putting them in one section.** *start
+  with Windows* opens the window at login; *auto start* then loads the engine and turns the
+  voice on. Both ticked is the "it just talks" mode, and the descriptions say so.
+
+**And the volume slider went up onto the button row, which the tick boxes had been in the way
+of.** It had a row of its own for a good reason -- three buttons and two tick boxes filled the
+row above, and a slider squeezed in beside them would have been a few pixels long. The tick
+boxes went into the dialog, so the reason went with them.
+
+- **The label and the percentage did not come with it.** There is one slider in this window;
+  a word saying *volume* next to it is a caption on a thing that needs none. The number went
+  into the hover text, which is where this window already puts the sort of detail a control
+  cannot fit -- and it follows the handle while you drag, so nothing was actually lost.
+- **Which meant teaching `Tip` two things.** It does not dismiss on a press for this one --
+  pressing a slider is the *start* of using it, not the end of wondering what it is -- and it
+  can be told to appear at once and to change what it is saying, rather than only fading in
+  after 450ms. Ten lines, and the slider is the only caller.
+- **The number is read off `drawn`, not off the widget.** While it is being dragged the handle
+  is ahead of the engine by design, and `drawn` is what the drag writes and what the POST
+  afterwards sends -- so the three cannot disagree. Reading the widget instead made it depend
+  on Tk having stored the new value before it called the callback, which it does, but only by
+  luck of ordering.
+- **`fill="both"`, so it is the height of the buttons rather than a groove floating in the
+  middle of their row.** clam draws the trough to whatever height it is handed, and it costs
+  the row nothing because the slider still only *asks* for 16 -- the buttons go on setting how
+  tall the row is. In light mode the native theme draws its own thin track and a fixed-size
+  thumb whatever height it is given, and nothing in ttk will talk it out of that; the two
+  themes already disagree about the size of the buttons.
+- **23 pixels, measured** -- by building a replica of the old row, putting it back, and asking
+  the window what its least height was with and without. The window's minimum width did not
+  move: the button row asks 262 in dark and 270 in light, against the 332 it is given at 348.
+
+**A memory readout was built here too, and then taken out again.** The footer was to say what
+the engine was holding, with the split between RAM and the graphics card in its hover text. It
+worked, and it was measured; Toni looked at it and did not want the number. Removing it put
+`speak_server.py` back to exactly what it had been, which is the tidiest kind of removal there
+is -- the panel's own change was five short pieces.
+
+It is written up in full at [memory-readout.md](memory-readout.md), including the working code,
+so putting it back is a paste rather than an evening. Two things there are worth reading even if
+nobody ever does: `nvidia-smi` cannot report per-process VRAM on any consumer Windows machine
+-- it answers `[N/A]` and never errors -- and the engine's committed RAM is 8 GB against a
+working set of under one, so the "about 3.5 GB" this window says the engine holds is the
+graphics card and not the memory.

@@ -1,18 +1,18 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
 
-  "version": "1.4.1",
+  "version": "1.5.0",
   "date": "2026-08-18",
 
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "The engine has a switch of its own now, so you can hand its memory back without a terminal.",
+  "headline": "The panel has a settings window now, and every tick in it says what it actually does.",
 
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "Turning the voice off never unloaded anything -- the engine stays warm on purpose, and sits on about three and a half gigabytes while it waits.",
-    "There is now a cog at the left of the button row that loads it or hands that memory back. Green means loaded, red means not, and pressing it does whichever is left.",
-    "The whole row is icons now rather than words, so rest on any button for a moment and it will tell you what it does.",
-    "The window remembers which monitor it was on, even one to the left of your main screen, which it used to lose every time."
+    "There is a cog in the top right corner, and behind it every tick has a line under it saying what ticking it would do.",
+    "One of those ticks is new. Start with Windows opens the panel when you log in, and with auto start beside it the thing simply talks, with nothing left for you to press.",
+    "The engine button wears a chip rather than a cog, because a cog now means settings, the way it does everywhere else.",
+    "The volume slider has moved up next to the buttons, so the window is a row shorter. Rest on it and it tells you how loud it is."
   ],
 
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",

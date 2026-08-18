@@ -106,7 +106,7 @@ go stale.
 
 <p align="center">
   <img src="docs/panel.png" width="390"
-       alt="The Abby for Claude panel: Abby's portrait and the voice picker beside the line she is speaking, turn off, skip line and skip all, a volume slider, a queue, a clickable history, a tick per session, and Abby herself along the bottom">
+       alt="The Abby for Claude panel: a settings cog in the top corner, Abby's portrait and the voice picker beside the line she is speaking, a chip for the engine, turn off, skip line and skip all, a volume slider, a queue, a clickable history, a tick per session, and Abby herself along the bottom">
 </p>
 
 **`/voice panel`**, or the **Abby for Claude** icon the installer leaves on your Desktop —
@@ -115,12 +115,15 @@ twice a second:
 
 - **who is speaking**, what they are saying, and which project it came from — click the
   portrait to swap voice; her picture and name are there before any engine is
-- **a cog to load the engine or hand its ~3.5 GB back**, and a **stop/play** switch for the
+- **a chip to load the engine or hand its memory back**, and a **stop/play** switch for the
   voice — both green while working, red while not; then **⏩ skip line · ⏭ skip all** and a
   **volume** slider that bites mid-sentence. Rest on any of them and it says what it does
 - **+ on the queue** — type any text and it is read out, behind whatever is already waiting
 - **history — click any line to hear it again**, from the audio you already heard
 - **a tick per session** — untick one and it stops being read aloud
+- **a cog in the corner** — settings, each tick with a line saying what it does: **start
+  with Windows** opens the panel when you log in, **auto start** loads the engine and turns
+  the voice on as it opens, and both together mean you press nothing at all
 - voice, portrait size, **dark**, **on top**, and Abby herself along the bottom
 
 ## The voices

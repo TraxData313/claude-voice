@@ -34,6 +34,7 @@ import ctypes
 import os
 import queue
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -69,13 +70,21 @@ FONT = ("Segoe UI", 9)
 # and the substitute here is the boxed emoji. Without it the buttons go back to
 # saying what they do in words.
 ICON_FAMILY = "Segoe UI Symbol"
-# And one glyph that font does not do well. U+2699, the cog, comes out of Segoe
-# UI Symbol as a small ring with a dot in it -- at button size it reads as a
-# record button, not as a cog. Windows 10 and 11 ship a whole icon set with a
-# proper one in it, so the engine button borrows that and nothing else does.
-# Private use codepoints are font-specific by definition, hence the fallback.
+# And two glyphs that font does not do at all well. U+2699, the cog, comes out
+# of Segoe UI Symbol as a small ring with a dot in it -- at button size that
+# reads as a record button rather than a cog -- and it has nothing resembling a
+# chip. Windows 10 and 11 ship a whole icon set with proper ones, so these two
+# buttons borrow from it and nothing else does. Private use codepoints are
+# font-specific by definition, hence the fallback behind each.
+#
+# The cog is settings, where a cog means what everybody already thinks it
+# means, and the chip is the engine: what that button loads and hands back is
+# three and a half gigabytes of model, and a cog on it only ever said
+# "something machinery". Both were drawn and looked at; the chip won by eye
+# over a power symbol, a bolt and a robot.
 MDL2_FAMILY = "Segoe MDL2 Assets"
 MDL2_GEAR = "\ue713"
+MDL2_CHIP = "\ue950"
 FONT_SMALL = ("Segoe UI", 8)
 FONT_BOLD = ("Segoe UI", 9, "bold")
 FONT_LINK = ("Segoe UI", 8, "underline")
@@ -90,6 +99,30 @@ APP_NAME = "Abby for Claude"
 AUTHOR = "TraxData313"
 AUTHOR_URL = "https://github.com/TraxData313"
 REPO_URL = "https://github.com/TraxData313/claude-voice"
+
+# What Windows opens when you log in is whatever is in this folder, and it is
+# per-user -- which is why nothing here needs administrator rights, the same
+# reason the installer does not. The name matches the Desktop shortcut, so the
+# two are one icon in two places rather than two things called the same.
+STARTUP_DIR = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows",
+                           "Start Menu", "Programs", "Startup")
+STARTUP_LNK = os.path.join(STARTUP_DIR, f"{APP_NAME}.lnk")
+# Writing a .lnk means COM, and there is no binding for it in a project with no
+# dependencies -- so it is PowerShell's WScript.Shell, the same object
+# make_shortcut.ps1 hands the Desktop icon to, writing the same shortcut.
+#
+# The values arrive through the environment rather than on the command line. A
+# repo path with a space in it is the obvious way this breaks, and quoting
+# PowerShell inside Python inside a shell is three chances to get it wrong.
+SHORTCUT_PS = ("$s = New-Object -ComObject WScript.Shell; "
+               "$l = $s.CreateShortcut($env:CV_LINK); "
+               "$l.TargetPath = $env:CV_EXE; "
+               "$l.Arguments = $env:CV_ARGS; "
+               "$l.WorkingDirectory = $env:CV_DIR; "
+               "$l.Description = $env:CV_TEXT; "
+               "if (Test-Path $env:CV_ICON) { $l.IconLocation = \"$($env:CV_ICON),0\" }; "
+               "$l.Save()")
+NO_WINDOW = 0x08000000
 
 # Dark is a set of colours plus a change of ttk theme. The native Windows theme
 # draws real Windows widgets and ignores most colour you ask it for; 'clam' is
@@ -124,9 +157,26 @@ FACE_SIZES = ("48", "96", "128", "256")
 # 352 once they moved to the top strip, and 348 now the row is icons. Below
 # about 396 the update note in the footer truncates -- that label is anchored
 # west and cut to 30 characters precisely so it can be the thing that gives.
+#
+# It did not move when the tick boxes went into a settings dialog, which was
+# expected to drop it. The strip fell from 190 to 33 -- one button where three
+# tick boxes were -- and it turns out the strip was never what set this: the
+# constant is a hand-measured 348 for the longest thing the line above the words
+# says, and nothing else asks that much. Measured again rather than assumed,
+# which is the whole reason the number is written down here.
+#
+# The button row is the closest thing to it now that the volume slider is on the
+# end of it: 262 in dark and 270 in light, against the 332 the row is given at
+# 348 wide. That headroom is what VOLUME_WIDE is chosen to protect.
 MIN_WIDE = 348
 FACE_MIN, FACE_MAX = 24, 320
 ROW_ICON = 24                # and the small one on every row
+# The volume slider shares the button row now, and the least it will accept is
+# what decides whether that row is the thing setting the window's minimum
+# width. Small on purpose: it grows into whatever the row has spare, so this is
+# a floor rather than a size. At 90 the row asks 268 of the 332 it has at the
+# narrowest the window goes, so the row is still not what sets it.
+VOLUME_WIDE = 90
 # However many sessions are live, only the newest few are worth a tick box --
 # an unbounded list pushes the history off the window exactly as a huge
 # portrait does.
@@ -164,7 +214,8 @@ POWER_DEAD = ("#6b6e76", "#6b6e76")
 # bar at the end, which is the difference itself -- one more, or straight to
 # where there is nothing left.
 GLYPH = {
-    "engine": ("\u2638", "engine"),        # a cog -- see MDL2_GEAR, preferred
+    "engine": ("\u2638", "engine"),        # see MDL2_CHIP, preferred over this
+    "settings": ("\u2699", "settings"),    # and MDL2_GEAR over this one
     "play": ("\u25b6", "turn on"),         # the voice is off; this starts it
     "stop": ("\u25a0", "turn off"),        # it is on; this stops it. Not a
                                            # pause: there is no coming back to
@@ -194,16 +245,20 @@ class Tip:
 
     DELAY = 450                   # long enough not to fire while passing over
 
-    def __init__(self, widget, words, dark):
+    def __init__(self, widget, words, dark, keep=False):
         self.widget = widget
         self.words = words        # str, or a callable returning one
         self.dark = dark          # callable: is the panel in dark theme
         self.tip = None
+        self.said = None          # the label inside it, so the words can change
         self.timer = None
         widget.bind("<Enter>", self._enter, add="+")
         widget.bind("<Leave>", self._leave, add="+")
-        # A press has been understood, so the explanation has done its job.
-        widget.bind("<ButtonPress>", self._leave, add="+")
+        if not keep:
+            # A press has been understood, so the explanation has done its job.
+            # Except on the volume slider, where pressing is the beginning of
+            # using it and the tooltip is also the only readout it has.
+            widget.bind("<ButtonPress>", self._leave, add="+")
 
     def _enter(self, _event=None):
         self._leave()
@@ -216,6 +271,21 @@ class Tip:
         if self.tip is not None:
             self.tip.destroy()
             self.tip = None
+            self.said = None
+
+    def now(self):
+        """Say it this instant, or change what it is already saying.
+
+        For the volume slider, whose tooltip does the job the number beside it
+        used to: dragging has to show where the handle has got to, and waiting
+        450ms to find out is not a readout.
+        """
+        if self.tip is None:
+            self._leave()             # drop any timer, then do it now
+            return self._show()
+        words = self.words() if callable(self.words) else self.words
+        if words and self.said is not None:
+            self.said.configure(text=words)
 
     def _show(self):
         self.timer = None
@@ -226,10 +296,12 @@ class Tip:
         self.tip = tip = tk.Toplevel(self.widget)
         tip.wm_overrideredirect(True)          # no title bar, no border, no taskbar
         tip.wm_attributes("-topmost", True)    # the panel itself usually is
-        tk.Label(tip, text=words, font=FONT_SMALL, justify="left", padx=6, pady=3,
-                 background=DARK["field"] if dark else "#ffffe1",
-                 foreground=DARK["fg"] if dark else "#000000",
-                 relief="solid", borderwidth=1).pack()
+        self.said = tk.Label(tip, text=words, font=FONT_SMALL, justify="left",
+                             padx=6, pady=3,
+                             background=DARK["field"] if dark else "#ffffe1",
+                             foreground=DARK["fg"] if dark else "#000000",
+                             relief="solid", borderwidth=1)
+        self.said.pack()
         # Under the button rather than over it, so it never covers the thing
         # you are pointing at -- and pulled left if it would run off the edge.
         tip.update_idletasks()
@@ -414,6 +486,52 @@ def _sane_size(value, fallback=FACE):
         return fallback
 
 
+def starts_with_windows():
+    """Whether the login shortcut is there. This is the whole of that setting.
+
+    There is no config key behind the tick box: Windows opens what is in that
+    folder, so the folder is the truth, and a key beside it would only be a
+    second opinion capable of disagreeing with it.
+    """
+    return os.path.isfile(STARTUP_LNK)
+
+
+def make_startup_shortcut():
+    """Write the login shortcut. Says nothing -- the caller re-reads the folder.
+
+    A quarter of a second, measured, which is why it is done on the Tk thread
+    and read straight back. A tick box that waits on a thread for its answer is
+    a tick box that is briefly wrong, and this one is only ever pressed on
+    purpose.
+    """
+    env = dict(os.environ,
+               CV_LINK=STARTUP_LNK,
+               # pythonw where there is one, so logging in does not also open a
+               # console window behind the panel. voice_lib picks it by the same
+               # rule for the engine and for the Desktop icon; one rule, one
+               # place, even though the name says it is private.
+               CV_EXE=voice_lib._python(),
+               CV_ARGS=f'"{os.path.join(voice_lib.ROOT, "panel.py")}"',
+               CV_DIR=voice_lib.ROOT,
+               CV_TEXT="Abby, and what she is saying -- the claude-voice panel",
+               CV_ICON=os.path.join(ICON_DIR, "abby.ico"))
+    try:
+        os.makedirs(STARTUP_DIR, exist_ok=True)
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                        "-Command", SHORTCUT_PS],
+                       capture_output=True, timeout=30, env=env,
+                       creationflags=NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def drop_startup_shortcut():
+    try:
+        os.remove(STARTUP_LNK)
+    except OSError:
+        pass
+
+
 def _descendants(widget):
     for child in widget.winfo_children():
         yield child
@@ -469,13 +587,30 @@ class Panel:
         self.drawing_art = False
         self.icons = Icons()
         self.art_pics = Icons(ART_DIR)     # the big picture, in its own folder
+        # One transparent pixel, held for as long as the window is. The two
+        # coloured buttons wear it so that their size can be given in pixels
+        # rather than in characters of their font -- see _match_switches. Tk
+        # silently draws nothing for an image nobody keeps a reference to.
+        self.blank = tk.PhotoImage(width=1, height=1)
         self.dim = []                # the labels that are grey in either theme
         self.links = []              # and the ones that are clickable
         saved = voice_lib.load_state()
         self.face_size = _sane_size(saved.get("panelFace", FACE))
         self.on_top = tk.BooleanVar(value=bool(saved.get("panelTopmost", True)))
         self.dark = tk.BooleanVar(value=bool(saved.get("panelDark", False)))
+        # Load an engine and turn the voice on as the window opens, because
+        # most of the times it is opened at all, it is opened to be spoken to.
+        # Off unless asked for: three and a half gigabytes is not something to
+        # take without being asked.
+        self.at_open = tk.BooleanVar(value=bool(saved.get("panelAutostart", False)))
+        # Not acted on here. Whether an engine is already up is the whole
+        # difference between loading one and doing nothing, and nothing knows
+        # that until the first poll answers -- so it waits for that answer.
+        self.opening = bool(self.at_open.get())
         self.auto_update = tk.BooleanVar(value=bool(saved.get("updateCheck", False)))
+        # Read off the filesystem rather than out of the config, and read again
+        # every time the dialog opens -- see starts_with_windows.
+        self.at_login = tk.BooleanVar(value=starts_with_windows())
         # Answers from the update thread, drained on the Tk timer like the
         # engine's. Nothing below touches a widget from another thread.
         self.update_inbox = queue.Queue()
@@ -486,6 +621,14 @@ class Panel:
         # An update was taken in this window, so this window is now the one
         # thing running the old code.
         self.update_reopen = False
+        # The update button lives in the settings dialog, so most of the time
+        # there is no button at all -- and the answers it waits for arrive when
+        # they arrive. What it *would* say is kept here, so a dialog opened
+        # later opens saying it. See say_on_button.
+        self.update_btn = None
+        self.update_saying = "check now"
+        # The settings dialog, while it is open. One at a time, like the typer.
+        self.settings = None
         # The typing box and the box inside it, while it is open. One at a
         # time: a second copy would be two boxes with one queue behind them.
         self.typer = None
@@ -495,7 +638,9 @@ class Panel:
         # transport row draws hangs off this.
         families = tkfont.families()
         self.icons_ok = ICON_FAMILY in families
-        self.gear_ok = self.icons_ok and MDL2_FAMILY in families
+        # Two glyphs come out of that icon set now, not one, so the name says
+        # the font rather than the cog.
+        self.mdl2_ok = MDL2_FAMILY in families
         self.tips = {}               # button key -> its Tip, so the words can change
         self._build()
         self.apply_theme()
@@ -515,10 +660,12 @@ class Panel:
         head = ttk.Frame(root)
         head.pack(fill="x", padx=8, pady=(8, 0))
 
-        # A strip along the very top, the way an ordinary window has one.
-        # Nothing in it is about what is being said -- these two are about the
-        # window itself -- and the left of it is deliberately empty. That is
-        # where a File or a Settings would go if this ever grows one.
+        # A strip along the very top, the way an ordinary window has one, and
+        # it did grow a Settings -- which is now the only thing in it. Nothing
+        # in this strip is about what is being said; it is where the window
+        # keeps the things that are about itself, and everything that used to be
+        # spread along the row is one click behind that button now, with room to
+        # say what it does.
         #
         # A row of its own rather than a corner of the row below, and that is
         # not tidiness. Sharing a row meant the tick boxes and the line being
@@ -526,12 +673,19 @@ class Panel:
         # line lost: "engine not running" came out as "engine not ru". Tried
         # both ways round and stacked; a row of its own is the only arrangement
         # where neither has to give. It costs about twenty pixels of height.
+        #
+        # Top right, where a window keeps this sort of button. The left is now
+        # genuinely empty, and stays empty: a File menu is the only thing that
+        # would ever go there and this window has no files.
         self.strip = ttk.Frame(head)
         self.strip.pack(fill="x")
-        self.check(self.strip, text="on top", variable=self.on_top,
-                   command=self.toggle_top).pack(side="right")
-        self.check(self.strip, text="dark", variable=self.dark,
-                   command=self.toggle_dark).pack(side="right", padx=(0, 8))
+        # A plain themed button, not one of the coloured pair: those two say a
+        # state as well as an action, and this one only ever opens a window.
+        cog, cog_style, cog_width = self._cog()
+        self.settings_btn = ttk.Button(self.strip, text=cog, style=cog_style,
+                                       width=cog_width, command=self.open_settings)
+        self.settings_btn.pack(side="right")
+        self.tips["settings"] = Tip(self.settings_btn, "settings", self.dark.get)
 
         top = ttk.Frame(head)
         top.pack(fill="x", pady=(2, 0))
@@ -588,12 +742,11 @@ class Panel:
         # stop one, and getting the memory back meant a terminal. This says
         # both, in the place the first one used to be, and its colour says
         # which of the two it is about to do.
-        # A point larger than the rest, whichever cog it ends up being: both
-        # are drawn inside a smaller box than the media glyphs are, and at the
-        # same size the first thing in the row reads as the runt of it.
-        self.engine_btn = self._switch(bar, "engine", self.toggle_engine, bump=1)
-        gear, gear_font = self._gear()
-        self.engine_btn.configure(text=gear, font=gear_font)
+        # _chip owns the font as well as the glyph, since the two go together
+        # and the fallback needs a different size from the chip itself.
+        self.engine_btn = self._switch(bar, "engine", self.toggle_engine)
+        chip, chip_font = self._chip()
+        self.engine_btn.configure(text=chip, font=chip_font)
         self.engine_btn.pack(side="left", padx=(0, 6), fill="y")
         self.tips["engine"] = Tip(self.engine_btn, self._engine_says, self.dark.get)
         self.paint_engine(None)
@@ -621,24 +774,45 @@ class Panel:
             b.pack(side="left", padx=(0, 4))
             self.tips[key] = Tip(b, says, self.dark.get)
             self.transport.append(b)
+            if key == "skip":
+                self.skip_btn = b        # the one the coloured pair copy
+        # Their size is not set here. _match_switches has to let Tk settle the
+        # layout to measure this button, and settling it half way through
+        # building the window delivers a resize event to a window that does not
+        # have all its widgets yet. apply_theme calls it, immediately after
+        # this returns and again on every theme switch, which it needs anyway.
 
-        # A row of its own. Three buttons and two tick boxes already fill the
-        # one above, and a slider squeezed in beside them would be a few pixels
-        # long -- too short to aim at, which is the one thing a slider must be.
-        loud = ttk.Frame(head)
-        loud.pack(fill="x", pady=(6, 0))
-        how_loud = ttk.Label(loud, text="volume", font=FONT_SMALL, foreground=GREY)
-        how_loud.pack(side="left")
-        # Fixed width, and packed before the slider: a number that changes from
-        # 8% to 100% would otherwise shove the slider sideways as you drag it.
-        self.volume_shown = ttk.Label(loud, text="", font=FONT_SMALL, foreground=GREY,
-                                      width=5, anchor="e")
-        self.volume_shown.pack(side="right")
-        self.volume = ttk.Scale(loud, from_=0, to=100, orient="horizontal",
-                                command=self.slide_volume)
-        self.volume.pack(side="left", fill="x", expand=True, padx=6)
+        # And the volume, on the end of the same row. It had a row of its own
+        # because three buttons and two tick boxes filled this one and a slider
+        # squeezed in beside them would have been a few pixels long -- too short
+        # to aim at, which is the one thing a slider must be. The tick boxes
+        # went into the settings dialog, so the room is there now, and a row of
+        # window is worth more than a label saying "volume" next to the only
+        # slider there is.
+        #
+        # It takes what the row has spare, which is what it did in its own row.
+        # VOLUME_WIDE is only the least it will accept, and the reason the row
+        # still is not what sets how narrow the window can be.
+        #
+        # fill="both", not "x", so it is the height of the buttons rather than a
+        # thin groove floating in the middle of their row -- clam draws the
+        # trough to whatever height it is given. It costs the row nothing: the
+        # slider still only *asks* for 16, so the buttons go on setting how tall
+        # the row is. The native theme in light mode draws its own thin track
+        # and a thumb of a fixed size whatever height it is handed, so there the
+        # slider stays slim; nothing in ttk will talk it out of that, and the
+        # two themes already disagree about the size of the buttons.
+        self.volume = ttk.Scale(bar, from_=0, to=100, orient="horizontal",
+                                length=VOLUME_WIDE, command=self.slide_volume)
+        self.volume.pack(side="left", fill="both", expand=True, padx=(4, 0))
         self.transport.append(self.volume)
-        self.dim += [how_loud, self.volume_shown]
+        # Both things the label and the percentage used to say, in the place
+        # this window already puts that sort of thing. keep=True because
+        # pressing a slider is the start of using it rather than the end of
+        # wondering what it is, and while it is being dragged this is the only
+        # thing saying where the handle has got to.
+        self.tips["volume"] = Tip(self.volume, self._volume_says, self.dark.get,
+                                  keep=True)
 
         ttk.Separator(root).pack(fill="x", padx=8, pady=(8, 0))
 
@@ -666,24 +840,11 @@ class Panel:
         self.version.pack(side="right")
         self.version.bind("<Button-1>", lambda _event: webbrowser.open(self.new_url))
 
-        # The only control in this window that can reach the network, so it is
-        # a tick box rather than something that happens quietly: ticked, it
-        # looks once a week and once immediately; unticked, nothing here ever
-        # contacts anything.
-        # "auto-check" rather than "auto-check for updates": at the narrowest
-        # the window goes, the longer label ate the room the line beside it
-        # needs, and this row already ends in a version number.
-        self.check(stamp, text="auto-check", variable=self.auto_update,
-                   command=self.toggle_auto_update).pack(side="left")
-
-        # One button, because it is one errand at two stages: look, then take
-        # what was found. A fixed width so the row does not shift under the
-        # pointer when the wording changes, and the small style because it
-        # belongs to the small print: a full-size button in the footer sets the
-        # height of a row that is mostly 8pt grey text, and looks it.
-        self.update_btn = ttk.Button(stamp, text="check now", width=15,
-                                     style="Small.TButton", command=self.press_update)
-        self.update_btn.pack(side="left", padx=(8, 0))
+        # The tick box and the button that used to sit here have gone into the
+        # settings dialog, where there is room for each of them to say what it
+        # is for. What is left in this row is the *report*: whether there is
+        # something to take, what is in it, and which version this is. None of
+        # it is operated, and all of it has to be legible with no dialog open.
 
         # Whatever came of it, in a few words. The whole account goes to
         # logs\panel.log, which is where a window with one line to spare should
@@ -779,12 +940,17 @@ class Panel:
         self.version_seen = when
 
         dark = bool(self.dark.get())
-        self.version.configure(text=f"v{update_check.shown_version()}",
-                               foreground=DARK["dim"] if dark else GREY)
-
         newer = update_check.available()
         if newer:
             self.new_url = newer.get("changelog") or update_check.CHANGELOG_URL
+        # The version wears the news. The button that used to announce it is
+        # behind the settings cog now, so with no dialog open this label is the
+        # only thing in the window that can say there is something to take --
+        # and it was already the clickable way to the changelog, so the link
+        # colour is what it should turn to say it. Grey the rest of the time.
+        self.version.configure(text=f"v{update_check.shown_version()}",
+                               foreground=(LINK_DARK if dark else LINK) if newer
+                               else (DARK["dim"] if dark else GREY))
         # Mid-errand the button is saying what it is doing, and this is only a
         # timer noticing a file; it does not get to argue with that.
         if self.update_busy:
@@ -793,10 +959,10 @@ class Panel:
             # The engine was put back by the update itself. This window was
             # not, and cannot be: it is the process it was started as. So the
             # one useful thing left for the button is to start its replacement.
-            self.update_btn.configure(text="reopen panel")
+            self.say_on_button("reopen panel")
             self.whats_new.pack_forget()
         elif newer:
-            self.update_btn.configure(text=f"update to {newer['version']}")
+            self.say_on_button(f"update to {newer['version']}")
             # Packed only now, and before the note so the row reads left to
             # right: what it would do, what is in it, how it went. Nobody
             # should have to decide from a version number alone.
@@ -806,7 +972,7 @@ class Panel:
             if not self.whats_new.winfo_manager():
                 self.whats_new.pack(side="left", padx=(8, 0), before=self.update_note)
         else:
-            self.update_btn.configure(text="check now")
+            self.say_on_button("check now")
             self.whats_new.pack_forget()
 
         # The rest of the row, which would otherwise be a stretch of nothing:
@@ -830,13 +996,38 @@ class Panel:
     def _icon_font(self, bump=0):
         return (ICON_FAMILY, 12 + bump) if self.icons_ok else FONT
 
-    def _gear(self):
-        """The cog and the font that draws it, whichever of the two we have."""
-        if self.gear_ok:
-            return MDL2_GEAR, (MDL2_FAMILY, 13)
+    def _chip(self):
+        """The chip on the engine switch, and the font that draws it.
+
+        Twelve point, where the cog that used to sit here was thirteen. The cog
+        needed the extra point because Segoe MDL2 draws it small inside its own
+        box, and at twelve it read as the runt of a row of four; the chip is
+        drawn nearly to the edges of that box, so the same bump made it heavier
+        than the square and the arrows beside it. Rendered all three and looked.
+
+        Falls back through the icon font's cog to the word "engine", which is
+        what this button wore before either glyph existed -- and that one does
+        still want the extra point.
+        """
+        if self.mdl2_ok:
+            return MDL2_CHIP, (MDL2_FAMILY, 12)
         return self._glyph("engine"), self._icon_font(1)
 
-    def _switch(self, parent, key, command, bump=0):
+    def _cog(self):
+        """The settings cog: its text, its style and how wide to ask for.
+
+        Three ways down rather than two, because this one is a themed button
+        and its font comes from a style rather than from the widget. The style
+        is set in apply_theme, since ttk keeps styles per theme and a switch
+        would otherwise drop the font and leave a boxed emoji behind.
+        """
+        if self.mdl2_ok:
+            return MDL2_GEAR, "Gear.TButton", 3
+        if self.icons_ok:
+            return self._glyph("settings"), "Icon.TButton", 3
+        return GLYPH["settings"][1], "Small.TButton", 10
+
+    def _switch(self, parent, key, command):
         """A button that can actually be green.
 
         The old plain Tk button rather than ttk's, for the same reason the tick
@@ -849,18 +1040,46 @@ class Panel:
         White text on all three faces, so the icon does not change weight as
         the colour under it changes.
 
-        Pack it with fill="y", so it is exactly as tall as the themed buttons
-        beside it rather than a guess at their padding -- which is a different
-        guess in each theme, and wrong in one of them whichever number is
-        picked.
+        The size is not set here: _match_switches measures it off the themed
+        buttons once the row exists. The width below is what the fallback
+        words need when there is no icon font to measure against.
         """
         return tk.Button(parent, text=self._glyph(key), command=command,
                          width=3 if self.icons_ok else 10,
-                         font=self._icon_font(bump), pady=3,
+                         font=self._icon_font(), pady=3,
                          relief="flat", borderwidth=0,
                          highlightthickness=0, takefocus=0,
                          foreground="#ffffff", activeforeground="#ffffff",
                          disabledforeground="#dcdcdc")
+
+    def _match_switches(self):
+        """Give the two coloured switches the size of the themed buttons.
+
+        Asking both kinds for three characters does not make them the same
+        shape, and the difference is not small: measured here, the themed skip
+        button wanted 37 by 29 and the coloured pair 25 by 35 and 31 by 35 --
+        narrower and taller, and not even the same width as each other. Most
+        of that is the theme's own border and padding, which is not a number
+        we are told, so it is measured rather than guessed, and measured again
+        after every theme switch because the two themes draw it differently.
+
+        The transparent pixel is what makes it possible at all: a Tk button
+        showing an image takes its width and height in screen pixels, where
+        one showing only text takes them in characters of its font. Its own
+        padding goes to zero for the same reason -- the box is now the size
+        asked for, not that size plus a margin.
+
+        Nothing to do in the fallback where the icon font is missing: those
+        buttons wear words, and words already agree on their character width.
+        """
+        if not self.icons_ok:
+            return
+        self.root.update_idletasks()      # measure the theme that is on now
+        wide = self.skip_btn.winfo_reqwidth()
+        tall = self.skip_btn.winfo_reqheight()
+        for button in (self.engine_btn, self.power):
+            button.configure(image=self.blank, compound="center",
+                             width=wide, height=tall, padx=0, pady=0)
 
     def link(self, parent, text, url):
         """A word you can click. Tk has no such widget, but it is only a label
@@ -945,6 +1164,10 @@ class Panel:
         if self.icons_ok:
             style.configure("Icon.TButton", font=(ICON_FAMILY, 12), padding=(2, 1))
             style.configure("Add.TButton", font=(ICON_FAMILY, 11), padding=(2, 0))
+        # The settings cog, which is drawn out of the other font and so cannot
+        # share a style with them.
+        if self.mdl2_ok:
+            style.configure("Gear.TButton", font=(MDL2_FAMILY, 12), padding=(2, 1))
 
         # The list a combobox drops is a plain Tk listbox, coloured the old way.
         popup = ((DARK["field"], DARK["fg"], DARK["sel"], DARK["fg"]) if dark else
@@ -976,10 +1199,19 @@ class Panel:
         for widget in _descendants(self.root):
             if isinstance(widget, tk.Checkbutton):     # ttk's are not these
                 self._paint_check(widget)
-        # Its ttk parts follow the styles set above on their own; the box you
-        # type into is a plain Tk widget and has to be told.
+        # Their ttk parts follow the styles set above on their own, and the tick
+        # boxes were caught by the walk just above -- a Toplevel is a child of
+        # root, so _descendants reaches into both of these windows. What is
+        # left is what takes no styling: the Toplevels' own backgrounds, and
+        # the box you type into.
         self._paint_typer()
+        self._paint_settings()
         self.drawn.pop("face", None)              # redraw it on the new background
+        # The themed buttons are not the same size in both themes, so the two
+        # coloured ones are measured against them here rather than once at
+        # startup -- and this is also the first moment after _build at which
+        # measuring is safe at all. See the note where the row is built.
+        self._match_switches()
 
     def toggle_auto_update(self):
         """The one switch here that lets this project use the network at all.
@@ -997,6 +1229,29 @@ class Panel:
             # beside it goes back to reporting the last look there was.
             self.update_msg = None
             self.show_version(force=True)
+
+    def say_on_button(self, text=None, enabled=None):
+        """Tell the update button something, if there is one on screen to tell.
+
+        It lives in the settings dialog now, and a check started from there
+        answers whenever the network answers -- which may well be after the
+        dialog has been closed. So what it would have said is remembered here
+        instead, and a dialog opened afterwards builds its button already
+        saying it. The typer has a comment about the same class of bug: a
+        widget that has gone is not an error to be caught later, it is a fact
+        the code around it has to be able to hold.
+        """
+        if text is not None:
+            self.update_saying = text
+        if self.update_btn is None:
+            return
+        try:
+            if text is not None:
+                self.update_btn.configure(text=text)
+            if enabled is not None:
+                self.update_btn.state(["!disabled" if enabled else "disabled"])
+        except tk.TclError:
+            self.update_btn = None      # it went while we were talking to it
 
     def press_update(self):
         """One button, three stages: find out, take it, then stand aside."""
@@ -1021,8 +1276,7 @@ class Panel:
     def look_for_update(self):
         self.update_busy = True
         self.update_msg = None
-        self.update_btn.state(["disabled"])
-        self.update_btn.configure(text="checking…")
+        self.say_on_button("checking…", enabled=False)
         self.update_note.configure(text="")
 
         # urllib on the Tk thread would freeze the window for as long as the
@@ -1035,8 +1289,7 @@ class Panel:
     def take_update(self, newer):
         self.update_busy = True
         self.update_msg = None
-        self.update_btn.state(["disabled"])
-        self.update_btn.configure(text="updating…")
+        self.say_on_button("updating…", enabled=False)
         self.update_note.configure(text="pulling, then restarting the engine…")
 
         def go():
@@ -1076,7 +1329,7 @@ class Panel:
                     self.update_msg = spoken[0] if spoken else "nothing was pulled"
 
             self.update_busy = False
-            self.update_btn.state(["!disabled"])
+            self.say_on_button(enabled=True)
             self.show_version(force=True)
 
     def toggle_dark(self):
@@ -1183,6 +1436,8 @@ class Panel:
             try:
                 self.render(latest)
                 self.show_version()
+                if self.opening:
+                    self.open_up(latest)
             except tk.TclError:
                 return                           # the window is going away
         try:
@@ -1202,8 +1457,50 @@ class Panel:
         threading.Thread(target=go, name="act", daemon=True).start()
 
     def toggle_top(self):
-        self.root.wm_attributes("-topmost", self.on_top.get())
-        voice_lib.patch_state(panelTopmost=bool(self.on_top.get()))
+        on = bool(self.on_top.get())
+        self.root.wm_attributes("-topmost", on)
+        # And whatever this window has opened, which floats with it: the tick
+        # that turns this off now lives in one of them, and a dialog that stays
+        # glued over everything right after you unticked "on top" reads as the
+        # tick not having worked.
+        for win in (self.settings, self.typer):
+            if win is not None and win.winfo_exists():
+                win.wm_attributes("-topmost", on)
+        voice_lib.patch_state(panelTopmost=on)
+
+    def toggle_at_open(self):
+        """Only ever about the next time. Nothing starts or stops here."""
+        voice_lib.patch_state(panelAutostart=bool(self.at_open.get()))
+
+    def open_up(self, st):
+        """Load an engine and turn the voice on, once, as the window opens.
+
+        On the first answer from the poll rather than at startup, because that
+        answer is the first moment anything here knows whether there is an
+        engine already. Starting a second one would do no harm -- start_server
+        checks the port before it launches anything -- but the window would
+        spend a minute saying it was loading a model that was already loaded,
+        which is the one thing it exists to be right about.
+        """
+        self.opening = False
+        if st is None:
+            self.start_engine()
+        if not (st or {}).get("enabled"):
+            self.turn_voice_on()
+
+    def turn_voice_on(self):
+        """The master switch, written rather than posted.
+
+        This can happen while there is no engine to post to -- the one being
+        started a line earlier is still loading -- and the config is what that
+        engine reads as it comes up. An engine already running hears it just as
+        quickly, because the watcher re-reads that file every sweep. It is the
+        same write the engine's own /enabled does, which is why the two agree.
+        """
+        voice_lib.patch_state(enabled=True)
+        self.hold("enabled")
+        self.drawn["enabled"] = True
+        self.paint_power(True)
 
     def _engine_says(self):
         if self.drawn.get("engine_loading"):
@@ -1211,6 +1508,20 @@ class Panel:
         if self.drawn.get("engine_up"):
             return "turn the engine OFF — hands back about 3.5 GB"
         return "turn the engine ON — the first load takes 40 to 60 seconds"
+
+    def _volume_says(self):
+        """How loud, as a whole percent.
+
+        Off drawn rather than off the widget: while it is being dragged the
+        handle is ahead of the engine by design, and drawn is what the drag
+        writes and what the POST afterwards reads -- so the three of them
+        cannot disagree. Asking the widget instead would have made this depend
+        on Tk having updated the value before it called the callback.
+        """
+        level = self.drawn.get("volume")
+        if not self.drawn.get("engine_up") or level is None:
+            return ""                # nothing to be loud, and no level to report
+        return f"volume {level}%"
 
     def _power_says(self):
         if not self.drawn.get("engine_up"):
@@ -1353,7 +1664,6 @@ class Panel:
                     self.volume.set(level)
                 finally:
                     self.echoing = False
-                self.volume_shown.configure(text=f"{level}%")
 
         if st.get("error"):
             note = f"engine failed: {one_line(st['error'], 28)}"
@@ -1501,16 +1811,18 @@ class Panel:
     def slide_volume(self, value):
         """Dragging is continuous; the engine only needs where you stopped.
 
-        The number beside the slider follows the handle immediately, because
-        that is what makes the thing feel connected to anything at all. The
-        POST does not: a request per pixel would be a hundred round trips for
-        one drag, so it waits until the handle has been still for a moment.
+        The hover text follows the handle immediately, because that is what
+        makes the thing feel connected to anything at all -- and since the
+        number beside the slider went to save a row, it is now the only place
+        the level is written down. The POST does not follow: a request per pixel
+        would be a hundred round trips for one drag, so it waits until the
+        handle has been still for a moment.
         """
         if self.echoing:
             return                   # we moved it ourselves, to match the engine
         level = int(round(float(value)))
-        self.volume_shown.configure(text=f"{level}%")
         self.drawn["volume"] = level
+        self.tips["volume"].now()
         self.hold("volume", 4)       # long enough to cover the send as well
         if self.volume_send is not None:
             self.root.after_cancel(self.volume_send)
@@ -1730,6 +2042,144 @@ class Panel:
             # switch, which then leaves half the panel in the wrong colours.
             self.dim = [w for w in self.dim if w.winfo_exists()]
         self.typer = self.typed = None
+
+    # -- the window's own settings -----------------------------------------
+    def open_settings(self):
+        """Everything that is about the window rather than about the voice.
+
+        Modelled on the typer, and for its reasons: one at a time, because two
+        copies would be two sets of tick boxes over one config file; Esc closes
+        it; it opens over the panel rather than wherever the window manager
+        would have put it; and it floats with the panel, which is usually on top
+        of everything.
+
+        Every row is a tick and a sentence under it saying what ticking it
+        means, and that is the point of having a dialog at all. A strip along
+        the top could fit the words "auto start" and nothing else, which left
+        the difference between that and starting with Windows to be guessed --
+        and the hover text standing in for the explanation could only be found
+        by resting on a thing you had already decided not to press.
+        """
+        if self.settings is not None and self.settings.winfo_exists():
+            self.settings.deiconify()               # already open; come back to it
+            self.settings.lift()
+            return
+
+        win = self.settings = tk.Toplevel(self.root)
+        win.title("settings")
+        win.transient(self.root)
+        win.wm_attributes("-topmost", self.on_top.get())
+        win.protocol("WM_DELETE_WINDOW", self.close_settings)
+        win.bind("<Escape>", lambda _event: self.close_settings())
+        # Fixed: the descriptions wrap at a pixel width, and a dialog that can
+        # be dragged narrower than that width would cut them off rather than
+        # rewrap -- which is a resize handler this window does not need to grow.
+        win.resizable(False, False)
+
+        frame = ttk.Frame(win)
+        frame.pack(fill="both", expand=True, padx=4, pady=(0, 12))
+
+        self._section(frame, "when it opens")
+        # Read again, here, rather than trusted from startup: the folder is the
+        # setting, and anything may have happened to it since -- an installer,
+        # a tidied Startup folder, the same tick in another copy of this window.
+        self.at_login.set(starts_with_windows())
+        self._setting(frame, "auto start", self.at_open, self.toggle_at_open,
+                      "When this window opens it loads the engine and turns the "
+                      "voice on, so the window is the only thing you touch. Not "
+                      "about Windows starting — that is the tick below.")
+        self._setting(frame, "start with Windows", self.at_login,
+                      self.toggle_at_login,
+                      "Opens this window when you log in. Tick both and it just "
+                      "talks: the window comes up by itself, loads the engine "
+                      "and turns the voice on.")
+
+        self._section(frame, "the window")
+        self._setting(frame, "dark", self.dark, self.toggle_dark,
+                      "Dark colours instead of the ones Windows gave it.")
+        self._setting(frame, "on top", self.on_top, self.toggle_top,
+                      "Keeps the window above the others, so what is being said "
+                      "does not go behind what you are reading.")
+
+        self._section(frame, "updates")
+        row = self._setting(frame, "auto-check for updates", self.auto_update,
+                            self.toggle_auto_update,
+                            "Looks once a week for a newer claude-voice, and "
+                            "once straight away when you tick it. The one thing "
+                            "here that touches the network at all — untick it "
+                            "and nothing in this program ever contacts anything.")
+        # The button the footer used to carry, now in the section it is about
+        # and indented under the words that explain it. It says whatever
+        # update_saying says rather than "check now", because a check can have
+        # been started and answered with no dialog on screen at all -- and one
+        # still running leaves it disabled, exactly as it was when it left.
+        self.update_btn = ttk.Button(row, text=self.update_saying, width=16,
+                                     style="Small.TButton", command=self.press_update)
+        self.update_btn.pack(anchor="w", padx=(20, 0), pady=(5, 0))
+        if self.update_busy:
+            self.update_btn.state(["disabled"])
+
+        self._paint_settings()
+        over(win, self.root)
+
+    def _setting(self, parent, text, variable, command, says):
+        """One setting: the tick, and under it what ticking it would mean."""
+        row = ttk.Frame(parent)
+        row.pack(fill="x", padx=8, pady=(2, 6))
+        self.check(row, text=text, variable=variable, command=command).pack(anchor="w")
+        # Indented to the tick's words rather than to its box, so the sentence
+        # reads as belonging to the label above it. wraplength is in pixels and
+        # this window cannot be resized, so the one number does for good.
+        note = ttk.Label(row, text=says, font=FONT_SMALL, foreground=GREY,
+                         wraplength=300, justify="left")
+        note.pack(anchor="w", padx=(20, 0))
+        self.dim.append(note)
+        return row
+
+    def _paint_settings(self):
+        """The dialog's own background, which is all that takes no styling.
+
+        Everything in it is either ttk, which follows the styles apply_theme
+        sets, or a tick box, which the walk in apply_theme repaints -- a
+        Toplevel is a child of root, so that walk reaches into this window
+        without being told to. The Toplevel itself is the one widget nobody
+        else is going to colour.
+        """
+        if self.settings is None or not self.settings.winfo_exists():
+            return
+        dark = bool(self.dark.get())
+        self.settings.configure(background=DARK["bg"] if dark else
+                                ttk.Style().lookup("TFrame", "background"))
+
+    def toggle_at_login(self):
+        """Ticked means the shortcut is in the Startup folder, and nothing else.
+
+        So the box is read back off the folder rather than left where the click
+        put it: a create that failed must not leave a tick claiming it worked,
+        and neither must a delete. There is nothing else to write -- see
+        starts_with_windows for why there is no setting behind this one.
+        """
+        if self.at_login.get():
+            make_startup_shortcut()
+        else:
+            drop_startup_shortcut()
+        self.at_login.set(starts_with_windows())
+
+    def close_settings(self):
+        if self.settings is not None:
+            try:
+                self.settings.destroy()
+            except tk.TclError:
+                pass
+            # Its headings and descriptions are in the list the theme repaints,
+            # and that list outlives this window. A dead widget left in it
+            # breaks the next dark switch half way through, which leaves the
+            # rest of the panel in the wrong colours. The typer learned this.
+            self.dim = [w for w in self.dim if w.winfo_exists()]
+        self.settings = None
+        # And the update button went with it. Everything it was saying is on
+        # update_saying, so the next dialog opens saying the same thing.
+        self.update_btn = None
 
     def close(self):
         self.stopping.set()

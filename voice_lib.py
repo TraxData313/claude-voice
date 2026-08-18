@@ -107,6 +107,13 @@ DEFAULTS = {
     "panelTopmost": True,
     # Dark colours in the panel. Its own tick box writes this too.
     "panelDark": False,
+    # Load the engine and turn the voice on as the panel opens -- 'auto start',
+    # in the panel's settings dialog. Off here, and it stays off until somebody
+    # ticks it: opening a window should not quietly take three and a half
+    # gigabytes. It is only ever about the panel; the hook's own 'autostart'
+    # above is a different question, about an engine that is asked to speak
+    # while none is running.
+    "panelAutostart": False,
     # How big the speaker's portrait is drawn, in pixels.
     "panelFace": 128,
 }

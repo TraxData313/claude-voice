@@ -6,6 +6,47 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.5.0 — 2026-08-18
+
+**The panel has a settings window now, and every tick in it says what it actually does.**
+
+The top strip had grown three tick boxes, each of which had to explain itself in two words
+and could not. *auto start* and *on top* are not the same kind of thing at all, and nothing
+on screen said which of them was about the window and which was about three and a half
+gigabytes of model. So they have gone behind a cog, where each of them gets a sentence.
+
+- **A cog in the top right, and four settings behind it.** *auto start*, *start with
+  Windows*, *dark* and *on top*, each with a line under it saying what ticking it would do.
+  Esc closes it, it opens over the panel, and flipping *dark* while it is open recolours it
+  where it stands.
+- **`start with Windows` is new**: it opens this window when you log in. Tick it together
+  with *auto start* and the whole thing simply talks — the window comes up by itself, loads
+  the engine, turns the voice on, and there is nothing left to press. Both are off until you
+  ask, because neither opening a window nor taking three and a half gigabytes should happen
+  because you logged in.
+- **That tick has no setting behind it.** Windows opens whatever is in the Startup folder, so
+  the folder *is* the setting: ticking writes the same shortcut the installer puts on your
+  Desktop, unticking deletes it, and the box is then read back off the folder rather than
+  left where the click put it. A shortcut that could not be written leaves the box unticked,
+  which is the truth, rather than ticked, which would be a promise.
+- **The engine button wears a chip.** The cog it used to wear now means settings, the way a
+  cog means settings everywhere else, and what that button loads and hands back is a model —
+  so it gets the chip. Drawn against a power symbol, a bolt and a robot, and chosen by eye.
+- **`auto-check for updates` can say what it means again.** In the footer it had to be called
+  `auto-check`, because the longer label ate the room the line beside it needed. In a dialog
+  there is room. What stays in the footer is the report rather than the controls: what is in
+  an update, how the last look went, and the version itself — which now turns the link colour
+  when there is something to take, since the button that used to announce it is behind a cog.
+- **The volume slider moved up beside the buttons, and the window is a row shorter.** It had
+  a row to itself because the old button row was full; the tick boxes leaving made the room.
+  The word *volume* and the percentage went with it — there is one slider in this window and
+  it does not need labelling, and the number is in the hover text now, which follows the
+  handle while you drag it. Worth 23 pixels of height, measured.
+- **A check that finishes after you close the dialog no longer has a button to write to.**
+  What it would have said is remembered instead, so the next dialog opens already saying it —
+  and one opened while a check is still running finds the button greyed out and reading
+  *checking…*, which is where it left off.
+
 ## 1.4.1 — 2026-08-18
 
 **The engine has a switch of its own now, so you can hand its memory back without a terminal.**
