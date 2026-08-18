@@ -6,6 +6,35 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.4.0 — 2026-08-18
+
+**The panel can now read out anything you type into it, not only what Claude says.**
+
+Everything in that window steered what Claude was already saying. There was no way to hand it
+a sentence of your own short of `/voice say` in a terminal, which meant opening a terminal to
+use a thing whose whole point is not having to.
+
+- **`read custom text`, on the queue's own heading.** It opens a small box; type into it, press
+  **ctrl+enter** or **read it**, and the line joins the queue. Esc or **cancel** closes it
+  without saying anything. The button greys out with the rest when the engine is down.
+- **It waits its turn.** `/voice say` cuts off whatever is playing, because that is what
+  *say this now* means. This does not — you asked for a line to be read, not for the three
+  behind it to be thrown away.
+- **It speaks with the voice turned off**, exactly as `/voice say` does. The master switch is
+  about Claude talking unprompted; this is you asking for one line.
+- **Typed lines are filed under `manual input`** in the queue and the history, so they read
+  apart from the folders Claude has been working in. Clicking one in the history says it
+  again, like any other.
+- The API behind it: `/speak` takes `project`, and a `queue` flag that asks it not to barge
+  in. Every existing caller is unchanged.
+
+**And the on-off switch is now green or red**, so which way it is set can be seen rather than
+read. Green is the voice working, red is it silent — the colour is the state, the label is
+still the action, which is why a green button says `turn off`. Grey while there is no engine:
+not working, but the switch is not the reason. It had to become a plain Tk button to be
+coloured at all — the native Windows theme ignores colour on a themed button, so it would
+have worked in dark and done nothing in light.
+
 ## 1.3.2 — 2026-08-17
 
 **Updating no longer depends on how git was installed — she goes and finds it herself.**

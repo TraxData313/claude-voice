@@ -8,9 +8,10 @@ deliberately plain:
 
     what is playing now, and which session it came from
     which voice is speaking, and how big to draw them
-    turn it off, skip this line, skip everything
+    turn it off -- green while it is working, red while it is not --
+    skip this line, skip everything
     how loud it is
-    what is queued behind it
+    what is queued behind it, and a box to add a line of your own to it
     what has been said -- click a line to hear it again
     which sessions are heard and which are muted
     and Abby along the bottom, whoever is actually talking
@@ -102,6 +103,24 @@ ROW_ICON = 24                # and the small one on every row
 MAX_SESSIONS = 5
 # The two voices the repo ships. Clicking the portrait swaps between them.
 SHIPPED = ("abby", "max")
+# What a line you typed yourself is filed under. Every other line in the queue
+# came from a folder Claude was working in, and the column says which; this one
+# came from the box in this window, and an empty cell would not say that.
+TYPED_PROJECT = "manual input"
+# The master switch says what pressing it *does*; its colour says what is
+# happening *now*. So a green button reads "turn off", and that is the right way
+# round -- green is the voice working, and the label is what you would be doing
+# to it. Getting these two the same way round would mean either a button that
+# does not say what it does or a colour that does not say how things are.
+#
+# Face, then the same again lighter for the pointer being over it.
+POWER_ON = ("#2f7d4f", "#3a9a61")
+POWER_OFF = ("#a33a3a", "#c04a4a")
+# No engine to ask, so the switch knows nothing to report. Grey rather than red:
+# the voice is indeed not working, but the switch is not the reason, and the row
+# is greyed out anyway. "engine: down" in the corner is the honest answer.
+POWER_DEAD = ("#6b6e76", "#6b6e76")
+
 # For the voices with no picture -- which is most of them. Picked from the id,
 # so a voice keeps its colour between runs and between rows.
 PALETTE = ["#2A9D8F", "#E9A13B", "#4C7FE0", "#8E6FD0", "#D96A82", "#4CA36A"]
@@ -354,6 +373,10 @@ class Panel:
         # An update was taken in this window, so this window is now the one
         # thing running the old code.
         self.update_reopen = False
+        # The typing box and the box inside it, while it is open. One at a
+        # time: a second copy would be two boxes with one queue behind them.
+        self.typer = None
+        self.typed = None
         self.native_theme = ttk.Style().theme_use()
         self._build()
         self.apply_theme()
@@ -412,9 +435,26 @@ class Panel:
         bar.pack(fill="x", pady=(6, 0))
         # The master switch first: it is the one reached for most, and the two
         # beside it are about the line being spoken, not about the voice.
-        self.power = ttk.Button(bar, text="turn off", width=9, command=self.toggle_voice)
-        self.power.pack(side="left", padx=(0, 6))
-        self.transport = [self.power]
+        # The old plain Tk button rather than ttk's, for the same reason the
+        # tick boxes are: the native Windows theme draws a real Windows button
+        # and ignores the colour you ask it for, so a ttk one would be green in
+        # dark and grey in light. This one is drawn by Tk and does as it is
+        # told, in both. Flat and borderless because a 3D grey frame around a
+        # coloured face is the one thing that makes it look broken.
+        self.power = tk.Button(bar, text="turn off", width=10, font=FONT,
+                               command=self.toggle_voice, relief="flat",
+                               borderwidth=0, highlightthickness=0, takefocus=0,
+                               pady=3, foreground="#ffffff",
+                               activeforeground="#ffffff",
+                               disabledforeground="#dcdcdc")
+        # fill="y", so it is exactly as tall as the themed buttons beside it
+        # rather than a guess at their padding -- which is a different guess in
+        # each theme, and wrong in one of them whichever number is picked.
+        self.power.pack(side="left", padx=(0, 6), fill="y")
+        self.paint_power(None)       # until the first poll says otherwise
+        # Not in here: this one is a tk.Button and takes 'state' as an option
+        # rather than as a method, so it is switched on and off by hand below.
+        self.transport = []
         # The queue is the whole difference between these two, so the labels
         # say so rather than leaving it to be discovered: 'skip line' gives up
         # on this sentence and goes straight to the next, 'skip all' throws
@@ -545,7 +585,24 @@ class Panel:
         self.sessions.pack(side="bottom", fill="x", padx=8)
         self._section(root, "sessions — ticked means heard").pack_configure(side="bottom")
 
-        self.queue_head = self._section(root, "queued")
+        # The heading, and beside it the one way to put something into the
+        # queue by hand. It sits on this row rather than up with the transport
+        # buttons because those three are all about the line being spoken --
+        # this one adds a line of your own to the ones waiting behind it.
+        asked = ttk.Frame(root)
+        asked.pack(fill="x")
+        self.queue_head = self._section(asked, "queued")
+        self.queue_head.pack_configure(side="left", expand=True)
+        # "read custom text" rather than "say something": the short one was
+        # cheerful and said nothing -- a button on a queue could as easily have
+        # meant say the next line. This one names what goes in and what happens
+        # to it, which is the whole of what the button is for.
+        self.say_btn = ttk.Button(asked, text="read custom text", width=17,
+                                  style="Small.TButton", command=self.open_typer)
+        self.say_btn.pack(side="right", padx=(0, 8), pady=(6, 0))
+        # Disabled with the rest when there is no engine: a box you can type
+        # into but nothing can read from is worse than no box at all.
+        self.transport.append(self.say_btn)
         self.queue_list = self._rows(root, height=3)
 
         # Three rows is what it insists on; it takes any spare height going.
@@ -720,6 +777,9 @@ class Panel:
         for widget in _descendants(self.root):
             if isinstance(widget, tk.Checkbutton):     # ttk's are not these
                 self._paint_check(widget)
+        # Its ttk parts follow the styles set above on their own; the box you
+        # type into is a plain Tk widget and has to be told.
+        self._paint_typer()
         self.drawn.pop("face", None)              # redraw it on the new background
 
     def toggle_auto_update(self):
@@ -973,6 +1033,7 @@ class Panel:
             return self.render_down()
         for b in self.transport:
             b.state(["!disabled"])
+        self.power.configure(state="normal")
         self.start_btn.pack_forget()
 
         # Before the portrait: it puts the voice's name under it, and that
@@ -1008,7 +1069,7 @@ class Panel:
             on = self.drawn.get("enabled", on)     # just clicked; let it settle
         else:
             self.drawn["enabled"] = on
-        self.power.configure(text="turn off" if on else "turn on")
+        self.paint_power(on)
 
         # The engine owns the level: it is the process making the noise, and
         # the mixer slider being moved is that process's own. So this only ever
@@ -1049,6 +1110,8 @@ class Panel:
         self.whose.configure(text="nothing is being spoken anywhere")
         for b in self.transport:
             b.state(["disabled"])
+        self.power.configure(state="disabled")
+        self.paint_power(None)
         # winfo_manager, not winfo_ismapped: a minimised window maps nothing,
         # and re-packing on every poll would fight the layout.
         if not self.start_btn.winfo_manager():
@@ -1145,12 +1208,25 @@ class Panel:
         self._rewrap()
         self.hold_the_floor()
 
+    def paint_power(self, on):
+        """The switch, wearing whether the voice is working.
+
+        None is "no engine, so no idea" -- and that has no label of its own,
+        because the last one it had is still the truthful thing to press.
+        """
+        if on is None:
+            face, hover = POWER_DEAD
+        else:
+            face, hover = POWER_ON if on else POWER_OFF
+            self.power.configure(text="turn off" if on else "turn on")
+        self.power.configure(background=face, activebackground=hover)
+
     def toggle_voice(self):
         """The switch itself: speaking, or not speaking anywhere."""
         on = not self.drawn.get("enabled", True)
         self.hold("enabled")
         self.drawn["enabled"] = on
-        self.power.configure(text="turn off" if on else "turn on")
+        self.paint_power(on)
         self.act("/enabled", {"on": on})
 
     def slide_volume(self, value):
@@ -1269,6 +1345,100 @@ class Panel:
             self.drawn["voice"] = vid
             self.act("/set-voice", {"voice": vid})
 
+    # -- saying something of your own --------------------------------------
+    def open_typer(self):
+        """A box to type a line into, and have it read out.
+
+        The panel owns no state, and this comes as close as anything here to
+        breaking that: the words are not read back off the engine, they are
+        yours. But it is still one POST -- the engine keeps them exactly as it
+        keeps a line a hook sent it, and this window forgets them at once.
+
+        It queues rather than barging in. 'voice say' means say this now, and
+        cuts off whatever is playing; typing a line here is asking for it to be
+        read, which is no reason to throw away what is already waiting.
+        """
+        if self.typer is not None and self.typer.winfo_exists():
+            self.typer.deiconify()               # already open; just come back
+            self.typer.lift()
+            self.typed.focus_set()
+            return
+
+        win = self.typer = tk.Toplevel(self.root)
+        win.title("read custom text")
+        # Owned by the panel, and floating with it: the panel is on top of
+        # everything by default, and a window it opened that it then covered
+        # over would be a strange thing to have been given.
+        win.transient(self.root)
+        win.wm_attributes("-topmost", self.on_top.get())
+        win.protocol("WM_DELETE_WINDOW", self.close_typer)
+        win.bind("<Escape>", lambda _event: self.close_typer())
+
+        frame = ttk.Frame(win)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self.typed = tk.Text(frame, height=6, width=42, wrap="word", font=FONT,
+                             borderwidth=1, relief="solid", highlightthickness=0)
+        self.typed.pack(fill="both", expand=True)
+        self.typed.bind("<Control-Return>", self.speak_typed)
+
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=(8, 0))
+        # Enter puts in a line break, because this takes as many lines as you
+        # like -- so the key that sends it has to be written down somewhere.
+        hint = ttk.Label(row, text="ctrl+enter reads it", font=FONT_SMALL,
+                         foreground=GREY)
+        hint.pack(side="left")
+        self.dim.append(hint)
+        ttk.Button(row, text="read it", width=9,
+                   command=self.speak_typed).pack(side="right")
+        ttk.Button(row, text="cancel", width=9,
+                   command=self.close_typer).pack(side="right", padx=(0, 6))
+
+        self._paint_typer()
+        over(win, self.root)
+        self.typed.focus_set()
+
+    def _paint_typer(self):
+        """The typing box in whichever theme the panel is wearing.
+
+        A tk.Text takes no ttk styles: its background, its words and its caret
+        are three separate colours, and left alone in dark the caret is black
+        on black -- a box that looks like it is not taking anything you type.
+        """
+        if self.typer is None or not self.typer.winfo_exists():
+            return
+        dark = bool(self.dark.get())
+        self.typer.configure(background=DARK["bg"] if dark else
+                             ttk.Style().lookup("TFrame", "background"))
+        self.typed.configure(
+            background=DARK["field"] if dark else "SystemWindow",
+            foreground=DARK["fg"] if dark else "SystemWindowText",
+            insertbackground=DARK["fg"] if dark else "SystemWindowText",
+            selectbackground=DARK["sel"] if dark else "SystemHighlight",
+            selectforeground=DARK["fg"] if dark else "SystemHighlightText")
+
+    def speak_typed(self, _event=None):
+        words = self.typed.get("1.0", "end").strip()
+        if words:
+            self.act("/speak", {"text": words, "project": TYPED_PROJECT,
+                                "queue": True})
+            self.close_typer()
+        # Or ctrl+enter sends the line and puts a line break in the box behind
+        # it, which is only visible if it failed to send.
+        return "break"
+
+    def close_typer(self):
+        if self.typer is not None:
+            try:
+                self.typer.destroy()
+            except tk.TclError:
+                pass
+            # Its grey label is in the list the theme repaints, and that list
+            # outlives the window; a dead widget left in it breaks the next
+            # switch, which then leaves half the panel in the wrong colours.
+            self.dim = [w for w in self.dim if w.winfo_exists()]
+        self.typer = self.typed = None
+
     def close(self):
         self.stopping.set()
         try:
@@ -1282,6 +1452,21 @@ class Panel:
         except Exception:
             pass
         self.root.destroy()
+
+
+def over(win, parent):
+    """Put a small window in the middle of the one that opened it.
+
+    Tk otherwise puts it wherever the window manager likes, which on a second
+    monitor is nowhere near the panel you just clicked. The size has to be
+    asked for before it is mapped, or it is 1x1 and the sum is wrong.
+    """
+    win.update_idletasks()
+    wide, high = win.winfo_reqwidth(), win.winfo_reqheight()
+    x = parent.winfo_rootx() + (parent.winfo_width() - wide) // 2
+    y = parent.winfo_rooty() + (parent.winfo_height() - high) // 3
+    # Never off the top or the left, whatever shape the parent is.
+    win.geometry(f"+{max(0, x)}+{max(0, y)}")
 
 
 def place(root, geometry):

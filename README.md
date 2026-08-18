@@ -115,7 +115,9 @@ twice a second:
 
 - **who is speaking**, what they are saying, and which project it came from — click the
   portrait to swap voice
-- **turn off · skip line · skip all**, and a **volume** slider that bites mid-sentence
+- **turn off** — green while the voice is working, red while it is not — with
+  **skip line · skip all** and a **volume** slider that bites mid-sentence
+- **read custom text** — type any text and it is read out, behind whatever is already waiting
 - **history — click any line to hear it again**, from the audio you already heard
 - **a tick per session** — untick one and it stops being read aloud
 - voice, portrait size, **dark**, **on top**, and Abby herself along the bottom

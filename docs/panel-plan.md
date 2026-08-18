@@ -325,3 +325,60 @@ one drifted right until it was touching the version number.
 - **The panel never checks by itself.** It reads the answer of whatever check last ran, off
   disk, by watching one small file's timestamp. Everything it knows about updates arrived
   because somebody asked for it.
+
+**A box to type a line into.** `read custom text`, on the queue's own heading. Everything else
+in this window steers what Claude is already saying; this is the one control that puts words
+in that came from nowhere but here. It sits on that row rather than up with the transport
+buttons because those three are about the line being spoken, and this one is about the ones
+waiting behind it.
+
+- **It queues, it does not barge in.** `/voice say` means *say this now* and cuts off
+  whatever is playing. Typing a line here is asking for it to be read, which is no reason to
+  throw away what is already in the queue — so `/speak` grew a `queue` flag, and the panel is
+  the only thing that sets it. Every other caller behaves exactly as it did.
+- **It is filed under `manual input`.** The panel draws a column of project names, and every
+  other line in the queue came from a folder Claude was working in. An empty cell there says
+  nothing; this says where it really came from. `/speak` now passes `project` through to the
+  job for the same reason it already passed `session`.
+- **It speaks even when the voice is turned off**, like `/voice say` and for the same reason:
+  you asked for this line, specifically, just now. The master switch is about Claude talking
+  unprompted.
+- **The window forgets the words the moment they go.** The panel owns no state, and this
+  comes closest to breaking that rule without actually doing it — the text is one POST, and
+  the engine keeps it exactly as it keeps a line a hook sent.
+- **The box is a `tk.Text`, so it takes no ttk styling.** Background, words and caret are
+  three separate colours, and left alone in dark theme the caret is black on black — a box
+  that looks like it is ignoring everything you type. Its grey hint label joins the list the
+  theme repaints, so closing the window has to take it back out again: a destroyed widget
+  left in that list breaks the *next* dark switch, halfway through, leaving the rest of the
+  panel in the wrong colours.
+- **Ctrl+Enter sends it**, because Enter has to keep making line breaks in a box that takes
+  as many lines as you like. The handler returns `"break"` or Tk helpfully does both.
+- **The label names both halves of what it does.** It read `say something` first, which was
+  cheerful and said nothing: a button sitting on a queue could as easily have meant *say the
+  next one*. `read custom text` says what goes in and what happens to it, which is the only
+  thing a person who has never seen this window needs from it.
+
+**The master switch wears its state: green working, red silent.** The label already said what
+pressing it would *do*; nothing said what was happening *now* without reading the words on it
+and working out which way round they were. So the colour is the state and the label is the
+action, which means a green button reads `turn off` — and that is the right way round. The
+alternative is either a button that does not say what it does or a colour that does not say
+how things are.
+
+- **It had to stop being a `ttk.Button` to be coloured at all.** The native Windows theme
+  draws a real Windows button and ignores the background you ask it for; only `clam` obeys,
+  and `clam` is the dark theme. A ttk button would have been green in dark and grey in light.
+  The plain `tk.Button` is drawn by Tk in both — the same reason the tick boxes are plain
+  ones. Flat and borderless, because a 3D grey frame around a coloured face looks broken.
+- **It is packed `fill="y"`.** Matching the themed buttons beside it by choosing a padding
+  means choosing two different numbers, one per theme, and being wrong in one of them — in
+  light it sat four pixels short. Filling the row takes the height the tallest button in it
+  already asked for, in either theme, without a number being picked at all.
+- **No engine means grey, not red.** The voice is indeed not working, but the switch is not
+  the reason and cannot know what it would be if there were one; the row is greyed out
+  anyway, and `engine: down` in the corner is the answer to what is actually wrong.
+- **It is out of the `transport` list** that greys the row, because that list is walked with
+  `state([...])` — a ttk method a plain Tk button does not have. It takes `state` as an
+  option instead, so it is switched by hand in the same two places.
+

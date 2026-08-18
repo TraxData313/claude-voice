@@ -1012,9 +1012,17 @@ class Handler(BaseHTTPRequestHandler):
             if not pieces:
                 return self._reply(400, {"error": "nothing speakable"})
             # An explicit request through the API is the user asking for this
-            # now, so it takes the floor.
+            # now, so it takes the floor -- unless it says otherwise. Text
+            # typed into the panel asks to be queued instead: it is a line to
+            # add to what is waiting, not a reason to throw the rest away.
+            #
+            # The project is passed through because the panel draws a column of
+            # them, and something typed by hand belongs to no folder; saying so
+            # is better than an empty cell nobody can account for.
             sp.submit(Job(pieces, voice["id"], kwargs, text=text,
-                          session=payload.get("session")), barge=True)
+                          session=payload.get("session"),
+                          project=payload.get("project")),
+                      barge=not payload.get("queue"))
             log(f"speak [{voice['id']}] {len(pieces)} chunk(s): {text[:60]}...")
             return self._reply(202, {"queued": len(pieces), "voice": voice["id"]})
 
