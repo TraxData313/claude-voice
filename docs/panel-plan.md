@@ -382,3 +382,82 @@ how things are.
   `state([...])` — a ttk method a plain Tk button does not have. It takes `state` as an
   option instead, so it is switched by hand in the same two places.
 
+**Then the engine got a switch of the same kind, and took the leftmost place.** It replaced
+`start engine`, which only ever appeared when there was nothing running — so the window could
+start an engine and never stop one, and handing its three and a half gigabytes back meant
+opening a terminal, which is the one thing this window exists to avoid. Making the two
+switches by the same hand is what turned that code into `_switch`; there is no third caller
+and there does not need to be, but two identical blocks of tk.Button arguments is a worse
+place to fix a colour than one.
+
+- **The row now reads biggest to smallest, left to right.** Loading a model is a minute and
+  three gigabytes. Turning the voice off is instant and costs nothing. Skipping a line is
+  about the one sentence in the air right now. That is the order they sit in.
+- **Unloading turns the voice off as well, and has to.** The hook loads an engine again the
+  moment Claude says anything, so unloading with the voice still on frees three gigabytes for
+  roughly five seconds. `voice kill` has exactly the same trap and exactly the same answer —
+  off first, then kill. The off is written straight to the config rather than posted, because
+  the two have to happen in that order and the second one is what stops the engine answering.
+- **Grey earns a third meaning here: not yet.** The voice switch is grey when there is no
+  engine to ask; the engine switch is grey, reading `starting…`, for the minute a first load
+  takes. Red is a state something has settled into, and neither of those has settled.
+- **A reply beats a countdown.** Pressing it holds the starting state for 25 seconds so the
+  window does not flash *engine not running* mid-load — but the moment `/state` answers, the
+  hold is dropped rather than waited out. The timer is only there for the case where nothing
+  ever answers.
+- **It cost the window 46 pixels of minimum width**, 420 to 466 — and then gave back more
+  than it took. Four buttons and two tick boxes do not fit in 420, so the tick boxes left
+  that row entirely (below), and four buttons alone want 352. That number was never a taste;
+  it is what the row measures, and it had to be measured again.
+
+**A strip along the very top, the way an ordinary window has one.** `dark` and `on top` live
+there now. Neither is about what is being said — they are about the window itself — and the
+left of that strip is deliberately empty, because that is where a File or a Settings would go
+if this ever grows one.
+
+- **It is a row of its own, and that is not tidiness.** Tried in the corner of the header
+  first, side by side: the tick boxes and the line being spoken then competed for the same
+  pixels, and in a narrow window the line lost — *engine not running* came out as
+  *engine not ru*. Tried them stacked, which halves their width to 57 and still lost. A row
+  of its own is the only arrangement where neither has to give, and it costs about twenty
+  pixels of height.
+- **The number that matters is 352.** Measured, not chosen: Tk asks 332 for the button row in
+  dark and 320 in light, plus 16 of padding. The window can now be narrower than it has ever
+  been, having been 420 for most of its life. Below about 396 the update note in the footer
+  starts to truncate, which is exactly what that label is anchored west and cut to 30
+  characters for — and it is the only thing in the window that gives.
+
+**The transport row became icons, and needed hover text the same day.** A cog for the
+engine, a square or a triangle for the voice, `⏩` for one line and `⏭` for all of them —
+they differ by the bar at the end, which is the difference itself: one more, or straight to
+where there is nothing left. The button on the queue's heading is a `+`, because that is what
+a button which adds one to a list looks like everywhere. It cost the row 173 pixels: 332 as
+words, 159 as icons.
+
+- **Name the font, or Windows picks the wrong one.** Left alone, Tk draws U+23F8 and its
+  neighbours out of Segoe UI Emoji — little boxed colour pictures, which on a green button
+  look like clip art stuck to it. Named as `Segoe UI Symbol` they come out as plain
+  monochrome shapes that take the button's own foreground colour like any letter would.
+  A missing font is not an error in Tk, it is a silent substitution, so the family is checked
+  for rather than assumed and the buttons fall back to their old words if it is gone.
+- **One glyph had to come from somewhere else.** U+2699, the cog, renders in Segoe UI Symbol
+  as a small ring with a dot in it — at button size that reads as a record button, not a cog.
+  Windows 10 and 11 ship `Segoe MDL2 Assets` with a proper one at `\ue713`, so the engine
+  button borrows that and nothing else does. Private use codepoints are font-specific by
+  definition, which is why there is a fallback behind it.
+- **An icon nobody can name is a puzzle, not a control.** Tk has no tooltip, so `Tip` is a
+  borderless `Toplevel` with a label in it, shown on a 450ms timer — without the delay,
+  crossing the row on the way somewhere else flashes four of them. It takes its words as a
+  *callable* where the button has more than one state, because a tooltip confidently saying
+  the wrong one of two things is worse than no tooltip at all.
+- **It sits below the button, never over it.** Whatever you are pointing at stays visible, and
+  it is pulled left if it would otherwise run off the screen.
+
+**She is drawn before anything has been asked.** The panel opened on an empty circle and an
+empty dropdown until an engine answered, which says less than the truth: which voice is set is
+in the config, the catalogue is a directory listing, and the portraits are files on disk. All
+three are knowable with nothing running. `show_saved_voice` reads them once at startup and
+hands them to the same `render_voices` the engine's reply goes through, so there is one code
+path and not two. The first poll that gets an answer replaces it — that one can say who is
+*speaking*, rather than who would.
+

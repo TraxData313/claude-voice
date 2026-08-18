@@ -114,10 +114,11 @@ no terminal needed. It floats on top, owns nothing, and asks the engine what is 
 twice a second:
 
 - **who is speaking**, what they are saying, and which project it came from — click the
-  portrait to swap voice
-- **turn off** — green while the voice is working, red while it is not — with
-  **skip line · skip all** and a **volume** slider that bites mid-sentence
-- **read custom text** — type any text and it is read out, behind whatever is already waiting
+  portrait to swap voice; her picture and name are there before any engine is
+- **a cog to load the engine or hand its ~3.5 GB back**, and a **stop/play** switch for the
+  voice — both green while working, red while not; then **⏩ skip line · ⏭ skip all** and a
+  **volume** slider that bites mid-sentence. Rest on any of them and it says what it does
+- **+ on the queue** — type any text and it is read out, behind whatever is already waiting
 - **history — click any line to hear it again**, from the audio you already heard
 - **a tick per session** — untick one and it stops being read aloud
 - voice, portrait size, **dark**, **on top**, and Abby herself along the bottom

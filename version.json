@@ -1,17 +1,18 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
 
-  "version": "1.4.0",
+  "version": "1.4.1",
   "date": "2026-08-18",
 
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "The panel can now read out anything you type into it, not only what Claude says.",
+  "headline": "The engine has a switch of its own now, so you can hand its memory back without a terminal.",
 
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "There is a new button beside the queue called read custom text. It opens a box, and whatever you type in there gets read out loud.",
-    "It waits its turn rather than cutting in, and it works even when the voice is switched off. Typed lines are filed under manual input, so you can tell them apart.",
-    "The on and off switch is now green while she is speaking and red while she is not, so you can see at a glance which way it is set."
+    "Turning the voice off never unloaded anything -- the engine stays warm on purpose, and sits on about three and a half gigabytes while it waits.",
+    "There is now a cog at the left of the button row that loads it or hands that memory back. Green means loaded, red means not, and pressing it does whichever is left.",
+    "The whole row is icons now rather than words, so rest on any button for a moment and it will tell you what it does.",
+    "The window remembers which monitor it was on, even one to the left of your main screen, which it used to lose every time."
   ],
 
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",

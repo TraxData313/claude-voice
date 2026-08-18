@@ -1,7 +1,7 @@
 {
   "name": "claude-voice",
   "displayName": "claude-voice",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Claude Code reads its answers aloud in a voice you choose, entirely on your own machine. A local Qwen-TTS model does the speaking: no cloud, no API key, no account, and no audio leaving the computer. Windows, NVIDIA.",
   "author": {
     "name": "TraxData313",

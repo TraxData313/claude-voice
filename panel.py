@@ -8,8 +8,8 @@ deliberately plain:
 
     what is playing now, and which session it came from
     which voice is speaking, and how big to draw them
-    turn it off -- green while it is working, red while it is not --
-    skip this line, skip everything
+    load the engine or give its memory back, turn the voice off, skip a line,
+    skip everything -- the two switches are green while working, red while not
     how loud it is
     what is queued behind it, and a box to add a line of your own to it
     what has been said -- click a line to hear it again
@@ -30,6 +30,7 @@ and the UI drains that queue on a timer of its own.
 """
 
 import argparse
+import ctypes
 import os
 import queue
 import re
@@ -38,6 +39,7 @@ import threading
 import time
 import tkinter as tk
 import webbrowser
+from tkinter import font as tkfont
 from tkinter import ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -56,6 +58,24 @@ DEFAULT_GEOMETRY = "440x860"
 GEOMETRY = re.compile(r"^(\d+x\d+)(?:([+-])(-?\d+)([+-])(-?\d+))?$")
 
 FONT = ("Segoe UI", 9)
+# The transport row is icons, and this is the font that has them as plain
+# monochrome shapes. Windows draws U+23F8 and friends out of Segoe UI Emoji if
+# nobody says otherwise -- little boxed colour pictures, which on a green
+# button look like clip art stuck to it. Named explicitly, they come out as
+# solid glyphs that take the button's own foreground colour like any letter.
+#
+# It has shipped with Windows since 7, but it is checked for rather than
+# assumed: a missing font is not an error in Tk, it is a silent substitution,
+# and the substitute here is the boxed emoji. Without it the buttons go back to
+# saying what they do in words.
+ICON_FAMILY = "Segoe UI Symbol"
+# And one glyph that font does not do well. U+2699, the cog, comes out of Segoe
+# UI Symbol as a small ring with a dot in it -- at button size it reads as a
+# record button, not as a cog. Windows 10 and 11 ship a whole icon set with a
+# proper one in it, so the engine button borrows that and nothing else does.
+# Private use codepoints are font-specific by definition, hence the fallback.
+MDL2_FAMILY = "Segoe MDL2 Assets"
+MDL2_GEAR = "\ue713"
 FONT_SMALL = ("Segoe UI", 8)
 FONT_BOLD = ("Segoe UI", 9, "bold")
 FONT_LINK = ("Segoe UI", 8, "underline")
@@ -93,8 +113,18 @@ FACE = 128                   # the portrait beside the line being spoken
 # The four worth offering. Any number can still be typed in, and the sizes in
 # between were a longer list saying nothing a person choosing would want said.
 FACE_SIZES = ("48", "96", "128", "256")
-# Wide enough for the row of buttons and both tick boxes, which is what sets it.
-MIN_WIDE = 420
+# The button row used to set this and no longer does: as icons those four want
+# 159 pixels rather than 332, which is less than anything else in the window.
+# What sets it now is the header: 136 for the portrait column, 26 of padding,
+# and about 185 for the longest thing the line above the words ever says --
+# "nothing is being spoken anywhere". Tried 320, which cut that line in half.
+#
+# For the record, because it has moved a lot: 420 for most of this window's
+# life, 466 when the engine switch briefly shared a row with the tick boxes,
+# 352 once they moved to the top strip, and 348 now the row is icons. Below
+# about 396 the update note in the footer truncates -- that label is anchored
+# west and cut to 30 characters precisely so it can be the thing that gives.
+MIN_WIDE = 348
 FACE_MIN, FACE_MAX = 24, 320
 ROW_ICON = 24                # and the small one on every row
 # However many sessions are live, only the newest few are worth a tick box --
@@ -113,17 +143,100 @@ TYPED_PROJECT = "manual input"
 # to it. Getting these two the same way round would mean either a button that
 # does not say what it does or a colour that does not say how things are.
 #
-# Face, then the same again lighter for the pointer being over it.
+# Face, then the same again lighter for the pointer being over it. Both
+# switches wear them: the engine either holds the model or it does not, and the
+# voice either speaks or it does not, and green-means-working reads the same on
+# either one.
 POWER_ON = ("#2f7d4f", "#3a9a61")
 POWER_OFF = ("#a33a3a", "#c04a4a")
-# No engine to ask, so the switch knows nothing to report. Grey rather than red:
-# the voice is indeed not working, but the switch is not the reason, and the row
-# is greyed out anyway. "engine: down" in the corner is the honest answer.
+# Nothing to ask, so the switch has nothing to report -- the voice switch while
+# there is no engine, and the engine switch during the minute it takes to load
+# one. Grey rather than red: red is a state it has settled into, and neither of
+# these has settled yet.
 POWER_DEAD = ("#6b6e76", "#6b6e76")
+
+# What each button shows, and what it says instead when the icon font is
+# missing. The pair matters: an icon nobody can name is a puzzle rather than a
+# control, which is what the hover text is for -- but if even that font is
+# gone, words are better than boxes.
+#
+# Fast-forward for one line and next-track for all of them: they differ by the
+# bar at the end, which is the difference itself -- one more, or straight to
+# where there is nothing left.
+GLYPH = {
+    "engine": ("\u2638", "engine"),        # a cog -- see MDL2_GEAR, preferred
+    "play": ("\u25b6", "turn on"),         # the voice is off; this starts it
+    "stop": ("\u25a0", "turn off"),        # it is on; this stops it. Not a
+                                           # pause: there is no coming back to
+                                           # the sentence it cut off.
+    "skip": ("\u23e9", "skip line"),       # >>
+    "skip_all": ("\u23ed", "skip all"),    # >|
+    "add": ("+", "read custom text"),      # into the queue, in your own words
+}
 
 # For the voices with no picture -- which is most of them. Picked from the id,
 # so a voice keeps its colour between runs and between rows.
 PALETTE = ["#2A9D8F", "#E9A13B", "#4C7FE0", "#8E6FD0", "#D96A82", "#4CA36A"]
+
+
+class Tip:
+    """The little label that appears under a button if you rest on it.
+
+    Tk has no tooltip, and once the transport row stopped using words it needed
+    one: an icon is only obvious to somebody who already knows what it does.
+    It is a borderless Toplevel with a label in it, shown on a timer so that
+    crossing the row on the way somewhere else does not flash four of them.
+
+    The words can be a callable, because half of these buttons do different
+    things depending on how the thing is set -- and a tooltip that says the
+    wrong one of the two is worse than none at all.
+    """
+
+    DELAY = 450                   # long enough not to fire while passing over
+
+    def __init__(self, widget, words, dark):
+        self.widget = widget
+        self.words = words        # str, or a callable returning one
+        self.dark = dark          # callable: is the panel in dark theme
+        self.tip = None
+        self.timer = None
+        widget.bind("<Enter>", self._enter, add="+")
+        widget.bind("<Leave>", self._leave, add="+")
+        # A press has been understood, so the explanation has done its job.
+        widget.bind("<ButtonPress>", self._leave, add="+")
+
+    def _enter(self, _event=None):
+        self._leave()
+        self.timer = self.widget.after(self.DELAY, self._show)
+
+    def _leave(self, _event=None):
+        if self.timer is not None:
+            self.widget.after_cancel(self.timer)
+            self.timer = None
+        if self.tip is not None:
+            self.tip.destroy()
+            self.tip = None
+
+    def _show(self):
+        self.timer = None
+        words = self.words() if callable(self.words) else self.words
+        if not words or not self.widget.winfo_exists():
+            return
+        dark = self.dark()
+        self.tip = tip = tk.Toplevel(self.widget)
+        tip.wm_overrideredirect(True)          # no title bar, no border, no taskbar
+        tip.wm_attributes("-topmost", True)    # the panel itself usually is
+        tk.Label(tip, text=words, font=FONT_SMALL, justify="left", padx=6, pady=3,
+                 background=DARK["field"] if dark else "#ffffe1",
+                 foreground=DARK["fg"] if dark else "#000000",
+                 relief="solid", borderwidth=1).pack()
+        # Under the button rather than over it, so it never covers the thing
+        # you are pointing at -- and pulled left if it would run off the edge.
+        tip.update_idletasks()
+        x = self.widget.winfo_rootx()
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        right = self.widget.winfo_screenwidth() - tip.winfo_reqwidth() - 4
+        tip.wm_geometry(f"+{min(x, right)}+{y}")
 
 
 def colour_for(voice_id):
@@ -378,8 +491,15 @@ class Panel:
         self.typer = None
         self.typed = None
         self.native_theme = ttk.Style().theme_use()
+        # Asked once, and only after there is a Tk to ask. Everything the
+        # transport row draws hangs off this.
+        families = tkfont.families()
+        self.icons_ok = ICON_FAMILY in families
+        self.gear_ok = self.icons_ok and MDL2_FAMILY in families
+        self.tips = {}               # button key -> its Tip, so the words can change
         self._build()
         self.apply_theme()
+        self.show_saved_voice()
         threading.Thread(target=self._poll_loop, name="poll", daemon=True).start()
         self.tick = self.root.after(DRAIN_MS, self._drain)
 
@@ -394,8 +514,27 @@ class Panel:
 
         head = ttk.Frame(root)
         head.pack(fill="x", padx=8, pady=(8, 0))
+
+        # A strip along the very top, the way an ordinary window has one.
+        # Nothing in it is about what is being said -- these two are about the
+        # window itself -- and the left of it is deliberately empty. That is
+        # where a File or a Settings would go if this ever grows one.
+        #
+        # A row of its own rather than a corner of the row below, and that is
+        # not tidiness. Sharing a row meant the tick boxes and the line being
+        # spoken were competing for the same pixels, and in a narrow window the
+        # line lost: "engine not running" came out as "engine not ru". Tried
+        # both ways round and stacked; a row of its own is the only arrangement
+        # where neither has to give. It costs about twenty pixels of height.
+        self.strip = ttk.Frame(head)
+        self.strip.pack(fill="x")
+        self.check(self.strip, text="on top", variable=self.on_top,
+                   command=self.toggle_top).pack(side="right")
+        self.check(self.strip, text="dark", variable=self.dark,
+                   command=self.toggle_dark).pack(side="right", padx=(0, 8))
+
         top = ttk.Frame(head)
-        top.pack(fill="x")
+        top.pack(fill="x", pady=(2, 0))
         who = self.who = ttk.Frame(top)
         who.pack(side="left", padx=(0, 10))
         self.face = tk.Canvas(who, width=self.face_size, height=self.face_size,
@@ -420,6 +559,12 @@ class Panel:
         self.size_box.pack(side="left", padx=(4, 0))
         for event in ("<<ComboboxSelected>>", "<Return>", "<FocusOut>"):
             self.size_box.bind(event, self.pick_size)
+        # The two switches that are about the window rather than the voice, in
+        # the corner the header was not using. They were down in the button row
+        # and they set its width: four buttons and two tick boxes did not fit
+        # in anything under 466 pixels, and the row is the only thing in this
+        # window with an opinion about how narrow it can be.
+        #
         said = ttk.Frame(top)
         said.pack(side="left", fill="x", expand=True)
         # Who is talking goes above what they said: you read down to the words
@@ -433,27 +578,34 @@ class Panel:
 
         bar = ttk.Frame(head)
         bar.pack(fill="x", pady=(6, 0))
-        # The master switch first: it is the one reached for most, and the two
+        # The engine first, then the voice, then the line: the row reads from
+        # the biggest thing to the smallest. Loading a model is a minute and
+        # three gigabytes; turning the voice off is instant and costs nothing;
+        # skipping a line is about the sentence in the air right now.
+        #
+        # It replaces the old "start engine" button, which only ever appeared
+        # when there was no engine -- so the window could start one and never
+        # stop one, and getting the memory back meant a terminal. This says
+        # both, in the place the first one used to be, and its colour says
+        # which of the two it is about to do.
+        # A point larger than the rest, whichever cog it ends up being: both
+        # are drawn inside a smaller box than the media glyphs are, and at the
+        # same size the first thing in the row reads as the runt of it.
+        self.engine_btn = self._switch(bar, "engine", self.toggle_engine, bump=1)
+        gear, gear_font = self._gear()
+        self.engine_btn.configure(text=gear, font=gear_font)
+        self.engine_btn.pack(side="left", padx=(0, 6), fill="y")
+        self.tips["engine"] = Tip(self.engine_btn, self._engine_says, self.dark.get)
+        self.paint_engine(None)
+
+        # The master switch second: it is the one reached for most, and the two
         # beside it are about the line being spoken, not about the voice.
-        # The old plain Tk button rather than ttk's, for the same reason the
-        # tick boxes are: the native Windows theme draws a real Windows button
-        # and ignores the colour you ask it for, so a ttk one would be green in
-        # dark and grey in light. This one is drawn by Tk and does as it is
-        # told, in both. Flat and borderless because a 3D grey frame around a
-        # coloured face is the one thing that makes it look broken.
-        self.power = tk.Button(bar, text="turn off", width=10, font=FONT,
-                               command=self.toggle_voice, relief="flat",
-                               borderwidth=0, highlightthickness=0, takefocus=0,
-                               pady=3, foreground="#ffffff",
-                               activeforeground="#ffffff",
-                               disabledforeground="#dcdcdc")
-        # fill="y", so it is exactly as tall as the themed buttons beside it
-        # rather than a guess at their padding -- which is a different guess in
-        # each theme, and wrong in one of them whichever number is picked.
+        self.power = self._switch(bar, "stop", self.toggle_voice)
         self.power.pack(side="left", padx=(0, 6), fill="y")
+        self.tips["power"] = Tip(self.power, self._power_says, self.dark.get)
         self.paint_power(None)       # until the first poll says otherwise
-        # Not in here: this one is a tk.Button and takes 'state' as an option
-        # rather than as a method, so it is switched on and off by hand below.
+        # Neither switch is in here: they are tk.Buttons and take 'state' as an
+        # option rather than as a method, so they are enabled by hand below.
         self.transport = []
         # The queue is the whole difference between these two, so the labels
         # say so rather than leaving it to be discovered: 'skip line' gives up
@@ -461,19 +613,14 @@ class Panel:
         # away everything waiting as well. Nothing here is called stop, because
         # neither of them pauses anything -- there is no coming back to it.
         # Skipping one line is the small, everyday one, so it is nearest.
-        for text, route in (("skip line", "/skip"), ("skip all", "/stop")):
-            b = ttk.Button(bar, text=text, command=lambda r=route: self.act(r))
+        for key, route, says in (("skip", "/skip", "skip this line"),
+                                 ("skip_all", "/stop", "skip everything waiting")):
+            b = ttk.Button(bar, text=self._glyph(key), style="Icon.TButton",
+                           width=3 if self.icons_ok else 10,
+                           command=lambda r=route: self.act(r))
             b.pack(side="left", padx=(0, 4))
+            self.tips[key] = Tip(b, says, self.dark.get)
             self.transport.append(b)
-        # Only ever shown when there is no engine to talk to.
-        self.start_btn = ttk.Button(bar, text="start engine", command=self.start_engine)
-        # Floating over everything is right while you are listening to a long
-        # answer and wrong while you are reading something behind it, so it is
-        # a switch rather than a decision, and it is remembered.
-        self.check(bar, text="on top", variable=self.on_top,
-                   command=self.toggle_top).pack(side="right")
-        self.check(bar, text="dark", variable=self.dark,
-                   command=self.toggle_dark).pack(side="right", padx=(0, 8))
 
         # A row of its own. Three buttons and two tick boxes already fill the
         # one above, and a slider squeezed in beside them would be a few pixels
@@ -573,6 +720,7 @@ class Panel:
         self.status.pack(side="right")
         self.dim += [made, dot, self.status]
 
+
         # Her, right above the credit -- the picture is what she looks like,
         # not a readout of anything, so it belongs at this end of the window.
         # No expand: the height is worked out in draw_art and set here, which
@@ -593,13 +741,18 @@ class Panel:
         asked.pack(fill="x")
         self.queue_head = self._section(asked, "queued")
         self.queue_head.pack_configure(side="left", expand=True)
-        # "read custom text" rather than "say something": the short one was
-        # cheerful and said nothing -- a button on a queue could as easily have
-        # meant say the next line. This one names what goes in and what happens
-        # to it, which is the whole of what the button is for.
-        self.say_btn = ttk.Button(asked, text="read custom text", width=17,
-                                  style="Small.TButton", command=self.open_typer)
+        # A plus, because that is what a button which adds one to a list looks
+        # like everywhere else. It said "read custom text" before, which was
+        # accurate and took a sixth of the width of the window to say -- the
+        # hover text says the same thing and takes none of it.
+        self.say_btn = ttk.Button(asked, text=self._glyph("add"),
+                                  width=3 if self.icons_ok else 17,
+                                  style="Add.TButton" if self.icons_ok else "Small.TButton",
+                                  command=self.open_typer)
         self.say_btn.pack(side="right", padx=(0, 8), pady=(6, 0))
+        self.tips["add"] = Tip(self.say_btn,
+                               "type a line of your own — it joins the queue,\n"
+                               "filed under “manual input”", self.dark.get)
         # Disabled with the rest when there is no engine: a box you can type
         # into but nothing can read from is worse than no box at all.
         self.transport.append(self.say_btn)
@@ -668,6 +821,46 @@ class Panel:
         label.pack(fill="x", padx=8, pady=(8, 2), anchor="w")
         self.dim.append(label)
         return label
+
+    def _glyph(self, key):
+        """The icon, or the words for anyone whose Windows has lost the font."""
+        icon, words = GLYPH[key]
+        return icon if self.icons_ok else words
+
+    def _icon_font(self, bump=0):
+        return (ICON_FAMILY, 12 + bump) if self.icons_ok else FONT
+
+    def _gear(self):
+        """The cog and the font that draws it, whichever of the two we have."""
+        if self.gear_ok:
+            return MDL2_GEAR, (MDL2_FAMILY, 13)
+        return self._glyph("engine"), self._icon_font(1)
+
+    def _switch(self, parent, key, command, bump=0):
+        """A button that can actually be green.
+
+        The old plain Tk button rather than ttk's, for the same reason the tick
+        boxes are: the native Windows theme draws a real Windows button and
+        ignores the colour you ask it for, so a ttk one would be green in dark
+        and grey in light. This one is drawn by Tk and does as it is told, in
+        both. Flat and borderless because a 3D grey frame around a coloured
+        face is the one thing that makes it look broken.
+
+        White text on all three faces, so the icon does not change weight as
+        the colour under it changes.
+
+        Pack it with fill="y", so it is exactly as tall as the themed buttons
+        beside it rather than a guess at their padding -- which is a different
+        guess in each theme, and wrong in one of them whichever number is
+        picked.
+        """
+        return tk.Button(parent, text=self._glyph(key), command=command,
+                         width=3 if self.icons_ok else 10,
+                         font=self._icon_font(bump), pady=3,
+                         relief="flat", borderwidth=0,
+                         highlightthickness=0, takefocus=0,
+                         foreground="#ffffff", activeforeground="#ffffff",
+                         disabledforeground="#dcdcdc")
 
     def link(self, parent, text, url):
         """A word you can click. Tk has no such widget, but it is only a label
@@ -746,6 +939,12 @@ class Panel:
         # small print around it. Set here rather than once at startup because
         # ttk keeps styles per theme, so a switch would otherwise lose it.
         style.configure("Small.TButton", font=FONT_SMALL, padding=(6, 1))
+        # The two skip buttons and the plus. Same story as every other style
+        # here: ttk keeps them per theme, so a switch would otherwise lose the
+        # font and drop the row back to boxed emoji.
+        if self.icons_ok:
+            style.configure("Icon.TButton", font=(ICON_FAMILY, 12), padding=(2, 1))
+            style.configure("Add.TButton", font=(ICON_FAMILY, 11), padding=(2, 0))
 
         # The list a combobox drops is a plain Tk listbox, coloured the old way.
         popup = ((DARK["field"], DARK["fg"], DARK["sel"], DARK["fg"]) if dark else
@@ -919,6 +1118,7 @@ class Panel:
         underneath are wider than a small picture, and taking the picture's
         width instead let the spoken line run off the right-hand edge -- by
         exactly the difference, which is why it only showed at some sizes.
+
         """
         width = self.root.winfo_width()
         column = max(self.face_size, self.who.winfo_width())
@@ -1005,11 +1205,70 @@ class Panel:
         self.root.wm_attributes("-topmost", self.on_top.get())
         voice_lib.patch_state(panelTopmost=bool(self.on_top.get()))
 
+    def _engine_says(self):
+        if self.drawn.get("engine_loading"):
+            return "loading the model — 40 to 60 seconds"
+        if self.drawn.get("engine_up"):
+            return "turn the engine OFF — hands back about 3.5 GB"
+        return "turn the engine ON — the first load takes 40 to 60 seconds"
+
+    def _power_says(self):
+        if not self.drawn.get("engine_up"):
+            return "no engine to speak with"
+        return "stop speaking" if self.drawn.get("enabled") else "start speaking"
+
+    def paint_engine(self, up):
+        """The engine switch. None is "loading", which is neither yet.
+
+        The cog does not change -- a cog is the engine either way, and what is
+        being said is whether it is running, which is what the colour is for.
+        Only the words under the pointer change.
+        """
+        face, hover = POWER_DEAD if up is None else (POWER_ON if up else POWER_OFF)
+        if not self.icons_ok and up is not None:
+            self.engine_btn.configure(text="engine off" if up else "engine on")
+        self.engine_btn.configure(background=face, activebackground=hover)
+
+    def toggle_engine(self):
+        """Load the model, or give the memory back."""
+        if self.drawn.get("engine_up"):
+            return self.unload_engine()
+        self.start_engine()
+
+    def unload_engine(self):
+        """Stop speaking, then shut the engine down.
+
+        It turns the voice off as well, and has to. The hook starts an engine
+        again the moment Claude says anything, so unloading with the voice
+        still on frees three gigabytes for about five seconds. `voice kill`
+        has the same trap and the same answer -- off first, then kill.
+
+        The off is written straight to the config rather than posted, because
+        these two have to happen in that order and the second one is what stops
+        the engine answering. The panel already writes its own settings there,
+        and the watcher re-reads that file every sweep.
+        """
+        voice_lib.patch_state(enabled=False)
+        self.hold("enabled")
+        self.drawn["enabled"] = False
+        self.drawn["engine_up"] = False
+        self.paint_power(False)
+        self.paint_engine(False)               # answer the click at once
+        self.status.configure(text="engine: unloading…")
+        self.act("/quit")
+
     def start_engine(self):
         self.hold("engine", 25)
+        self.drawn["engine_up"] = True         # so a second press unloads it
         self.now.configure(text="starting the engine — the first model load "
                                 "takes 40 to 60 seconds")
-        self.start_btn.pack_forget()
+        # Neither colour is true yet, and it cannot be pressed again until the
+        # poll says which. A minute is long enough that saying nothing about it
+        # would read as the click having been missed, so the line above the
+        # buttons says it and the hover text says it.
+        self.drawn["engine_loading"] = True
+        self.paint_engine(None)
+        self.engine_btn.configure(state="disabled")
         threading.Thread(target=lambda: voice_lib.start_server(voice_lib.load_state()),
                          name="start", daemon=True).start()
 
@@ -1034,7 +1293,13 @@ class Panel:
         for b in self.transport:
             b.state(["!disabled"])
         self.power.configure(state="normal")
-        self.start_btn.pack_forget()
+        self.engine_btn.configure(state="normal")
+        # It answered, so the wait is over whatever the clock said. The hold is
+        # only there to stop the window flashing "engine not running" during a
+        # load; a reply is better evidence than a countdown.
+        self.pending.pop("engine", None)
+        self.drawn["engine_loading"] = False
+        self.paint_engine(True)
 
         # Before the portrait: it puts the voice's name under it, and that
         # comes from the catalogue this reads.
@@ -1056,6 +1321,7 @@ class Panel:
             speaker = self.drawn.get("voice") or speaker
         self.draw_face(speaker)
 
+        self.drawn["engine_up"] = True
         rows = st.get("queue") or []
         self.queue_head.configure(text=f"queued ({len(rows)})")
         self.fill(self.queue_list, "queue", rows)
@@ -1112,10 +1378,11 @@ class Panel:
             b.state(["disabled"])
         self.power.configure(state="disabled")
         self.paint_power(None)
-        # winfo_manager, not winfo_ismapped: a minimised window maps nothing,
-        # and re-packing on every poll would fight the layout.
-        if not self.start_btn.winfo_manager():
-            self.start_btn.pack(side="left", padx=(6, 0))
+        # The one thing still worth pressing in this row: it offers to load one.
+        self.engine_btn.configure(state="normal")
+        self.drawn["engine_up"] = False
+        self.drawn["engine_loading"] = False
+        self.paint_engine(False)
         self.status.configure(text="engine: down")
 
     def draw_face(self, voice_id):
@@ -1218,7 +1485,9 @@ class Panel:
             face, hover = POWER_DEAD
         else:
             face, hover = POWER_ON if on else POWER_OFF
-            self.power.configure(text="turn off" if on else "turn on")
+            # A square while it is speaking, a triangle while it is not: the
+            # icon is what pressing it does, exactly as the words were.
+            self.power.configure(text=self._glyph("stop" if on else "play"))
         self.power.configure(background=face, activebackground=hover)
 
     def toggle_voice(self):
@@ -1312,6 +1581,29 @@ class Panel:
             var = self.session_vars.get(s["path"])
             if var is not None and not self.held(s["path"]) and var.get() == s["muted"]:
                 var.set(not s["muted"])
+
+    def show_saved_voice(self):
+        """Draw whoever would speak, before anything has been asked.
+
+        The panel is a view over the engine, and with no engine there was
+        nothing to view: it opened on an empty circle and an empty dropdown,
+        which says less than the truth. Which voice is set is in the config,
+        the catalogue is a directory listing and the pictures are files -- all
+        three are knowable without anybody being running, so there is no reason
+        to sit there blank until an engine turns up.
+
+        Read once, at startup. The engine's own answer replaces it on the first
+        poll that gets one, and that is the one that can say who is *speaking*
+        rather than who would.
+        """
+        state = voice_lib.load_state()
+        try:
+            voices = [{"id": v["id"], "name": v["name"], "culture": v["culture"],
+                       "sex": v["sex"]} for v in voice_lib.catalog(state)]
+        except OSError:
+            voices = []            # no voices folder; the dropdown stays empty
+        self.render_voices({"voices": voices, "voice": state.get("voice")})
+        self.draw_face(state.get("voice"))
 
     def render_voices(self, st):
         voices = st.get("voices") or []
@@ -1469,6 +1761,34 @@ def over(win, parent):
     win.geometry(f"+{max(0, x)}+{max(0, y)}")
 
 
+def desktop(root):
+    """Every monitor, not just the main one.
+
+    Tk only knows about the primary screen: winfo_screenwidth is *that* one,
+    and there is nothing in Tk that says a second monitor exists at all. A
+    window on a monitor to the left of the main one therefore has a negative x
+    -- perfectly ordinary, and indistinguishable from nonsense to anything
+    checking against 0.
+
+    That cost a real afternoon. The panel kept coming back on the middle of the
+    main screen instead of where it was left, because the check below read a
+    saved x of -428 as a monitor that had been unplugged and threw the position
+    away. Windows knows the shape of the whole desktop, so ask it.
+
+    Returns left, top, right, bottom. Falls back to the primary screen, which
+    is what Tk would have said on its own.
+    """
+    try:
+        metric = ctypes.windll.user32.GetSystemMetrics
+        # SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CY...
+        left, top, wide, high = (metric(n) for n in (76, 77, 78, 79))
+        if wide > 0 and high > 0:
+            return left, top, left + wide, top + high
+    except Exception:
+        pass
+    return 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+
+
 def place(root, geometry):
     """Reopen where it was left, unless that is no longer on any screen.
 
@@ -1484,9 +1804,11 @@ def place(root, geometry):
         return root.geometry(size)
     # A '-' offset is measured from the right or bottom edge, so it is on
     # screen by construction; only the '+' form can point at a monitor that
-    # is no longer there.
-    on_screen = (x_sign == "-" or -60 <= int(x) <= root.winfo_screenwidth() - 80) and \
-                (y_sign == "-" or -20 <= int(y) <= root.winfo_screenheight() - 60)
+    # is no longer there. The margins let a window that was left overlapping an
+    # edge come back overlapping it, rather than being treated as lost.
+    left, top, right, bottom = desktop(root)
+    on_screen = (x_sign == "-" or left - 60 <= int(x) <= right - 80) and \
+                (y_sign == "-" or top - 20 <= int(y) <= bottom - 60)
     root.geometry(geometry if on_screen else size)
 
 

@@ -6,6 +6,47 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.4.1 — 2026-08-18
+
+**The engine has a switch of its own now, so you can hand its memory back without a terminal.**
+
+`/voice off` only stops her talking. The engine stays loaded on purpose — that is what makes
+turning it back on instant — but it is sitting on about 3.5 GB while it waits, and the panel
+could start one and never stop one. Getting that memory back meant opening a terminal, which
+is the one thing this window exists to avoid.
+
+- **A cog, leftmost in the button row.** Green means the model is loaded, red means it is
+  not, and pressing it does whichever is left. It replaces the old `start engine` button,
+  which only ever appeared when there was nothing running.
+- **Unloading turns the voice off as well**, and has to: the hook loads an engine again the
+  moment Claude says anything, so unloading with the voice still on would free three
+  gigabytes for about five seconds. Same *off first, then kill* that `/voice kill` needs.
+- **Loading says so.** The cog goes grey for the minute a first load takes, rather than
+  wearing a colour that is not true yet, and says *loading the model* if you rest on it. It
+  drops that the moment the engine answers rather than waiting out a timer.
+- **`dark` and `on top` have moved to a strip along the very top**, the way an ordinary
+  window has one. The left of that strip is empty on purpose — it is where a File or a
+  Settings would go if this ever grows one.
+- **The whole transport row is icons, and every one of them says what it does.** A cog for
+  the engine, a **■** or a **▶** for the voice, **⏩** for one line and **⏭** for all of them —
+  they differ by the bar at the end, which is the difference itself: one more, or straight to
+  where there is nothing left. The button on the queue's heading is a **+**. Rest on any of
+  them for a moment and a small label says the rest, including which way the two switches are
+  about to go.
+- **The window can be narrower than it has ever been: 348, down from 420.** As words those
+  four buttons wanted 332 pixels; as icons they want 159, and the row stopped being what sets
+  the width at all. Below about 396 the update note in the footer truncates, which is what it
+  is cut to 30 characters for.
+- **The panel comes back on the monitor it was left on.** It never did if that monitor was to
+  the *left* of the main one: Tk only knows about the primary screen, so the saved position
+  was a negative number, and the check that decides whether a window is still on screen read
+  that as a monitor which had been unplugged and threw it away. Windows knows the shape of
+  the whole desktop; it is asked now.
+- **Her picture and name are drawn before any engine is running.** The window used to open on
+  an empty circle and an empty dropdown until something answered, but the voice is in the
+  config, the catalogue is a directory listing and the portraits are files — none of it needs
+  anybody running.
+
 ## 1.4.0 — 2026-08-18
 
 **The panel can now read out anything you type into it, not only what Claude says.**
