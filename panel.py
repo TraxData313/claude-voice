@@ -608,6 +608,11 @@ class Panel:
         # that until the first poll answers -- so it waits for that answer.
         self.opening = bool(self.at_open.get())
         self.auto_update = tk.BooleanVar(value=bool(saved.get("updateCheck", False)))
+        # How much audio to have in hand before the first word. Here rather
+        # than only in the CLI because the machine it matters on is the one
+        # somebody is already fighting, and a dropdown is quicker to reach
+        # for than a terminal while the voice is stuttering at you.
+        self.playback = tk.StringVar(value=str(saved.get("playback", "instant")))
         # Read off the filesystem rather than out of the config, and read again
         # every time the dialog opens -- see starts_with_windows.
         self.at_login = tk.BooleanVar(value=starts_with_windows())
@@ -2101,6 +2106,19 @@ class Panel:
                       "Keeps the window above the others, so what is being said "
                       "does not go behind what you are reading.")
 
+        self._section(frame, "how it speaks")
+        # Read again here rather than trusted from startup: the CLI writes
+        # this too, and a dropdown showing the wrong mode is worse than no
+        # dropdown at all.
+        self.playback.set(str(voice_lib.load_state().get("playback", "instant")))
+        self._choice(frame, "start speaking", self.playback,
+                     [m[0] for m in voice_lib.PLAYBACK_MODES],
+                     self.pick_playback,
+                     ["How much speech to have ready before she starts. Too "
+                      "little and she breaks up when the machine is busy."]
+                     + [f"• {name} — {says}"
+                        for name, _lead, says in voice_lib.PLAYBACK_MODES])
+
         self._section(frame, "updates")
         row = self._setting(frame, "auto-check for updates", self.auto_update,
                             self.toggle_auto_update,
@@ -2135,6 +2153,44 @@ class Panel:
         note.pack(anchor="w", padx=(20, 0))
         self.dim.append(note)
         return row
+
+    def _choice(self, parent, text, variable, options, command, says):
+        """One setting that is a pick rather than a yes: the label, the box,
+        and under both what the choice is between.
+
+        Read-only, because every value it can hold is in the list and a
+        typed one would only ever be a typo the engine then has to guess at.
+
+        `says` may be one sentence or a list of them, and a list is drawn a
+        line each. Four modes described in a paragraph is four things to hold
+        in your head at once; a list is four things to glance down.
+        """
+        row = ttk.Frame(parent)
+        row.pack(fill="x", padx=8, pady=(2, 6))
+        line = ttk.Frame(row)
+        line.pack(fill="x")
+        ttk.Label(line, text=text, font=FONT_SMALL).pack(side="left")
+        box = ttk.Combobox(line, state="readonly", width=10, font=FONT_SMALL,
+                           values=list(options), textvariable=variable)
+        box.pack(side="left", padx=(8, 0))
+        box.bind("<<ComboboxSelected>>", lambda _event: command())
+        for i, line in enumerate([says] if isinstance(says, str) else says):
+            note = ttk.Label(row, text=line, font=FONT_SMALL, foreground=GREY,
+                             wraplength=300, justify="left")
+            # Tight between the lines of one list, looser above the first,
+            # so the block reads as one thing rather than five.
+            note.pack(anchor="w", padx=(20, 0), pady=(3 if i == 0 else 1, 0))
+            self.dim.append(note)
+        return row
+
+    def pick_playback(self):
+        """Written straight to the config, and that is the whole of it.
+
+        No route through the engine because there is nothing for it to do:
+        it reads this per message rather than at startup, so the next line
+        spoken already uses it and a restart is never needed.
+        """
+        voice_lib.patch_state(playback=self.playback.get())
 
     def _paint_settings(self):
         """The dialog's own background, which is all that takes no styling.

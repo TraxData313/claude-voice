@@ -40,9 +40,11 @@ command — it is `/voice on`, never `/voice_on`.
 | `volume <0-100>` | How loud. It is this app's own slider in the Windows mixer. |
 | `max <chars>` | Longest answer read before it is cut. Default 4000. |
 | `history <count>` | Utterances kept for replay, and their wavs. Default 40. |
-| `narrate on|off` | Whether the short lines said mid-work are spoken. |
-| `watch on|off` | Follow sessions directly. Off means relying on hooks alone. |
-| `source embedding|icl` | Which clone to use. 'icl' is closer, and heavier. |
+| `playback <mode>` | auto, instant, buffered or whole: how much speech is ready before the first word. |
+| `playback report` | What the traces say this machine needed. Reads local files, sends nothing. |
+| `narrate on\|off` | Whether the short lines said mid-work are spoken. |
+| `watch on\|off` | Follow sessions directly. Off means relying on hooks alone. |
+| `source embedding\|icl` | Which clone to use. 'icl' is closer, and heavier. |
 
 ## The engine itself
 
@@ -57,11 +59,11 @@ command — it is `/voice on`, never `/voice_on`.
 |---|---|
 | `version` | What this copy is. Contacts nobody -- worth quoting in a bug report. |
 | `update [--apply]` | Is there a newer version? --apply pulls it and restarts the engine. |
-| `update on|off` | Allow one look a week. Off by default: nothing is contacted until you say so. |
+| `update on\|off` | Allow one look a week. Off by default: nothing is contacted until you say so. |
 
 ## Also worth knowing
 
-- Aliases: `repeat` = `replay, again`; `repeat-all` = `replay-all, all`; `volume` = `vol, loud`.
+- Aliases: `repeat` = `replay, again`; `repeat-all` = `replay-all, all`; `volume` = `vol, loud`; `playback` = `buffer`.
 - The voice is **one setting shared by every session**. Change it anywhere and it
   changes everywhere at once, including sessions already open, and it survives a
   reboot.

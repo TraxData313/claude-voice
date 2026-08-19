@@ -6,6 +6,80 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.6.0 — 2026-08-19
+
+**She works out for herself how much speech to have ready before starting, so she stops
+breaking up on a machine that cannot keep up.**
+
+On a laptop with a heavy Windows job beside it the voice would stutter — a gap opening in
+the middle of a sentence. That is not the voice failing. Speech is made in pieces and the
+player takes one file at a time; when the next piece is not finished by the time the last
+one ends, the wait is heard. A buffer underrun, the same thing a video does when the
+network dips. It turns out a laptop under load runs the synthesiser at **0.6–0.9× realtime
+— below the speed of speech**, all the time, not in spikes. At that rate the old behaviour
+could not have worked: it left an audible gap in 34 of 42 real messages.
+
+- **`playback auto` is the new default, and it is arithmetic rather than a guess.** At a
+  rate *R* the audio arrives *R* times as fast as it is heard, so *E* seconds of speech
+  take *E*/*R* to make and *E* to say. Start at once and the difference comes out as gaps
+  in the middle; wait that long first and there are none — and the message ends at the same
+  moment either way. The wait is not a cost. It is the same silence, moved to the front,
+  where it is one pause instead of ten.
+- **On a machine that keeps up, `auto` *is* the old behaviour** — the same 2.5 seconds,
+  nothing different. It waits only when waiting was going to happen anyway.
+- **A short answer arrives in one piece now, with no join in it anywhere.** `auto` weighs a
+  head start against simply making the whole thing, and says in the log which it picked. At
+  0.81× a 17-second answer is made whole for the same 22-second wait either way; a
+  155-second one takes a 54-second head start and begins after 67 seconds instead of 191.
+- **A seam is priced at eight seconds of waiting**, which is deliberate and is not about the
+  pause being unpleasant. The silence between two messages is on purpose — it is how you
+  hear that a new line has started — and a seam mid-line is silence of much the same length,
+  in a gap between two ordinary words. They are not tellable apart, so a seam makes you lose
+  your place and wonder whether you missed the start of something else. Waiting at the front
+  costs attention once; a seam costs it every time.
+- **Three fixed modes as well**, on the command line and in the panel under the cog.
+  `instant` is what it always did. `buffered` banks fifteen seconds. `whole` makes the
+  entire message and plays it as one file — it never breaks up, and it waits far longer than
+  it needs to: 3½ minutes on that 155-second answer, against `auto`'s 67 seconds.
+- **Whichever you pick applies to the very next message.** The engine reads it per message
+  rather than at startup, on purpose: this is the setting you reach for *while* the voice is
+  breaking up, and being told to restart first would mean waiting a minute to find out
+  whether it helped.
+
+### Two things that were wrong, and both were wrong quietly
+
+- **The player takes whole files.** It cannot begin a piece until every sample of it is
+  written, so at each seam it waits for a *whole piece* to be made, not for the next second
+  of one. Left out of the sum, the head start pays for exactly one seam — which stalls once
+  in the middle of nearly every message while the arithmetic insists it is fine. The engine
+  log was right where the report was wrong, for an entire afternoon.
+- **A seam was costed at a fifth of a second**, on the reasoning that the player's tail wait
+  was all of it. On that sum, halving the piece size looked free; it was shipped, and the
+  ear caught it inside an hour. Pieces are twelve seconds again, and the player now **times
+  every seam** — `seam of 0.62s between pieces` in the log, and `seam` in `/health` — so the
+  next version of that number can be measured rather than reasoned about.
+- **A gap about two seconds into every message**, on every machine, and it predates all of
+  this. The first piece was 2.5 seconds and the second was twelve, so the first bought 2.5
+  seconds in which to make twelve — which needs three even on an idle machine. The pieces
+  double now: 2.5, 5, 10, 12. The first word still arrives just as quickly.
+
+### Seeing it for yourself
+
+- **Every message leaves a trace** in `logs\playback-trace.jsonl`: when each piece of audio
+  arrived and how much of it there was. Lengths and timings only — nothing of what was said
+  is written down, and nothing is ever sent anywhere.
+- **`playback report`** reads it back and says what this machine has actually needed, and
+  which mode would have covered it. It simulates the player rather than asking whether
+  enough audio existed; that kinder question was what called messages covered that were
+  audibly stalling.
+- **The log says when the player starved**, as `playback ran dry mid-message`, so "it breaks
+  up on my work laptop" can be a measurement instead of an impression.
+- **A whole answer in memory is a thirtieth of what it was.** The samples were kept as
+  Python floats, twenty-four bytes of object each; five minutes of speech would have been a
+  quarter of a gigabyte on the machine that was already short of room. Four bytes each now.
+
+**[What this really does →](docs/how-it-works.md#when-the-first-word-is-played)**
+
 ## 1.5.0 — 2026-08-18
 
 **The panel has a settings window now, and every tick in it says what it actually does.**

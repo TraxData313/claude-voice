@@ -7,6 +7,7 @@ and voice_cli.py (the switch).
 """
 
 import json
+import math
 import os
 import re
 import textwrap
@@ -25,6 +26,126 @@ def _unlogged(msg):
 # stopping halfway looks like the engine breaking rather than a limit doing its
 # job. The server sets this to its own log; the hook sets it to its trace.
 notify = _unlogged
+
+# The playback modes, offered in this order: shortest wait first. The number
+# is the lead each one wants banked before the first word, in seconds, and
+# None means all of it. The engine reads the numbers, the CLI and the panel
+# print the words -- one list, so a mode cannot exist in one of them and not
+# in another. See the "playback" default below for what any of it is for.
+PLAYBACK_MODES = [
+    ("auto", "auto", "works the wait out itself. Best if it breaks up."),
+    ("instant", 2.5, "starts the moment there is anything to say."),
+    ("buffered", 15.0, "banks about fifteen seconds, then starts."),
+    ("whole", None, "makes all of it first, then never breaks up."),
+]
+
+
+# How many recent messages an automatic lead is worked out from, how
+# pessimistic to be about them, and how much margin on top.
+#
+# A low percentile rather than the median, because the number exists to survive
+# the bad message and the bad message is the one that gets heard.
+#
+# Swept against 41 real messages from a machine running at 0.6-0.9x realtime,
+# scored walk-forward -- each message judged using only the ones before it, and
+# against a simulation of the actual player rather than against the sum. These
+# values leave 38 of the 41 without a gap, for 398 seconds of waiting in total;
+# banking the whole of every message covers all 41 and costs 892. The three it
+# misses are the first three a brand-new machine ever says, before there is
+# anything to learn from -- and only ever once, since the last twenty are read
+# back off the trace at startup. Raising the safety further bought nothing.
+LEARN_FROM = 20
+RATE_PERCENTILE = 0.2
+LEAD_SAFETY = 1.5
+
+# How much audio goes into one playable piece, once past the lead. The player
+# takes whole files, so this is also the granularity of the whole business:
+# at every seam it must wait for the *entire* next piece, not for the next
+# second of it. That is why it appears in the sum below.
+#
+# This was briefly 6, on a sum that costed a seam at the 0.2s the player waits
+# past the end of a clip. That sum was wrong and the ear caught it: a seam is
+# the 0.2s *plus* getting the next file playing, and it lands between two
+# ordinary words rather than at a full stop -- the cut is chosen for being
+# quiet, and an ordinary gap between words is quiet. Stretching one of those
+# is heard as a stumble in the middle of a phrase, and halving the piece size
+# doubled how often it happened. Back to 12 until the real cost is measured;
+# Speaker._play_loop now times every seam and says so in the log.
+PIECE_SECONDS = 12.0
+
+# What one seam is worth, in seconds of waiting avoided. Eight says: do not
+# hand me a stumble to save me less than eight seconds.
+#
+# Weighted this heavily for a reason worth writing down, because it is not
+# about the pause being unpleasant. A silence between messages is *deliberate*
+# -- gapSeconds, so you can hear that a new line has started rather than the
+# same one continuing. A seam in the middle of a line is silence of much the
+# same length, in a gap between two ordinary words, and the two are not
+# tellable apart. So a seam does not merely interrupt a sentence: it makes you
+# lose your place in it, and wonder whether you missed the start of something
+# new. Waiting longer at the front costs attention once. A seam costs it every
+# time, and costs more of it.
+#
+# A judgement rather than a measurement, and the only number here that is.
+# Speaker times every seam now, so it can become one.
+SEAM_COST = 8.0
+
+
+def auto_lead(expected, recent, floor):
+    """How much audio to bank before speaking, from what a machine manages.
+
+    Not a heuristic -- the arithmetic is forced, and it has two halves.
+
+    At a rate R the audio arrives R times as fast as it is heard, so E seconds
+    of speech take E/R to make and E to say. Start at once and the difference
+    comes out as gaps in the middle; wait that long first and there are none,
+    and the message finishes at the same moment either way.
+
+    The second half is the one that cost a day. **The player takes whole files.**
+    It cannot begin a piece until all of it is written, so at every seam it is
+    waiting for a whole piece to be made rather than for the next second of one.
+    Leaving that out is not a small error: it makes the lead pay for exactly one
+    seam and no more, which is why the first version of this stalled once in the
+    middle of nearly every message while the sums insisted it was fine.
+
+    Requiring no stall at the last seam gives L >= E(1-R) + R*PIECE, and that is
+    what this returns. Banking the whole message instead waits E/R -- the same
+    silence plus the entire message over again.
+
+    `recent` is (rate, shrink) per past message -- how fast it was made, and how
+    much of expected_seconds() turned out to be real, since that overstates by
+    about a third and a lead built on an overstated length is a longer wait than
+    anyone needed. Returns (lead, rate, seconds); rate is None when nothing has
+    been learned yet and the caller is getting the ordinary first piece back.
+    """
+    if len(recent) < 3:
+        return floor, None, expected
+    rates = sorted(r for r, _ in recent)
+    shrinks = sorted(s for _, s in recent)
+    rate = rates[min(len(rates) - 1, int(len(rates) * RATE_PERCENTILE))]
+    seconds = expected * shrinks[len(shrinks) // 2]
+    if rate >= 1.0:
+        return floor, rate, seconds       # it keeps up; nothing to wait for
+    # The safety margin belongs on the rate term and nowhere else: that is the
+    # half being estimated. The piece term is exactly known, and multiplying it
+    # too made a flat fifteen-second floor that quietly turned every message
+    # under about forty seconds into 'whole' without ever saying so.
+    lead = seconds * (1.0 - rate) * LEAD_SAFETY + rate * PIECE_SECONDS
+    # Never more than the message itself -- past that it is simply 'whole' --
+    # and never less than the ordinary first piece.
+    lead = max(floor, min(seconds, lead))
+
+    # And now the question the clamp above was answering by accident: would
+    # banking the lot simply be better? Starting early buys back the waiting,
+    # and costs a seam every PIECE_SECONDS. On a short message that is a poor
+    # trade -- a few seconds saved for a stumble -- and on a long one it is an
+    # obvious one. Deciding it out loud beats falling into it.
+    saved = (seconds - lead) / rate
+    seams = math.ceil((seconds - lead) / PIECE_SECONDS)
+    if saved <= seams * SEAM_COST:
+        return seconds, rate, seconds
+    return lead, rate, seconds
+
 
 DEFAULTS = {
     # --- machine-specific, written by install.ps1 -------------------------
@@ -49,6 +170,35 @@ DEFAULTS = {
     # which is worth having if a Studio build ever ships without the streaming
     # entry points. See docs/engine-notes.md.
     "streaming": True,
+    # How much audio to have in hand before the first word is played.
+    #
+    # What breaks up on a busy machine is not synthesis, it is the handover:
+    # the player takes one file at a time, and if the next one is not finished
+    # by the time the current one ends, that gap is heard mid-sentence. It is a
+    # buffer underrun, exactly as a video stalls. Synthesis normally runs about
+    # four times realtime and the question never comes up; put a heavy Windows
+    # job beside it and it falls towards realtime, and then it does.
+    #
+    #   instant   play the moment there is anything to play. Fastest to the
+    #             first word -- 0.8s -- and the one that stalls.
+    #   buffered  bank a lead first, so a stall in synthesis is spent from the
+    #             buffer instead of being heard. Costs seconds, not gaps.
+    #   whole     synthesise the entire message, then play it as a single file.
+    #             A gap becomes impossible rather than unlikely; you wait out
+    #             the whole synthesis before the first word.
+    #   auto      work the lead out per message from what this machine has been
+    #             managing lately. On a machine that keeps up it is instant; on
+    #             one that does not it waits the difference and no more, which
+    #             is a good deal less than whole waits.
+    #
+    # The seconds behind each are Speaker.PLAY_LEAD. Re-read per message, so
+    # changing it needs no restart.
+    #
+    # auto is the default because on a machine that keeps up it *is* instant --
+    # it returns the same 2.5s and nothing is different -- and on one that does
+    # not, instant is simply wrong: measured over fifteen real messages on a
+    # machine at 0.77x realtime, instant left eight of them with an audible gap.
+    "playback": "auto",
     # The ceiling on a TL;DR. This was 600 -- about five sentences -- and it was
     # the wrong kind of limit: it cut at a full stop, so the summary *sounded*
     # finished and simply was not, and nothing said it had happened. A listener

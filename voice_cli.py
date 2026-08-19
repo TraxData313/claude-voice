@@ -350,6 +350,171 @@ def cmd_max(state, args):
     print(f"Reading at most {state['maxChars']} characters per answer.")
 
 
+
+def _stalls(curve, lead, unit=None):
+    """How many times the player would have run dry on this message.
+
+    Cuts the curve into pieces the way the engine does -- the lead first, then
+    doubling up to the piece size -- and plays them.
+
+    The whole point is that it plays *files*. An earlier version of this asked
+    only whether enough audio existed by each moment, which is a different and
+    much kinder question: the player cannot begin a piece until all of it is
+    written, so at every seam it waits for a whole piece to be made rather than
+    for the next second of one. That version reported messages as covered that
+    were audibly stalling, and the engine log was right where it was wrong.
+    """
+    unit = voice_lib.PIECE_SECONDS if unit is None else unit
+    pieces, target, base = [], lead, 0.0
+    for ms, cum in curve:
+        if cum - base >= target:
+            pieces.append((ms / 1000.0, cum - base))
+            base, target = cum, min(unit, target * 2)
+    if base < curve[-1][1]:
+        pieces.append((curve[-1][0] / 1000.0, curve[-1][1] - base))
+    if not pieces:
+        return 1
+    clock, stalls = pieces[0][0], 0
+    for at, dur in pieces:
+        if at > clock + 1e-6:
+            stalls += 1
+            clock = at
+        clock += dur
+    return stalls
+
+
+def _needed_lead(curve):
+    """The smallest lead that would have carried this message without a gap.
+
+    Searched rather than solved, because the piece sizes depend on the lead and
+    the lead on the piece sizes. Playback is monotone in the lead -- more audio
+    in hand is never worse -- so a bisection is sound and forty steps is plenty.
+    """
+    top = curve[-1][1]
+    if not _stalls(curve, 0.1):
+        return 0.0, 0.0
+    lo, hi = 0.1, top
+    if _stalls(curve, top):
+        return top, top                    # nothing short of the whole thing
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        lo, hi = (lo, mid) if not _stalls(curve, mid) else (mid, hi)
+    return hi, hi
+
+
+def _playback_report(state):
+    """What the traces say this machine needs. Reads only, and sends nothing."""
+    import json
+    path = os.path.join(voice_lib.LOG_DIR, "playback-trace.jsonl")
+    rows = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("curve"):
+                    rows.append(row)
+    except OSError:
+        raise SystemExit(f"no playback trace yet at {path}. Say something first "
+                         "-- one line is written per message.")
+    if not rows:
+        raise SystemExit("the playback trace is there but empty.")
+
+    leads, rates, drift = [], [], []
+    for row in rows:
+        _start, lead = _needed_lead(row["curve"])
+        leads.append(lead)
+        wall = row["curve"][-1][0] / 1000.0
+        if wall > 0:
+            rates.append(row["audio"] / wall)
+        if row.get("expected"):
+            drift.append(row["audio"] / row["expected"])
+
+    def at(values, frac):
+        values = sorted(values)
+        return values[min(len(values) - 1, int(len(values) * frac))]
+
+    worst = max(leads)
+    print(f"\n  {len(rows)} messages traced, {rows[0]['at'][:10]} to {rows[-1]['at'][:10]}")
+    print(f"  from {path}\n")
+    print(f"  synthesis rate      median {at(rates, 0.5):.1f}x realtime, "
+          f"slowest message {min(rates):.1f}x")
+    print(f"  lead needed         median {at(leads, 0.5):.1f}s, "
+          f"nine in ten under {at(leads, 0.9):.1f}s, worst {worst:.1f}s")
+    # A mode covers a message when the lead it banks is at least the lead that
+    # message turned out to need. 'whole' banks everything, so it covers all of
+    # them; 'auto' is walked forward -- each message judged by the rule using
+    # only the messages before it, which is the only honest way to score it.
+    floor = dict((n, l) for n, l, _ in voice_lib.PLAYBACK_MODES)["instant"]
+    covered, seen, auto_ok, auto_waits = [], [], 0, []
+    for row, need in zip(rows, leads):
+        lead, _rate, _sec = voice_lib.auto_lead(
+            row.get("expected", 0), seen, floor)
+        auto_ok += lead >= need
+        auto_waits.append(lead)
+        wall = row["curve"][-1][0] / 1000.0
+        if wall > 0 and row["audio"] > 0 and row.get("expected"):
+            seen.append((row["audio"] / wall, row["audio"] / row["expected"]))
+        del seen[:-voice_lib.LEARN_FROM]
+    for name, lead, _says in voice_lib.PLAYBACK_MODES:
+        if lead == "auto":
+            ok = auto_ok
+        elif lead is None:
+            ok = len(leads)
+        else:
+            ok = sum(1 for l in leads if lead >= l)
+        covered.append(f"{name} {ok}/{len(leads)}")
+    print(f"  would have covered  {', '.join(covered)}")
+    whole = sum(row["curve"][-1][0] / 1000.0 for row in rows)
+    print(f"  waiting, all told    auto {sum(auto_waits):.0f}s, whole {whole:.0f}s")
+    if drift:
+        off = (at(drift, 0.5) - 1) * 100
+        print(f"  length guess        {'over' if off < 0 else 'under'}stated by "
+              f"{abs(off):.0f}% at the median")
+    print()
+    print(f"  A lead of {worst:.1f}s would have covered every message here.")
+    print("  Nothing above left this machine -- the trace is read, not sent.")
+    print()
+
+
+def cmd_playback(state, args):
+    """When to start speaking: straight away, after a lead, or not till it is done.
+
+    What breaks up on a busy machine is the handover, not the synthesis: the
+    player takes one file at a time, and if the next is not written by the time
+    the current one ends, that gap is heard mid-sentence. A lead is audio
+    already in hand to spend while synthesis is behind.
+
+    Takes effect on the next message -- the engine reads this per message
+    rather than at startup, precisely because it is the setting somebody
+    reaches for while the voice is breaking up.
+    """
+    names = [n for n, _, _ in voice_lib.PLAYBACK_MODES]
+    if not args:
+        now = state.get("playback", "instant")
+        print(f"Playback is '{now}'.")
+        for name, _lead, says in voice_lib.PLAYBACK_MODES:
+            print(f"    {'>' if name == now else ' '} {name:<9} {says}")
+        print()
+        print("  auto is the default, and it waits only as long as this machine")
+        print("  makes it: on one that keeps up it starts as soon as instant does.")
+        print("  'playback report' says what yours has actually needed.")
+        return
+    want = args[0].lower()
+    if want in ("report", "trace", "why"):
+        return _playback_report(state)
+    # Unambiguous substring, as 'set' takes a voice: 'playback wh' is enough.
+    hits = [n for n in names if n.startswith(want)] or [n for n in names if want in n]
+    if len(hits) != 1:
+        raise SystemExit(f"usage: voice_cli.py playback {'|'.join(names)}")
+    state["playback"] = hits[0]
+    voice_lib.save_state(state)
+    print(f"Playback set to '{hits[0]}'. It applies from the next message; "
+          "the engine needs no restart.")
+
+
 def cmd_history(state, args):
     """How many utterances stay replayable, and so how many wavs sit in temp.
 
@@ -480,6 +645,8 @@ HELP = [
         ("volume", "<0-100>", "How loud. It is this app's own slider in the Windows mixer."),
         ("max", "<chars>", "Longest answer read before it is cut. Default 4000."),
         ("history", "<count>", "Utterances kept for replay, and their wavs. Default 40."),
+        ("playback", "<mode>", "auto, instant, buffered or whole: how much speech is ready before the first word."),
+        ("playback", "report", "What the traces say this machine needed. Reads local files, sends nothing."),
         ("narrate", "on|off", "Whether the short lines said mid-work are spoken."),
         ("watch", "on|off", "Follow sessions directly. Off means relying on hooks alone."),
         ("source", "embedding|icl", "Which clone to use. 'icl' is closer, and heavier."),
@@ -496,7 +663,7 @@ HELP = [
 ]
 
 ALIASES = {"repeat": "replay, again", "repeat-all": "replay-all, all",
-           "volume": "vol, loud"}
+           "volume": "vol, loud", "playback": "buffer"}
 
 
 def cmd_help(state, args):
@@ -532,7 +699,10 @@ def _help_markdown():
     for group, rows in HELP:
         out += [f"## {group}\n", "| command | does |", "|---|---|"]
         for name, arg, desc in rows:
-            out.append(f"| `{(name + ' ' + arg).strip()}` | {desc} |")
+            # A pipe ends a cell even inside backticks, so 'narrate on|off'
+            # rendered as two broken columns for as long as this table existed.
+            cell = (name + ' ' + arg).strip().replace('|', '\\|')
+            out.append(f"| `{cell}` | {desc} |")
         out.append("")
     out += [
         "## Also worth knowing\n",
@@ -626,7 +796,7 @@ COMMANDS = {
     "list": cmd_list, "set": cmd_set, "say": cmd_say,
     "stop": cmd_stop, "break": cmd_stop, "shush": cmd_stop,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,
-    "history": cmd_history,
+    "history": cmd_history, "playback": cmd_playback, "buffer": cmd_playback,
     "volume": cmd_volume, "vol": cmd_volume, "loud": cmd_volume,
     "clone": cmd_clone,
     # Named several ways on purpose. This gets typed from memory while

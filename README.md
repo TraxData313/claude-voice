@@ -94,6 +94,7 @@ tool either way. Mind the space: `/voice on`, never `/voice_on`.
 | `repeat` | say the last answer again. `repeat-all` for the whole thing |
 | `stop` | cut off what is playing. The voice stays on (`break` works too) |
 | `volume 40` | how loud, 0 to 100 — audible mid-sentence |
+| `playback auto` | breaking up on a busy machine? This works out the wait per message. Default |
 | `list` | every voice available |
 | `panel` | the window below |
 | `update` | is there a newer claude-voice? It only ever looks when you ask |

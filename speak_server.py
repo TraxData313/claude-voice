@@ -31,6 +31,7 @@ makes speech start on the first sentence instead of the last.
 """
 
 import argparse
+import array
 import collections
 import itertools
 import json
@@ -65,6 +66,45 @@ def log(msg):
 voice_lib.notify = log
 
 
+# Around 1500 messages before the oldest is dropped, at roughly 300 bytes each.
+# Enough to see a bad afternoon in with room to spare, and small enough that
+# nobody has to think about it.
+TRACE_BYTES = 500_000
+
+
+def _trace(mode, lead, text, curve):
+    """One line per message: when each piece of audio arrived, and how much.
+
+    That curve is the only machine-dependent thing in the whole underrun
+    question, and it is enough to work out afterwards -- exactly, not by feel --
+    what lead this machine would have needed. Which beats picking a threshold
+    now and discovering next month that it was wrong. 'playback report' reads
+    it back.
+
+    Lengths and timings only. Nothing of what was said is written here, and
+    this file never leaves the machine.
+    """
+    if not curve:
+        return
+    try:
+        os.makedirs(voice_lib.LOG_DIR, exist_ok=True)
+        path = os.path.join(voice_lib.LOG_DIR, "playback-trace.jsonl")
+        row = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "mode": mode,
+               "lead": lead, "chars": len(text),
+               "expected": round(voice_lib.expected_seconds(text), 2),
+               "audio": curve[-1][1], "curve": curve}
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+        if os.path.getsize(path) > TRACE_BYTES:
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.readlines()
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.writelines(lines[len(lines) // 2:])
+    except (OSError, ValueError) as exc:
+        # A trace nobody can write is not a reason to stop talking.
+        log(f"could not write the playback trace: {exc}")
+
+
 def set_volume(level):
     """How loud this process is allowed to be. Returns the level asked for.
 
@@ -89,7 +129,7 @@ class Job:
     """
 
     __slots__ = ("id", "chunks", "voice", "kwargs", "text", "session", "project",
-                 "when", "cancelled")
+                 "when", "cancelled", "stalled")
     _ids = itertools.count(1)
 
     def __init__(self, chunks, voice, kwargs, text=None, session=None, project=None):
@@ -104,6 +144,10 @@ class Job:
         self.project = project
         self.when = time.time()
         self.cancelled = False
+        # How many times the player ran dry part way through this message. Not
+        # used to decide anything yet -- it is here so that "it breaks up on my
+        # work laptop" can be a measurement instead of an impression.
+        self.stalled = 0
 
     def as_dict(self):
         return {
@@ -130,6 +174,17 @@ class Speaker:
         self.error = None
         self.speaking = False
         self.spoken = 0
+        self.underruns = 0            # times the player ran dry, all messages
+        # Measured seams: how long the silence between two pieces of one
+        # message really lasts. Costed at 0.2s once, on the reasoning that
+        # TAIL was all of it; halving the piece size on that sum made the
+        # voice stumble twice as often, so it is measured now.
+        self.seams = collections.deque(maxlen=200)
+        self._said_mode = None        # last playback mode written to the log
+        # (rate, shrink) for the last few messages: how fast this machine
+        # made speech, and how much of expected_seconds turned out real.
+        self.recent = collections.deque(maxlen=self.LEARN_FROM)
+        self._seed_learning()
         os.makedirs(CACHE_DIR, exist_ok=True)
         # Before anything can play: Windows remembers a level per application,
         # so without this the voice comes back at whatever the last run -- or
@@ -259,6 +314,8 @@ class Speaker:
             "speaking": self.speaking,
             "queued": self.jobs.qsize() + self.play_q.qsize(),
             "spoken": self.spoken,
+            "underruns": self.underruns,
+            "seam": round(self.seam_typical(), 3),
             "pid": os.getpid(),
         }
 
@@ -337,14 +394,98 @@ class Speaker:
             job = self.jobs.get()
             with self.lock:
                 self.current = job
+            # Read the config again here rather than trusting the snapshot this
+            # process started with. Playback mode is the one setting somebody
+            # changes *because* the voice is breaking up, and "restart the
+            # engine first" means waiting a minute to find out whether it
+            # helped. One small JSON read per message costs nothing beside a
+            # generation.
+            live = self._live()
             try:
-                if self.state.get("streaming", True) and self._stream(eng, job):
+                mode = self._mode(live)
+                if live.get("streaming", True) and self._stream(eng, job, mode):
                     continue
                 self._chunked(eng, job)
             finally:
                 with self.lock:
                     if self.current is job:
                         self.current = None
+
+    def _live(self):
+        """The config as it is now, not as it was when this process started.
+
+        Only for the few settings a running engine can honour without reloading
+        anything -- the model paths in here are already loaded and changing them
+        means a restart whatever this returns. A read that fails falls back to
+        the startup snapshot: a config caught half-written is not a reason to
+        stop talking.
+        """
+        try:
+            return voice_lib.load_state()
+        except Exception:
+            return self.state
+
+    def _mode(self, live):
+        """Which playback mode to use, said in the log whenever it changes.
+
+        Logged on change rather than per message -- it is the answer to "is it
+        actually using the setting I picked", and a typo in config.json shows up
+        here as the only place that would ever mention it.
+        """
+        want = str(live.get("playback") or "instant").strip().lower()
+        mode = want if want in self.PLAY_LEAD else "instant"
+        if want != self._said_mode:
+            self._said_mode = want
+            log(f"playback: {mode}" if mode == want else
+                f"playback: {mode} (there is no mode called '{want}')")
+        return mode
+
+    def _learn(self, expected, audio, wall):
+        """Keep what one message managed: its rate, and how long it really ran.
+
+        Both are needed. The rate says how far behind the speaker synthesis is;
+        the second says how much of expected_seconds() to believe, which on the
+        machine this was written on overstates by about a third. A lead worked
+        out from an overstated length is simply a longer wait than necessary.
+        """
+        if wall > 0 and audio > 0 and expected > 0:
+            self.recent.append((audio / wall, audio / expected))
+
+    def _seed_learning(self):
+        """Read the last few messages back off the trace at startup.
+
+        Otherwise every restart begins by learning the machine again, and it
+        learns it from the hiccup it was meant to prevent.
+        """
+        try:
+            path = os.path.join(voice_lib.LOG_DIR, "playback-trace.jsonl")
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.readlines()[-self.LEARN_FROM:]
+        except OSError:
+            return
+        for line in lines:
+            try:
+                row = json.loads(line)
+                self._learn(row["expected"], row["audio"],
+                            row["curve"][-1][0] / 1000.0)
+            except (ValueError, KeyError, IndexError, TypeError):
+                continue
+        if self.recent:
+            log(f"playback: {len(self.recent)} past messages remembered")
+
+    def _auto_lead(self, text):
+        """The lead voice_lib.auto_lead works out, said in the log.
+
+        The sum itself lives there so that 'playback report' can run the very
+        rule the engine runs over the traces, rather than a second copy of it
+        that drifts.
+        """
+        lead, rate, seconds = voice_lib.auto_lead(
+            voice_lib.expected_seconds(text), self.recent, self.FIRST_SECONDS)
+        if rate is not None and lead > self.FIRST_SECONDS:
+            log(f"auto: banking {lead:.0f}s of about {seconds:.0f}s "
+                f"(this machine at {rate:.2f}x realtime)")
+        return lead
 
     def _emit(self, job, samples):
         """Write one playable piece and hand it to the player. False if we stopped."""
@@ -362,14 +503,45 @@ class Speaker:
         self.play_q.put((job, path, False))       # blocks while the player is behind
         return True
 
-    # How much audio to get out of the door before worrying about seams, and how
-    # much to gather per piece after that. The first is small because it is the
-    # only thing between the answer arriving and the first word being heard; the
-    # rest are large because every one of them costs a gap in playback.
-    FIRST_SECONDS = 2.5
-    UNIT_SECONDS = 12.0
+    # How much audio to gather per playable piece once past the lead. Large,
+    # because every piece is a seam and a chance for the next one to be late.
+    #
+    # Getting from the lead up to here the size doubles rather than jumping.
+    # It used to jump, and the arithmetic of that never worked: a 2.5-second
+    # first piece buys 2.5 seconds in which to make a twelve-second second
+    # piece, and twelve seconds of audio needs three to make even at four
+    # times realtime. So there was a gap about two seconds into every message,
+    # on a machine with nothing else to do. Doubling means each piece pays for
+    # the next one rather than for one five times its size, and it costs
+    # nothing -- the first word still arrives on the first 2.5 seconds.
+    UNIT_SECONDS = voice_lib.PIECE_SECONDS
 
-    def _stream(self, eng, job):
+    # How much audio each playback mode wants banked before the first word --
+    # the lead that a stall in synthesis is spent from instead of being heard.
+    # None means all of it: nothing plays until the generation has finished.
+    #
+    # 'instant' is small because it is the only thing standing between the
+    # answer arriving and the first word being heard. 'buffered' is fifteen
+    # seconds because that covers the whole ramp above in one go, so the early
+    # small pieces -- the ones with the least time to spare -- are never the
+    # ones the player is waiting on.
+    PLAY_LEAD = {name: lead for name, lead, _ in voice_lib.PLAYBACK_MODES}
+    FIRST_SECONDS = PLAY_LEAD["instant"]
+
+    LEARN_FROM = voice_lib.LEARN_FROM
+
+    # Past this a seam is worth a line in the log rather than just a number:
+    # comfortably more than TAIL, so an ordinary handover stays quiet.
+    SEAM_WORTH_SAYING = 0.40
+
+    def seam_typical(self):
+        """The middle seam, which is the one to design against."""
+        if not self.seams:
+            return 0.0
+        ordered = sorted(self.seams)
+        return ordered[len(ordered) // 2]
+
+    def _stream(self, eng, job, mode="instant"):
         """Speak the whole job as ONE generation, played as it is made.
 
         This is the fix for the voice changing between sentences. Several
@@ -382,6 +554,14 @@ class Speaker:
         Playback still has to be cut somewhere, since winsound plays a file at a
         time. The cuts are placed in silence, which is why they are not heard.
 
+        `mode` decides only *when* the first piece is handed over, never how
+        the audio is made -- it is one generation either way, and turning that
+        off would bring the changing voice back. What it buys is a lead: audio
+        already written that the player can spend while synthesis is stalled,
+        which is the whole of what goes wrong on a busy machine. 'whole' takes
+        that to its end and hands over one file, after which a gap is not
+        unlikely but impossible.
+
         Returns True if it spoke. False means nothing was played and the caller
         should fall back -- never True-ish half measures, or the fallback would
         say the first half of the answer twice.
@@ -390,12 +570,35 @@ class Speaker:
         if not text:
             return True
         expect = voice_lib.expected_seconds(text)
-        buf, spoken, unit = [], [0.0], [self.FIRST_SECONDS]
+        lead = self.PLAY_LEAD.get(mode, self.FIRST_SECONDS)
+        if lead == "auto":
+            lead = self._auto_lead(text)
+        # An array rather than a list, and that is not housekeeping. ctypes
+        # hands back real Python floats -- twenty-four bytes of object each,
+        # plus the pointer -- so a five-minute answer held whole would be a
+        # quarter of a gigabyte, on the machine that was short of room to begin
+        # with. As 'f' it is four bytes a sample and every line below reads it
+        # unchanged.
+        buf, spoken = array.array("f"), [0.0]
+        unit = [self.FIRST_SECONDS if lead is None else lead]
+        # When each piece arrived and how much audio existed by then. This
+        # curve is the only machine-dependent thing in the whole question,
+        # and from it the lead this machine actually needed can be worked
+        # out exactly, afterwards -- see 'playback report'.
+        began, made, curve = time.monotonic(), [0], []
 
         def on_piece(samples, _chunk):
             buf.extend(samples)
+            made[0] += len(samples)
+            curve.append((int((time.monotonic() - began) * 1000),
+                          round(made[0] / SAMPLE_RATE, 3)))
             if job.cancelled:
                 return False
+            # 'whole': hand over nothing until the generation has finished, so
+            # there is no next piece to be late and no gap to hear. The flush
+            # below plays it as a single file.
+            if lead is None:
+                return True
             if len(buf) / SAMPLE_RATE < unit[0]:
                 return True
             cut = voice_lib.quiet_cut(buf, SAMPLE_RATE)
@@ -411,32 +614,37 @@ class Speaker:
                 return False
             spoken[0] += cut / SAMPLE_RATE
             del buf[:cut]
-            unit[0] = self.UNIT_SECONDS
+            unit[0] = min(self.UNIT_SECONDS, unit[0] * 2)
             return True
 
         try:
-            eng.synthesize_streaming(text, on_piece,
-                                     max_seconds=voice_lib.ceiling_seconds(text),
-                                     **job.kwargs)
-        except Exception as exc:
-            if spoken[0] > 0:
-                # Already speaking, so there is no going back to the old road
-                # without repeating what was heard. Keep what we have.
-                log(f"streaming stopped after {spoken[0]:.1f}s: {exc}")
+            try:
+                eng.synthesize_streaming(text, on_piece,
+                                         max_seconds=voice_lib.ceiling_seconds(text),
+                                         **job.kwargs)
+            except Exception as exc:
+                if spoken[0] > 0:
+                    # Already speaking, so there is no going back to the old
+                    # road without repeating what was heard. Keep what we have.
+                    log(f"streaming stopped after {spoken[0]:.1f}s: {exc}")
+                    return True
+                log(f"streaming unavailable, falling back to chunks: {exc}")
+                return False
+            if job.cancelled:
                 return True
-            log(f"streaming unavailable, falling back to chunks: {exc}")
-            return False
-        if job.cancelled:
-            return True
-        if buf:
-            self._emit(job, buf)
-            spoken[0] += len(buf) / SAMPLE_RATE
+            if buf:
+                self._emit(job, buf)
+                spoken[0] += len(buf) / SAMPLE_RATE
 
-        verdict = voice_lib.audio_verdict(text, spoken[0])
-        if verdict != "ok":
-            log(f"  {verdict}: {spoken[0]:.1f}s of audio for {len(text)} characters, "
-                f"where {expect:.1f}s is honest")
-        return True
+            verdict = voice_lib.audio_verdict(text, spoken[0])
+            if verdict != "ok":
+                log(f"  {verdict}: {spoken[0]:.1f}s of audio for {len(text)} "
+                    f"characters, where {expect:.1f}s is honest")
+            return True
+        finally:
+            if curve:
+                self._learn(expect, curve[-1][1], curve[-1][0] / 1000.0)
+            _trace(mode, lead, text, curve)
 
     def _chunked(self, eng, job):
         """The old road: a generation per piece of text, joined by playback.
@@ -498,7 +706,13 @@ class Speaker:
         return best
 
     def _play_loop(self):
-        last = None
+        # When the audio of the previous piece actually ran out -- not when
+        # _play came back, which is TAIL later. The difference between that
+        # and the next piece starting is the seam, and it is the thing heard
+        # as a stumble mid-phrase: the cut is placed in a gap between words,
+        # which is quiet but is not a full stop, and stretching one of those
+        # sounds wrong in a way that stretching a full stop does not.
+        last, audio_ended = None, 0.0
         while True:
             job, path, keep = self.play_q.get()
             # A beat between one message and the next. The seam is useful --
@@ -507,16 +721,40 @@ class Speaker:
             # it to whatever gap the synthesiser happens to leave.
             if last is not None and job is not last:
                 time.sleep(self.state.get("gapSeconds", 0.45))
-            last = job
+            last_played, last = last, job
             played = False
             try:
                 if not job.cancelled:
                     with self.lock:
                         self.playing = job
                     self.speaking = True
+                    if job is last_played and audio_ended:
+                        seam = time.monotonic() - audio_ended
+                        self.seams.append(seam)
+                        if seam > self.SEAM_WORTH_SAYING:
+                            log(f"seam of {seam:.2f}s between pieces "
+                                f"({len(self.seams)} timed, "
+                                f"{self.seam_typical():.2f}s typical)")
+                    length = _wav_seconds(path)
+                    began = time.monotonic()
                     self._play(job, path)
+                    audio_ended = began + length
                     self.spoken += 1
                     played = True
+                    # Did the player just run out of things to play while this
+                    # message was still being made? Then the next word is late
+                    # and the gap is being heard right now. Recorded rather
+                    # than guessed at, because "it breaks up under load" and
+                    # "this machine needs a longer lead" are the same sentence
+                    # only if somebody counted.
+                    if (not job.cancelled and self.play_q.empty()
+                            and self.current is job):
+                        self.underruns += 1
+                        if job.stalled == 0:
+                            log("playback ran dry mid-message -- synthesis is "
+                                "behind the speaker. A longer lead would cover "
+                                "it: set playback to buffered, or whole.")
+                        job.stalled += 1
             except Exception as exc:
                 log(f"playback failed: {exc}")
             finally:

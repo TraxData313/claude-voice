@@ -24,6 +24,9 @@
   "_volume": "How loud, 0.0 to 1.0. This is Windows' own per-app volume -- the slider the mixer keeps under this app's name -- so it applies in the middle of a sentence, and to replayed audio.",
   "volume": 1.0,
 
+  "_playback": "How much speech is ready before the first word. instant starts as soon as there is anything to start with; buffered banks about fifteen seconds first, so a stall in synthesis is spent from that instead of being heard as a gap; whole makes the entire message and plays it as one file, after which a gap is impossible. Read per message, so it needs no restart. See docs/how-it-works.md.",
+  "playback": "instant",
+
   "maxChars": 600,
   "port": 8765,
   "autostart": true,

@@ -1,18 +1,18 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
 
-  "version": "1.5.0",
-  "date": "2026-08-18",
+  "version": "1.6.0",
+  "date": "2026-08-19",
 
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "The panel has a settings window now, and every tick in it says what it actually does.",
+  "headline": "She now works out for herself how much speech to have ready before she starts, so she stops breaking up when your machine is busy.",
 
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "There is a cog in the top right corner, and behind it every tick has a line under it saying what ticking it would do.",
-    "One of those ticks is new. Start with Windows opens the panel when you log in, and with auto start beside it the thing simply talks, with nothing left for you to press.",
-    "The engine button wears a chip rather than a cog, because a cog now means settings, the way it does everywhere else.",
-    "The volume slider has moved up next to the buttons, so the window is a row shorter. Rest on it and it tells you how loud it is."
+    "There is a new setting called playback, under the cog and on the command line. It decides how much speech is ready before she starts talking.",
+    "It is set to auto, which measures how fast your machine actually makes speech and waits just long enough that the rest arrives in time. On a machine that keeps up, nothing changes at all.",
+    "You can also fix it: instant to always start straight away, or whole to make the entire message first. It takes effect on the very next thing said.",
+    "There was also a gap about two seconds into every message, on any machine, and that one is simply fixed."
   ],
 
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",

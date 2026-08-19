@@ -70,6 +70,15 @@ all interrupt deliberately. Ordinary lines queue and wait.
 That is inherent, and it is why the chunking crosses as few boundaries as possible — but a
 very long message will still cross one or two.
 
+**She breaks up mid-sentence when the machine is busy.** The player takes one file at a
+time and the next one was not finished in time — a buffer underrun, not the voice failing.
+`logs\speak-server.log` says `playback ran dry mid-message` every time it happens. Give it
+a lead to spend. `playback auto` is the default and works the wait out per message;
+`playback whole` makes the entire line before saying any of it, which never breaks up but
+makes you wait far longer than you need to. Also in the panel, under the cog. No
+restart. `playback report` says what lead this machine has actually needed, from the trace
+each message leaves behind. **[The measurements →](how-it-works.md#when-the-first-word-is-played)**
+
 **The engine died and took a line with it.** Renaming or deleting a voice's folder while it
 is being spoken will do it: the native layer reads the embedding file on every generation.
 Stop it first.

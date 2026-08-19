@@ -9,7 +9,7 @@
     {
       "name": "claude-voice",
       "source": "./",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "description": "Claude Code reads its answers aloud in a voice you choose, entirely on your own machine. No cloud, no API key, no audio leaving the computer. Windows, NVIDIA.",
       "author": {
         "name": "TraxData313"
