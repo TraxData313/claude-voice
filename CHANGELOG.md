@@ -6,6 +6,28 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.7.0 — 2026-08-19
+
+**Click her portrait and she says a line you already know, so you can tell in five seconds
+that she still sounds right and the engine is still awake.**
+
+- **Click her portrait** and the voice you have set plays one known line — Abby's and
+  Max's own words from the samples on the website. It is a reference rather than a
+  curiosity: a sentence you have heard fifty times answers *does she still sound right, is
+  the engine alive, has it wandered off* in five seconds, against a memory rather than
+  against nothing. The **+** on the queue still reads anything you type.
+  **[Hearing the voice →](docs/test-button.md)**
+- **Right-click the portrait to swap between Abby and Max.** That is what a left click
+  used to do; the dropdown right under her does it too, which is what left it free.
+- **Pausing your browser while she talks was built, proved and left out.** It works:
+  Chrome answers a window message aimed at it, both to pause and to play, and Core Audio
+  says exactly what is making a sound. It is not wired into the engine, because a
+  background thread, a setting and a failure mode that ends in somebody's meeting is a lot
+  of surface in exchange for not pressing space. `hush.py` runs by hand if you want it.
+  **[What we found →](docs/pausing-other-media.md)**
+- **The `auto start` tick is now `auto start engine`**, since that is what it does — the
+  tick above it is the one about Windows.
+
 ## 1.6.0 — 2026-08-19
 
 **She works out for herself how much speech to have ready before starting, so she stops

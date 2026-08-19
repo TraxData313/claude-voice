@@ -114,8 +114,8 @@ go stale.
 no terminal needed. It floats on top, owns nothing, and asks the engine what is happening
 twice a second:
 
-- **who is speaking**, what they are saying, and which project it came from — click the
-  portrait to swap voice; her picture and name are there before any engine is
+- **who is speaking**, what they are saying, and which project it came from — click her
+  portrait to hear one known line, right-click to swap voice
 - **a chip to load the engine or hand its memory back**, and a **stop/play** switch for the
   voice — both green while working, red while not; then **⏩ skip line · ⏭ skip all** and a
   **volume** slider that bites mid-sentence. Rest on any of them and it says what it does
@@ -123,8 +123,8 @@ twice a second:
 - **history — click any line to hear it again**, from the audio you already heard
 - **a tick per session** — untick one and it stops being read aloud
 - **a cog in the corner** — settings, each tick with a line saying what it does: **start
-  with Windows** opens the panel when you log in, **auto start** loads the engine and turns
-  the voice on as it opens, and both together mean you press nothing at all
+  with Windows** opens the panel when you log in, **auto start engine** loads it and
+  turns the voice on as the panel opens, and both together mean you press nothing at all
 - voice, portrait size, **dark**, **on top**, and Abby herself along the bottom
 
 ## The voices
@@ -169,6 +169,7 @@ embedding is a clone of a real person, so that folder has rules.
 | **[Engine notes →](docs/engine-notes.md)** | why she sometimes stops early, changes voice, or buzzes — three different causes |
 | **[Writing for the ear →](docs/writing-for-the-ear.md)** | the TL;DR contract, why captions sound wrong aloud, and how much of a voice's character Claude is told to wear |
 | **[Languages →](docs/languages.md)** | what is tested, and how it fails when it fails |
+| **[Hearing the voice →](docs/test-button.md)** | the line behind her portrait, for checking she sounds right and is awake |
 | **[Voices →](docs/voices.md)** | what may go in that folder, and what may not |
 | **[When it goes quiet →](docs/troubleshooting.md)** | silence has no error message. Start here |
 

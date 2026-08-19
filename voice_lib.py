@@ -225,6 +225,7 @@ DEFAULTS = {
     "watch": True,
     # Pause between one message and the next, so the seam is audible.
     "gapSeconds": 0.45,
+
     # Name the project when the project changes, and only then. 'off' says
     # nothing at all; anything else names it. Two conversations open on the
     # same project are still that project, and switching between them passes
@@ -257,10 +258,10 @@ DEFAULTS = {
     "panelTopmost": True,
     # Dark colours in the panel. Its own tick box writes this too.
     "panelDark": False,
-    # Load the engine and turn the voice on as the panel opens -- 'auto start',
-    # in the panel's settings dialog. Off here, and it stays off until somebody
-    # ticks it: opening a window should not quietly take three and a half
-    # gigabytes. It is only ever about the panel; the hook's own 'autostart'
+    # Load the engine and turn the voice on as the panel opens -- 'auto start
+    # engine', in the panel's settings dialog. Off here, and it stays off until
+    # somebody ticks it: opening a window should not quietly take three and a
+    # half gigabytes. It is only ever about the panel; the hook's own 'autostart'
     # above is a different question, about an engine that is asked to speak
     # while none is running.
     "panelAutostart": False,
@@ -414,6 +415,69 @@ def resolve(voice_id, source="embedding", state=None):
         raise LookupError(f"voice '{hit['id']}' has no embedding or ICL prompt")
     key = "icl_prompt_path" if path.endswith("icl-prompt.json") else "embedding_path"
     return hit, {key: path}
+
+
+# --------------------------------------------------------------------------
+# the line a voice says when you ask to hear her
+# --------------------------------------------------------------------------
+
+# Here, in the code, and not in a file beside it. There was a file for a day and
+# it was the wrong idea twice over: nobody but whoever hacks on this ever wants
+# to change these, and anyone who wants to hear arbitrary words already has the
+# plus button in the panel, which reads anything you type. What a file added was
+# a second place for the same sentence to live, with the file quietly winning --
+# so an edit made here did nothing at all, and looked like the button being
+# broken.
+#
+# The words themselves are Abby's and Max's from docs/samples, which is where
+# most people hear this project first. That is the whole point of the button:
+# not a curiosity but a *reference*. One line you have heard fifty times, so
+# that pressing it answers "does she still sound right, is the engine alive,
+# has it wandered off" in five seconds, against a memory rather than against
+# nothing. They were taken back off those wavs with Windows' own speech
+# recognition, since nothing wrote them down at the time.
+#
+# Written to be performed, not merely spoken. The model reads punctuation as
+# performance: the first version of these ended in full stops and came out
+# bored, which is a strange thing to hear from a voice whose whole character is
+# that she is pleased to be here. So they are short clauses, an exclamation to
+# open on, and a question to land on -- a rising ending is the single cheapest
+# way to sound like somebody enjoying themselves.
+#
+# It also rolls its prosody afresh on every generation, so two presses are never
+# quite identical. One flat reading is the model having an off roll, not the
+# line: press it again before rewriting anything.
+TEST_LINES = {
+    "default": "Hii! I'm {name}! I read your answers out loud, right here, "
+               "on your own machine. Pretty neat, right?",
+    "abby": "Hii! I'm Abby! I read your answers out loud, right here, on your "
+            "own machine. No cloud, no waiting. Pretty neat, right?",
+    "max": "Hey! I'm Max! Come on, let's get through this list. "
+           "One more, and then we're done!",
+}
+
+
+def test_line(voice_id, state=None):
+    """What this voice says when you ask to hear her.
+
+    A voice with no line of its own gets the default, with its name and its
+    persona put into it -- so a voice cloned this morning has something to say
+    without anybody writing it a line first.
+
+    The placeholders are replaced rather than formatted, because a line with a
+    stray brace in it is a line to say and not a KeyError.
+    """
+    voice = next((v for v in catalog(state)
+                  if v["id"].lower() == (voice_id or "").strip().lower()), None)
+    said = TEST_LINES.get((voice_id or "").strip().lower()) if voice_id else None
+    if not said:
+        said = TEST_LINES["default"]
+    name = (voice or {}).get("name") or voice_id or "nobody"
+    # Personas end in a full stop already; the default line puts one after
+    # {persona} only when there is nothing there to punctuate.
+    persona = ((voice or {}).get("persona") or "").strip()
+    return " ".join(str(said).replace("{name}", str(name))
+                    .replace("{persona}", persona).split())
 
 
 # --------------------------------------------------------------------------

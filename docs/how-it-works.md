@@ -270,6 +270,14 @@ cut it; it queues up behind it and returns once the clip has finished of its own
 `stop` quietly meant "drop the queue and wait out this sentence" — measured at 5.8 seconds
 on a long one. Playback is asynchronous now and a purge cuts within about 0.12s.
 
+**A pause you cannot see is worse than a slow one.** Chrome can be told to pause a video
+with a window message aimed at it, and it obeys instantly — but its audio is already in
+flight, so a check a fifth of a second later still hears sound and calls it a failure. The
+video is paused; nothing recorded that it was; nothing ever puts it back. Wait for silence
+rather than demanding it. That, and the rest of what a browser will and will not answer,
+is in **[pausing-other-media.md](pausing-other-media.md)** — the feature itself was built,
+proved and deliberately left out.
+
 **Saving a config wrote every default into it**, freezing them, so improving a default later
 reached nobody who had already run the tool. Only what differs from the defaults is written.
 

@@ -187,6 +187,9 @@ SHIPPED = ("abby", "max")
 # came from a folder Claude was working in, and the column says which; this one
 # came from the box in this window, and an empty cell would not say that.
 TYPED_PROJECT = "manual input"
+# And what the test line is filed under. It is not something you typed and it
+# is not something Claude said, so it gets a column of its own to be honest in.
+TEST_PROJECT = "voice test"
 # The master switch says what pressing it *does*; its colour says what is
 # happening *now*. So a green button reads "turn off", and that is the right way
 # round -- green is the voice working, and the label is what you would be doing
@@ -701,7 +704,13 @@ class Panel:
                               cursor="hand2",
                               background=ttk.Style().lookup("TFrame", "background"))
         self.face.pack()
-        self.face.bind("<Button-1>", self.flip_voice)
+        # A left click plays her own line, because that is the question the
+        # picture asks -- "what does she sound like" -- and the dropdown right
+        # under it changes voice anyway. The right button still swaps, since
+        # that is what the picture used to do and fingers remember.
+        self.face.bind("<Button-1>", self.hear_voice)
+        self.face.bind("<Button-3>", self.flip_voice)
+        self.tips["face"] = Tip(self.face, self._face_says, self.dark.get)
         # Directly under the portrait, in place of the name it used to print
         # there -- the dropdown says the name anyway, and this is where you
         # already click to change voice, so it is where the control belongs.
@@ -1031,6 +1040,10 @@ class Panel:
         if self.icons_ok:
             return self._glyph("settings"), "Icon.TButton", 3
         return GLYPH["settings"][1], "Small.TButton", 10
+
+    def _face_says(self):
+        who = self.voice_names.get(self.drawn.get("voice")) or "this voice"
+        return f"click to hear {who}\nright-click swaps voice"
 
     def _switch(self, parent, key, command):
         """A button that can actually be green.
@@ -1850,6 +1863,33 @@ class Panel:
             self.voice_box.set(shown)
         self.act("/set-voice", {"voice": want})
 
+    def hear_voice(self, _event=None):
+        """One known line, in the voice that is set. Click her picture.
+
+        Not a way to make her say something: the plus on the queue does that,
+        and it did before this existed. This is the line you have heard fifty
+        times, so that clicking says whether she still sounds right and whether
+        the engine is awake at all.
+
+        There was a button for this beside the plus for an afternoon. It was one
+        control too many for a row that already had one, and the picture is
+        where a hand goes to ask a voice what it sounds like anyway.
+
+        It barges rather than queueing: asking to hear something now, and a
+        sample that waits behind three messages is not a sample, it is a
+        surprise four minutes later. The words are voice_lib.TEST_LINES.
+        """
+        voice = self.drawn.get("voice")
+        if not voice:
+            return                    # nothing has answered yet; nobody to be
+        try:
+            words = voice_lib.test_line(voice)
+        except Exception:
+            return                    # no catalogue, or a file mid-edit
+        if words:
+            self.act("/speak", {"text": words, "voice": voice,
+                                "project": TEST_PROJECT})
+
     def fill(self, tree, key, jobs):
         # "direct" is /voice say and the like, which belongs to no session and
         # no folder -- an empty project column reads better there than the word
@@ -2089,7 +2129,7 @@ class Panel:
         # setting, and anything may have happened to it since -- an installer,
         # a tidied Startup folder, the same tick in another copy of this window.
         self.at_login.set(starts_with_windows())
-        self._setting(frame, "auto start", self.at_open, self.toggle_at_open,
+        self._setting(frame, "auto start engine", self.at_open, self.toggle_at_open,
                       "When this window opens it loads the engine and turns the "
                       "voice on, so the window is the only thing you touch. Not "
                       "about Windows starting — that is the tick below.")

@@ -1,18 +1,18 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
 
-  "version": "1.6.0",
+  "version": "1.7.0",
   "date": "2026-08-19",
 
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "She now works out for herself how much speech to have ready before she starts, so she stops breaking up when your machine is busy.",
+  "headline": "Click her picture in the panel and she says a line you already know, so you can tell in five seconds that she still sounds right.",
 
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "There is a new setting called playback, under the cog and on the command line. It decides how much speech is ready before she starts talking.",
-    "It is set to auto, which measures how fast your machine actually makes speech and waits just long enough that the rest arrives in time. On a machine that keeps up, nothing changes at all.",
-    "You can also fix it: instant to always start straight away, or whole to make the entire message first. It takes effect on the very next thing said.",
-    "There was also a gap about two seconds into every message, on any machine, and that one is simply fixed."
+    "Clicking her picture in the panel now plays one line you already know, the one from the samples on the website. Right clicking still swaps between Abby and Max.",
+    "It is there as a quick check rather than a toy. A sentence you have heard fifty times tells you in five seconds whether she still sounds right and whether the engine is awake.",
+    "Right clicking her picture still swaps between Abby and Max.",
+    "The tick that loads the engine when the panel opens is now called auto start engine, since that is what it does."
   ],
 
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
