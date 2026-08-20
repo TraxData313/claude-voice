@@ -781,6 +781,55 @@ def _tidy_label(label, words=6):
     return " ".join(parts).rstrip(".,:;")
 
 
+class _LastSpeaker:
+    """Who was heard last -- one record, for every path into the speakers.
+
+    A single voice says the lot: the sessions the watcher follows, and anything
+    posted to /speak by the panel or the CLI. So the note of which name was
+    last announced has to be single too. Kept per-path it only ever compared
+    sessions against sessions, and stepping from a session to a line typed by
+    hand and back passed without a word -- the panel's column said whose it was
+    and the room could not tell.
+    """
+
+    def __init__(self):
+        self.lock = threading.Lock()      # the watcher thread and HTTP workers
+        self.name = None
+
+    def prefix(self, project, state):
+        """The name to say in front of this line, or "" to just say the line.
+
+        Only when it actually changes: announcing every line would be worse
+        than the confusion it is fixing.
+
+        The project, never the conversation's title. 'qwen voices' says where
+        you are in two words, while a generated title is a whole sentence, and
+        two conversations open on the same project are still that one project:
+        switching between them is not news and should pass without a word.
+        Anything other than 'off' means the project, so a stale setting from an
+        older config cannot quietly bring the titles back.
+
+        The first line after a restart is never announced -- there is nothing
+        for it to be a change from. A line belonging to no project at all
+        leaves the record standing rather than clearing it, so an anonymous
+        aside between two lines of one project does not make the second
+        announce itself again.
+        """
+        project = _tidy_label(project)
+        with self.lock:
+            announced = ""
+            if (state.get("sessionLabel", "project") != "off" and project
+                    and self.name is not None and self.name != project):
+                announced = f"{project}. "
+            # Followed even with labelling off, so turning it back on says the
+            # next *change* instead of naming whoever happens to speak first.
+            self.name = project or self.name
+            return announced
+
+
+_last_speaker = _LastSpeaker()
+
+
 def _unlink(path):
     try:
         os.remove(path)
@@ -839,7 +888,6 @@ class TranscriptWatcher(threading.Thread):
         self.dirty = False
         self.labels = {}        # transcript -> what to call that session aloud
         self.projects = {}      # transcript -> the folder it is being run in
-        self.last_source = None
         # Sessions the panel has silenced. Kept in config too, so muting one and
         # restarting the engine does not un-mute it behind your back.
         self.muted = set(voice_lib.load_state().get("mutedSessions") or [])
@@ -1072,23 +1120,12 @@ class TranscriptWatcher(threading.Thread):
         except LookupError as exc:
             return log(f"watcher: {exc}")
 
-        # Two projects talking through one voice are impossible to tell apart,
-        # so say which one -- but only when it actually changes. Announcing
-        # every line would be worse than the confusion it is fixing.
-        #
-        # The project, never the conversation's title. 'qwen voices' says where
-        # you are in two words, while a generated title is a whole sentence, and
-        # two conversations open on the same project are still that one project:
-        # switching between them is not news and should pass without a word.
-        # Anything other than 'off' means the project, so a stale setting from
-        # an older config cannot quietly bring the titles back.
+        # Two projects talking through one voice are impossible to tell
+        # apart, so say which one. Whether it is a change from the last one is
+        # not the watcher's to judge -- see _LastSpeaker, which the API path
+        # asks as well.
         label = self.labels.get(path)
-        project = _tidy_label(self.projects.get(path))
-        announced = ""
-        if (state.get("sessionLabel", "project") != "off" and project
-                and self.last_source is not None and self.last_source != project):
-            announced = f"{project}. "
-        self.last_source = project or self.last_source
+        announced = _last_speaker.prefix(self.projects.get(path), state)
 
         pieces = voice_lib.chunks(announced + speech)
         if pieces:
@@ -1249,6 +1286,16 @@ class Handler(BaseHTTPRequestHandler):
             pieces = voice_lib.chunks(text)
             if not pieces:
                 return self._reply(400, {"error": "nothing speakable"})
+            # Out of the same speakers as everything else, so it wears the same
+            # name in front when the speaker has changed. Judged against the
+            # setting as it stands now, not as it stood at startup: the watcher
+            # reads it fresh every sweep, and one shared record cannot honour
+            # two different answers to whether labelling is on.
+            announced = _last_speaker.prefix(payload.get("project"), sp._live())
+            if announced:
+                # Chunked with the name attached, exactly as the watcher does
+                # it, so the name rides the first piece and no other.
+                pieces = voice_lib.chunks(announced + text) or pieces
             # An explicit request through the API is the user asking for this
             # now, so it takes the floor -- unless it says otherwise. Text
             # typed into the panel asks to be queued instead: it is a line to
@@ -1261,7 +1308,8 @@ class Handler(BaseHTTPRequestHandler):
                           session=payload.get("session"),
                           project=payload.get("project")),
                       barge=not payload.get("queue"))
-            log(f"speak [{voice['id']}] {len(pieces)} chunk(s): {text[:60]}...")
+            log(f"speak [{voice['id']}] {len(pieces)} chunk(s): "
+                f"{'<' + announced.strip() + '> ' if announced else ''}{text[:60]}...")
             return self._reply(202, {"queued": len(pieces), "voice": voice["id"]})
 
         self._reply(404, {"error": f"no route {route}"})
