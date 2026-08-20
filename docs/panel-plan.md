@@ -626,3 +626,32 @@ nobody ever does: `nvidia-smi` cannot report per-process VRAM on any consumer Wi
 -- it answers `[N/A]` and never errors -- and the engine's committed RAM is 8 GB against a
 working set of under one, so the "about 3.5 GB" this window says the engine holds is the
 graphics card and not the memory.
+
+**And the update button came straight back out of it.** It went behind the cog with the tick
+box, on the reasoning that both were controls and controls belong in the dialog. That was
+right about one of them. Pressing `check now` starts something that answers *minutes* later
+— the network, then git, then a model load — and by then the dialog is shut. So the answer
+that matters most, `reopen panel`, which is the one thing an update cannot do for itself, was
+being written to a button nobody could see. An update was taken and the window went on
+running the old code with nothing on its face saying so.
+
+- **The test for whether a control belongs behind a cog is not “is it a control”.** It is
+  whether pressing it *finishes* while the dialog is still open. A tick box does. A button
+  that goes to the network, then to git, then waits on a model load, does not — and what it
+  has to say afterwards it has to be able to say to somebody.
+- **The tick stayed in the dialog** and keeps the full label it earned there,
+  `auto-check for updates`, with its sentence under it. Deciding once is what a dialog is for.
+- **`say_on_button` shrank back.** With the button part of the window again there is always
+  one to write to, so remembering what it *would* have said is no longer needed. The `try`
+  around it stays: the window can still be closed while a check is in flight.
+- **The version number keeps the link colour** it was given when it was the only thing that
+  could announce an update. It is not the only one any more — the button says it in words at
+  the other end of the row — but colour and words are not the same channel, and only one of
+  them works out of the corner of your eye.
+- **The row was measured again rather than assumed.** At the narrowest the window goes it has
+  332 pixels. Button, the line and the version ask 327 in light and 325 in dark — so the whole
+  30-character line fits, which is the state the row is in almost all of the time. Add the
+  `what's new` link, which is only there when there is something to take, and it asks 398, and
+  the line gives — exactly the “below about 396 it truncates” that is written beside
+  `MIN_WIDE`. That it is the same number is the point: the tick box that left the row was
+  about as wide as the button that came back.

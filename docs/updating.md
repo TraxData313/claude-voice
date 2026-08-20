@@ -16,11 +16,14 @@ The bottom row of the panel does the whole of it:
 
 | | |
 |---|---|
-| ☐ **auto-check** | the weekly look. Ticking it also looks **now**, so you see one happen rather than waiting a week to find out it works |
 | **check now** → **update to 1.4.2** → **reopen panel** | one button at three stages: it asks, it takes what it found, and then it stands aside |
 | **what's new** | appears beside the button when there is something to read — the changelog, *before* you decide |
 | *up to date, 2 days ago* | how the last look went, when there is nothing else to say |
-| **v1.0.0** | in the far corner, and clickable |
+| **v1.0.0** | in the far corner, and clickable — it turns the link colour when there is something to take |
+
+The weekly look is a tick behind the settings cog, **auto-check for updates**. Ticking it
+also looks straight away, so you see one happen rather than waiting a week to find out that
+it works. Untick it and nothing in this program ever contacts anything.
 
 If the pull is refused — local changes in the way, usually — the reason appears in that same
 row, and the full account goes to `logs\panel.log`.

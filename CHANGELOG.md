@@ -6,6 +6,26 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.7.1 — 2026-08-20
+
+**The button that looks for a newer version is back in the corner of the panel, so what
+it finds is still on screen when you next look at it.**
+
+- **`check now` is in the bottom row again**, left of the line that says how the last
+  look went. It spent 1.7.0 behind the settings cog, on the reasoning that it was a
+  control and controls belong in a dialog. Pressing it, though, starts something that
+  answers *minutes* later — the network, then git, then a model load — and by then the
+  dialog is shut. The answer that matters most is the last one, `reopen panel`: putting
+  this window back is the one thing an update cannot do for itself, and it was being
+  offered to nobody. **[Updating →](docs/updating.md)**
+- **`auto-check for updates` stayed in the settings**, with the sentence under it saying
+  that it is the only thing here that ever touches the network. A tick is decided once,
+  and it finishes deciding while the dialog is still open — which turns out to be the
+  test for whether something belongs behind a cog at all.
+- **The version number keeps the link colour** it was given when it was the only thing
+  that could announce an update. Colour and words are not the same channel, and only one
+  of them works out of the corner of your eye.
+
 ## 1.7.0 — 2026-08-19
 
 **Click her portrait and she says a line you already know, so you can tell in five seconds

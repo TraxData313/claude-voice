@@ -1,18 +1,17 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
 
-  "version": "1.7.0",
-  "date": "2026-08-19",
+  "version": "1.7.1",
+  "date": "2026-08-20",
 
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "Click her picture in the panel and she says a line you already know, so you can tell in five seconds that she still sounds right.",
+  "headline": "The button that looks for a newer version is back in the corner of the panel, so what it finds is still on screen when you next look at it.",
 
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "Clicking her picture in the panel now plays one line you already know, the one from the samples on the website. Right clicking still swaps between Abby and Max.",
-    "It is there as a quick check rather than a toy. A sentence you have heard fifty times tells you in five seconds whether she still sounds right and whether the engine is awake.",
-    "Right clicking her picture still swaps between Abby and Max.",
-    "The tick that loads the engine when the panel opens is now called auto start engine, since that is what it does."
+    "The button that checks for a newer version is back in the bottom corner of the panel. It spent a release behind the settings cog, where the answer arrived minutes after the press, with the dialog long since closed.",
+    "That matters most at the end of an update, when the button offers to reopen the window. Putting the window back is the one thing an update cannot do for itself, so the offer has to be somewhere you will see it.",
+    "The tick that looks once a week stayed in the settings, where there is room to say what ticking it does."
   ],
 
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",

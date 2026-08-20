@@ -629,12 +629,9 @@ class Panel:
         # An update was taken in this window, so this window is now the one
         # thing running the old code.
         self.update_reopen = False
-        # The update button lives in the settings dialog, so most of the time
-        # there is no button at all -- and the answers it waits for arrive when
-        # they arrive. What it *would* say is kept here, so a dialog opened
-        # later opens saying it. See say_on_button.
+        # The button that looks, and then takes what it found. Built in the
+        # footer -- see the note there for why it did not stay in the dialog.
         self.update_btn = None
-        self.update_saying = "check now"
         # The settings dialog, while it is open. One at a time, like the typer.
         self.settings = None
         # The typing box and the box inside it, while it is open. One at a
@@ -836,17 +833,19 @@ class Panel:
         # The packer hands out space in the order things were packed, so the
         # credit going first is also what keeps it on screen in a small window.
         # The last two rows are one thought: who she is, and who made the thing.
-        # Nothing here is operated -- the controls all live at the top now --
-        # so it sits below the working part of the window and stays there.
+        # Everything about the voice is operated at the top of the window; the
+        # one control down here is the update button, which is not about the
+        # voice and is pressed perhaps once a month.
         # The version, in the corner. Nobody needs it while working and
         # everybody needs it when writing a bug report, so it goes as far out of
         # the way as there is: the last row, hard right, in the small grey.
         # Packed before the credit because the bottom of the window is filled
         # upwards -- first one down is the lowest.
         #
-        # It is read off disk. The panel never checks for anything and never
-        # touches the network; if an update is known here, it is because the
-        # user asked for a check somewhere else.
+        # It is read off disk, and so is everything beside it. Nothing here
+        # reaches the network on its own: what this row shows is the answer of
+        # the last check there was, whether that came from the button, from the
+        # weekly look, or from the command line.
         stamp = ttk.Frame(root)
         stamp.pack(side="bottom", fill="x", padx=8, pady=(0, 6))
 
@@ -854,11 +853,24 @@ class Panel:
         self.version.pack(side="right")
         self.version.bind("<Button-1>", lambda _event: webbrowser.open(self.new_url))
 
-        # The tick box and the button that used to sit here have gone into the
-        # settings dialog, where there is room for each of them to say what it
-        # is for. What is left in this row is the *report*: whether there is
-        # something to take, what is in it, and which version this is. None of
-        # it is operated, and all of it has to be legible with no dialog open.
+        # One button, because it is one errand at three stages: look, take what
+        # was found, then stand aside. It spent a release behind the settings
+        # cog and came back here, because the last stage of that errand lands
+        # minutes after the press -- long after the dialog was closed -- and a
+        # button nobody can see saying "reopen panel" is an update taken and
+        # then quietly not finished. Out here it is still saying it the next
+        # time you look at the window at all.
+        #
+        # A fixed width so the row does not shift under the pointer when the
+        # wording changes, and the small style because it belongs to the small
+        # print: a full-size button here sets the height of a row that is
+        # otherwise 8pt grey text, and looks it.
+        #
+        # The tick box beside it stayed in the dialog. It is a preference, it
+        # is decided once, and it has room there to say what ticking it means.
+        self.update_btn = ttk.Button(stamp, text="check now", width=15,
+                                     style="Small.TButton", command=self.press_update)
+        self.update_btn.pack(side="left")
 
         # Whatever came of it, in a few words. The whole account goes to
         # logs\panel.log, which is where a window with one line to spare should
@@ -957,11 +969,10 @@ class Panel:
         newer = update_check.available()
         if newer:
             self.new_url = newer.get("changelog") or update_check.CHANGELOG_URL
-        # The version wears the news. The button that used to announce it is
-        # behind the settings cog now, so with no dialog open this label is the
-        # only thing in the window that can say there is something to take --
-        # and it was already the clickable way to the changelog, so the link
-        # colour is what it should turn to say it. Grey the rest of the time.
+        # The version wears the news as well. The button says it in words at
+        # the other end of the row; this says it in colour, and it was already
+        # the clickable way to the changelog, so the link colour is the honest
+        # thing for it to turn into. Grey the rest of the time.
         self.version.configure(text=f"v{update_check.shown_version()}",
                                foreground=(LINK_DARK if dark else LINK) if newer
                                else (DARK["dim"] if dark else GREY))
@@ -1249,27 +1260,21 @@ class Panel:
             self.show_version(force=True)
 
     def say_on_button(self, text=None, enabled=None):
-        """Tell the update button something, if there is one on screen to tell.
+        """Tell the update button what it is for at the moment.
 
-        It lives in the settings dialog now, and a check started from there
-        answers whenever the network answers -- which may well be after the
-        dialog has been closed. So what it would have said is remembered here
-        instead, and a dialog opened afterwards builds its button already
-        saying it. The typer has a comment about the same class of bug: a
-        widget that has gone is not an error to be caught later, it is a fact
-        the code around it has to be able to hold.
+        It is part of the window now, so there is always one to tell -- but a
+        check answers whenever the network answers, and the window may have
+        been closed by then. A widget that has gone is not an error to be
+        caught later, it is a fact the code around it has to be able to hold;
+        the typer has a comment about the same class of bug.
         """
-        if text is not None:
-            self.update_saying = text
-        if self.update_btn is None:
-            return
         try:
             if text is not None:
                 self.update_btn.configure(text=text)
             if enabled is not None:
                 self.update_btn.state(["!disabled" if enabled else "disabled"])
         except tk.TclError:
-            self.update_btn = None      # it went while we were talking to it
+            pass
 
     def press_update(self):
         """One button, three stages: find out, take it, then stand aside."""
@@ -2160,22 +2165,16 @@ class Panel:
                         for name, _lead, says in voice_lib.PLAYBACK_MODES])
 
         self._section(frame, "updates")
-        row = self._setting(frame, "auto-check for updates", self.auto_update,
-                            self.toggle_auto_update,
-                            "Looks once a week for a newer claude-voice, and "
-                            "once straight away when you tick it. The one thing "
-                            "here that touches the network at all — untick it "
-                            "and nothing in this program ever contacts anything.")
-        # The button the footer used to carry, now in the section it is about
-        # and indented under the words that explain it. It says whatever
-        # update_saying says rather than "check now", because a check can have
-        # been started and answered with no dialog on screen at all -- and one
-        # still running leaves it disabled, exactly as it was when it left.
-        self.update_btn = ttk.Button(row, text=self.update_saying, width=16,
-                                     style="Small.TButton", command=self.press_update)
-        self.update_btn.pack(anchor="w", padx=(20, 0), pady=(5, 0))
-        if self.update_busy:
-            self.update_btn.state(["disabled"])
+        # The tick only. The button that looks now is in the corner of the
+        # panel, where it can still be seen when the answer arrives -- see the
+        # note where it is built.
+        self._setting(frame, "auto-check for updates", self.auto_update,
+                      self.toggle_auto_update,
+                      "Looks once a week for a newer claude-voice, and once "
+                      "straight away when you tick it. The one thing here that "
+                      "touches the network at all — untick it and nothing in "
+                      "this program ever contacts anything. Checking by hand is "
+                      "the button in the bottom corner of the panel.")
 
         self._paint_settings()
         over(win, self.root)
@@ -2273,9 +2272,6 @@ class Panel:
             # rest of the panel in the wrong colours. The typer learned this.
             self.dim = [w for w in self.dim if w.winfo_exists()]
         self.settings = None
-        # And the update button went with it. Everything it was saying is on
-        # update_saying, so the next dialog opens saying the same thing.
-        self.update_btn = None
 
     def close(self):
         self.stopping.set()
