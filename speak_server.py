@@ -217,8 +217,20 @@ class Speaker:
         where each line is a different thing worth hearing -- there, cutting off
         the previous line mid-word is just losing it. So the watcher queues,
         and only a deliberate 'say this now' (replay, say) interrupts.
+
+        **Nothing barges past a line that is being held.** Cutting the current
+        line short is only ever worth it to reach a newer one sooner -- and
+        while she is paused nobody is hearing either of them, so the cut buys
+        no time at all and costs the sentence you stopped half way through on
+        purpose. Worse, cancel() empties the queue as well, so one answer
+        arriving took the held line and everything waiting behind it.
+
+        Held means held: it queues, and play works through it in order. The one
+        thing that still takes the floor is replay -- clicking a line in the
+        history is asking to hear that line now, which is a different sentence
+        from anything arriving by itself.
         """
-        if barge:
+        if barge and not self.paused:
             self.cancel()
         self.jobs.put(job)
 

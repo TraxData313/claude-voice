@@ -128,6 +128,14 @@ stops on its own after two pieces because the play queue is capped at two and bl
 **"quiet now" is not "I never want to hear that"**: emptying the queue is ⏭ skip all,
 sitting next to the pause button, which is the honest place for it.
 
+**Nothing barges past a held line.** A finished answer normally takes the floor — the
+newest is the one worth hearing while an older one is still being read out. That reasoning
+runs out when she is held: nobody is hearing either, so the cut buys no time, and it costs
+the sentence you stopped half way through on purpose. It costs more than that, in fact —
+taking the floor calls `cancel()`, which empties the queue as well, so one answer arriving
+took the held line and everything waiting behind it. The one thing that still interrupts a
+hold is clicking a line in the **history**, which is you asking for that line, now.
+
 ### The play/pause key
 
 The key on a keyboard's media row, on a headphone cable, on the button on a pair of

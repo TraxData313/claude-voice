@@ -21,6 +21,13 @@ that word, and the play/pause key on your keyboard or your headphones works it t
   queueing, and synthesis stops of its own accord after two pieces. So pausing to take a
   call and coming back to press play means hearing what arrived while you were gone,
   rather than finding it was thrown away.
+- **An arriving answer does not push the held one out.** A finished answer normally takes
+  the floor — newest wins, which is right while an older one is still being read out.
+  That reasoning runs out when she is held: nobody is hearing either, so the cut buys no
+  time and costs the sentence you stopped half way through on purpose. It cost more than
+  that, in fact — taking the floor empties the queue too, so one answer arriving took the
+  held line *and* everything waiting behind it. Held means held. Clicking a line in the
+  history still takes the floor, because that is you asking for that line, now.
 - **And if you would rather not hear all of it**, ⏭ skip all is the button beside it. That
   is the honest split: *quiet now* and *I never want to hear that* are two different
   wishes, and one button could only ever grant one of them.
