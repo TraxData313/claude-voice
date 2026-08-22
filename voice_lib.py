@@ -223,6 +223,13 @@ DEFAULTS = {
     # Follow the session transcripts directly instead of waiting to be called.
     # Hooks need the client to run them; this needs nothing but the files.
     "watch": True,
+    # Speak the runs nobody is sitting in front of. A headless run -- `claude
+    # -p`, an SDK call, an errand one of your own programs sends off -- writes
+    # a transcript like every other session, and the watcher needs no hook to
+    # find it. But its report is addressed to the program that asked for it,
+    # not to the room, and hearing one read out in full is how this was found.
+    # Off, so they pass in silence; on if you would rather hear yours come home.
+    "watchHeadless": False,
     # Pause between one message and the next, so the seam is audible.
     "gapSeconds": 0.45,
 
@@ -751,46 +758,99 @@ def chunks(text, first=140, target=480):
 QUIET_WINDOW = 0.04        # 40 ms, about the shortest gap between two words
 QUIET_SEARCH = 1.5         # how far back from the end to look for one
 QUIET_RATIO = 0.12         # how far under the local peak counts as a gap
+QUIET_FLOOR = 0.02         # and, with no peak to go by, the level silence sits under
 
 
-def quiet_cut(samples, rate=24000, search=QUIET_SEARCH, window=QUIET_WINDOW,
-              ratio=QUIET_RATIO):
-    """Where to cut this buffer so the cut lands in a gap, not a word.
+def _loudest(samples, start, stop):
+    """Peak absolute value in a block. The one inner loop of all of this."""
+    loudest = 0.0
+    for s in samples[start:stop]:
+        a = -s if s < 0 else s
+        if a > loudest:
+            loudest = a
+    return loudest
 
-    Looks only at the tail, because the caller has already decided it wants
-    roughly this much audio and the only question is where to round it to.
 
-    **Returns 0 when there is no gap to cut on**, which is not a failure and
-    must not be treated as one: the right answer then is to gather more audio
-    and ask again, which pushes the seam to the next natural breath instead of
-    putting it in the middle of a word. Speech runs out of breath every few
-    seconds, so this converges quickly.
+def trim_head(samples, rate=24000, window=QUIET_WINDOW, floor=QUIET_FLOOR):
+    """How many samples of dead air sit before the first word. Pure latency.
 
-    The quietest window is not automatically a good cut -- in a continuous
-    stretch of speech one of them is still the quietest, and cutting there is
-    exactly the stutter this exists to avoid. Hence the ratio test.
+    The engine leaves a variable run of nothing at the top of a generation --
+    measured between 0.00s and 0.86s across eight consecutive messages -- and
+    none of it was asked for. On the first piece it is the delay between the
+    answer arriving and the voice starting, which is the one number 'instant'
+    playback exists to make small.
+
+    Absolute rather than relative, because at the head there is no peak yet to
+    be relative to.
+    """
+    win = max(1, int(window * rate))
+    at = 0
+    while at + win <= len(samples) and _loudest(samples, at, at + win) <= floor:
+        at += win
+    return at
+
+
+def quiet_span(samples, rate=24000, search=QUIET_SEARCH, window=QUIET_WINDOW,
+               ratio=QUIET_RATIO, budget=0.0):
+    """Where to end this piece, and where the next one picks up.
+
+    Returns (cut, resume): emit samples[:cut], throw samples[cut:resume] away,
+    carry on from resume. **(0, 0) means there is no gap to cut on**, which is
+    not a failure and must not be treated as one: the right answer then is to
+    gather more audio and ask again, which pushes the seam to the next natural
+    breath instead of putting it in the middle of a word. Speech runs out of
+    breath every few seconds, so this converges quickly.
+
+    The thrown-away part is the whole point, and it is new. A pause in speech
+    is far longer than the 40ms window used to find it, so cutting at the
+    window left the rest of the pause split across the seam -- some trailing
+    this piece, the remainder leading the next -- and *both* halves were kept,
+    with the player's handover added in between. Three silences where the
+    engine made one. Measured across eight consecutive messages: a median
+    heard gap of 0.42s and a worst of 0.88s, landing by preference on commas
+    and full stops, because the quietest window is exactly where punctuation
+    is. A comma held for 0.88s is heard as the end of a thought, which is the
+    stumble this was supposed to prevent.
+
+    So the whole silent run is found, and `budget` -- how much silence the
+    handover will supply by itself -- is taken out of it. What remains stays at
+    the end of the piece. The gap that is heard is then the pause the engine
+    made, once. A pause shorter than the budget cannot be shortened below it
+    without clipping speech, so it is left to the handover alone.
     """
     n = len(samples)
     win = max(1, int(window * rate))
     back = min(n, int(search * rate))
     if back < win * 2:
-        return 0
+        return 0, 0
 
     best, best_at, peak = None, 0, 0.0
     for start in range(n - back, n - win + 1, win):
-        loudest = 0.0
-        for s in samples[start:start + win]:
-            a = -s if s < 0 else s
-            if a > loudest:
-                loudest = a
+        loudest = _loudest(samples, start, start + win)
         if loudest > peak:
             peak = loudest
         if best is None or loudest < best:
-            best, best_at = loudest, start + win
+            best, best_at = loudest, start
 
     if peak <= 0.0:
-        return n                      # all silence: anywhere will do, take it all
-    return best_at if best <= peak * ratio else 0
+        return n, n                   # all silence: anywhere will do, take it all
+    # The quietest window is not automatically a good cut -- in a continuous
+    # stretch of speech one of them is still the quietest, and cutting there is
+    # exactly the stutter this exists to avoid. Hence the ratio test.
+    if best > peak * ratio:
+        return 0, 0
+
+    # Widen from that window to the whole breath it sits in, so what gets
+    # dropped is the entire pause rather than 40ms out of the middle of it.
+    level = peak * ratio
+    lo, hi = best_at, best_at + win
+    while lo - win >= 0 and _loudest(samples, lo - win, lo) <= level:
+        lo -= win
+    while hi + win <= n and _loudest(samples, hi, hi + win) <= level:
+        hi += win
+
+    keep = max(0, (hi - lo) - int(budget * rate))
+    return lo + keep, hi
 
 
 # On loudness, since it is the obvious next worry: the sister project had to

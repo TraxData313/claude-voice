@@ -59,6 +59,14 @@ Details that matter:
   after a crash is wanted and reading out last night's backlog is not.
 - It **names the session** when the speaker changes, reading the title you see on screen.
   Only on a change; announcing every line would be worse than the confusion it fixes.
+- It **stays quiet on runs nobody is sitting in front of**. `claude -p`, an SDK caller, an
+  errand one of your own programs sends off: those write a transcript exactly like a
+  session you are watching, in the project folder you are working in, and the watcher
+  needs no hook to find them — so keeping your hooks out of such a run does *not* keep it
+  quiet. Their reports are addressed to the program that asked, not to the room, and
+  hearing one read out in full is how this was found. Every user entry carries the
+  `entrypoint` that wrote it, and a headless run says `sdk-cli` where a window says `cli`
+  or `claude-desktop`. `/voice headless on` if you would rather hear yours come home.
 
 ## Choosing what to say
 
@@ -246,6 +254,25 @@ Kept because they will not be obvious to the next person either. The ones about 
 *engine* misbehaving — stopping early, changing voice between sentences, buzzing — have
 their own page now: **[engine-notes.md](engine-notes.md)**, with the measurements behind
 each and where the guards are still missing.
+
+**A pause at a seam was being paid for three times.** `quiet_cut` found the quietest 40ms
+window and cut at the end of it — but a pause in speech is far longer than 40ms, so the
+rest of it survived: some trailing the piece, the remainder leading the next, and both
+were played, with the 0.2s handover in the middle. Three silences where the engine made
+one. It landed by preference on commas and full stops, because the quietest window is
+exactly where punctuation is, so the message stopped dead where it was already pausing
+for effect. Measured across eight consecutive messages: median heard gap 0.42s, worst
+0.88s, on a machine with *zero* underruns and synthesis running at 4.3× realtime.
+
+The tell was that nothing in the logs showed it. `seam_typical()` measures from the end of
+one **file** to the start of the next, so the silence inside the audio was invisible to it
+— it reported 0.227s while the room heard 0.87s — and `SEAM_WORTH_SAYING` was 0.40, above
+every value the meter could ever produce. *An instrument whose threshold sits above its own
+subject will report healthy forever.* The fix is `quiet_span`: find the whole silent run,
+subtract what the handover supplies, keep the remainder. Streaming now pauses for exactly
+as long as `whole` mode does, which is the right target — that mode never had the fault.
+The same pass drops the engine's opening dead air, which was up to 0.86s of pure latency
+before the first word.
 
 **A piece must pay for the next piece, not for one five times its size.** The first piece
 was 2.5 seconds and every piece after it was twelve. That first piece therefore bought 2.5

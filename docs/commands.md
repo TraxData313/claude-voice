@@ -44,6 +44,7 @@ command — it is `/voice on`, never `/voice_on`.
 | `playback report` | What the traces say this machine needed. Reads local files, sends nothing. |
 | `narrate on\|off` | Whether the short lines said mid-work are spoken. |
 | `watch on\|off` | Follow sessions directly. Off means relying on hooks alone. |
+| `headless on\|off` | Speak runs a program started -- `claude -p` and SDK callers. Off by default. |
 | `source embedding\|icl` | Which clone to use. 'icl' is closer, and heavier. |
 
 ## The engine itself

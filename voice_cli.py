@@ -14,6 +14,7 @@ and make new ones.
     python voice_cli.py replay [n]          # say the last answer again (or the nth back)
     python voice_cli.py replay-all [n]      # the whole message, not just its summary
     python voice_cli.py narrate on|off      # speak the short lines said mid-work
+    python voice_cli.py headless on|off     # speak runs nobody is sitting in front of
     python voice_cli.py volume <0-100>     # how loud, applied mid-sentence
     python voice_cli.py source embedding|icl
     python voice_cli.py max <chars>
@@ -649,6 +650,7 @@ HELP = [
         ("playback", "report", "What the traces say this machine needed. Reads local files, sends nothing."),
         ("narrate", "on|off", "Whether the short lines said mid-work are spoken."),
         ("watch", "on|off", "Follow sessions directly. Off means relying on hooks alone."),
+        ("headless", "on|off", "Speak runs a program started -- `claude -p` and SDK callers. Off by default."),
         ("source", "embedding|icl", "Which clone to use. 'icl' is closer, and heavier."),
     ]),
     ("The engine itself", [
@@ -782,6 +784,17 @@ def cmd_update(state, args):
     print(f"  Read it :  {remote.get('changelog') or update_check.CHANGELOG_URL}")
 
 
+def cmd_headless(state, args):
+    if not args or args[0] not in ("on", "off"):
+        raise SystemExit("usage: voice_cli.py headless on|off")
+    state["watchHeadless"] = args[0] == "on"
+    voice_lib.save_state(state)
+    print("Headless runs are "
+          + ("spoken." if state["watchHeadless"] else "silent.")
+          + " These are `claude -p` runs and SDK callers -- sessions started by"
+            " a program rather than by you.")
+
+
 def cmd_narrate(state, args):
     if not args or args[0] not in ("on", "off"):
         raise SystemExit("usage: voice_cli.py narrate on|off")
@@ -806,7 +819,7 @@ COMMANDS = {
     "replay-all": cmd_replay_all, "replay_all": cmd_replay_all,
     "replayall": cmd_replay_all, "all": cmd_replay_all,
     "repeat-all": cmd_replay_all, "repeat_all": cmd_replay_all,
-    "narrate": cmd_narrate, "watch": cmd_watch,
+    "narrate": cmd_narrate, "watch": cmd_watch, "headless": cmd_headless,
     "update": cmd_update, "upgrade": cmd_update, "version": cmd_version,
     "help": cmd_help, "commands": cmd_help,
 }

@@ -530,9 +530,17 @@ class Speaker:
 
     LEARN_FROM = voice_lib.LEARN_FROM
 
-    # Past this a seam is worth a line in the log rather than just a number:
-    # comfortably more than TAIL, so an ordinary handover stays quiet.
-    SEAM_WORTH_SAYING = 0.40
+    # Past this a seam is worth a line in the log rather than just a number.
+    #
+    # This was 0.40, which is above every seam this ever measures: the number
+    # is the handover alone -- from the end of one file to the start of the
+    # next -- and that is TAIL plus a little, so the line could never fire. It
+    # sat above its own subject while the room was hearing gaps of up to 0.88s,
+    # because the rest of those gaps was silence inside the audio, which this
+    # does not see and now does not need to: quiet_span takes it out at the
+    # cut. So the threshold moves down to just above an ordinary handover,
+    # where it can actually report a machine falling behind.
+    SEAM_WORTH_SAYING = 0.30
 
     def seam_typical(self):
         """The middle seam, which is the one to design against."""
@@ -580,6 +588,7 @@ class Speaker:
         # with. As 'f' it is four bytes a sample and every line below reads it
         # unchanged.
         buf, spoken = array.array("f"), [0.0]
+        head = [False]                # has the opening dead air been dropped yet
         unit = [self.FIRST_SECONDS if lead is None else lead]
         # When each piece arrived and how much audio existed by then. This
         # curve is the only machine-dependent thing in the whole question,
@@ -594,6 +603,15 @@ class Speaker:
                           round(made[0] / SAMPLE_RATE, 3)))
             if job.cancelled:
                 return False
+            # Dead air before the first word is latency and nothing else, and
+            # the engine leaves a different amount of it every time. Drop it
+            # once, at the top, for every mode -- 'whole' included, since it
+            # waits long enough already.
+            if not head[0]:
+                drop = voice_lib.trim_head(buf, SAMPLE_RATE)
+                head[0] = drop < len(buf)
+                if drop:
+                    del buf[:drop]
             # 'whole': hand over nothing until the generation has finished, so
             # there is no next piece to be late and no gap to hear. The flush
             # below plays it as a single file.
@@ -601,20 +619,26 @@ class Speaker:
                 return True
             if len(buf) / SAMPLE_RATE < unit[0]:
                 return True
-            cut = voice_lib.quiet_cut(buf, SAMPLE_RATE)
-            if not cut:
+            # The handover is silence the player supplies whether we want it or
+            # not, so it is spent as part of the pause rather than added to it.
+            cut, resume = voice_lib.quiet_span(buf, SAMPLE_RATE,
+                                               budget=self.TAIL)
+            if not resume:
                 # No breath to cut on yet. Gathering more is right: it moves the
                 # seam to the next natural pause rather than into a word. Only
                 # a genuine run-on gets cut regardless, and then only so that
                 # one endless sentence cannot hold up playback for ever.
                 if len(buf) / SAMPLE_RATE < unit[0] * 2.5:
                     return True
-                cut = len(buf)
-            if not self._emit(job, buf[:cut]):
-                return False
-            spoken[0] += cut / SAMPLE_RATE
-            del buf[:cut]
-            unit[0] = min(self.UNIT_SECONDS, unit[0] * 2)
+                cut = resume = len(buf)
+            # cut can be 0 with resume past it: the buffer opens on a pause we
+            # are dropping whole. Nothing to play, but the silence still goes.
+            if cut:
+                if not self._emit(job, buf[:cut]):
+                    return False
+                spoken[0] += cut / SAMPLE_RATE
+                unit[0] = min(self.UNIT_SECONDS, unit[0] * 2)
+            del buf[:resume]
             return True
 
         try:
@@ -858,6 +882,15 @@ def _empty_dir(path):
         pass
 
 
+# How a transcript says that nobody is sitting in front of it. Claude Code
+# stamps every user entry with the entrypoint that wrote it: an interactive
+# session says 'cli' or 'claude-desktop', while a run started headless --
+# `claude -p`, or anything driving the SDK -- says 'sdk-cli'. Read off real
+# transcripts against Claude Code 2.1.229; if a future version spells it
+# differently the worst that happens is those runs speak again.
+HEADLESS_ENTRYPOINTS = ("sdk-cli",)
+
+
 class TranscriptWatcher(threading.Thread):
     """Speak new assistant messages by watching the session files on disk.
 
@@ -888,6 +921,8 @@ class TranscriptWatcher(threading.Thread):
         self.dirty = False
         self.labels = {}        # transcript -> what to call that session aloud
         self.projects = {}      # transcript -> the folder it is being run in
+        self.headless = {}      # transcript -> was it started with nobody there
+        self.hushed = set()     # headless ones already said to be skipped
         # Sessions the panel has silenced. Kept in config too, so muting one and
         # restarting the engine does not un-mute it behind your back.
         self.muted = set(voice_lib.load_state().get("mutedSessions") or [])
@@ -947,9 +982,16 @@ class TranscriptWatcher(threading.Thread):
             rows = sorted(self._transcripts(), key=lambda r: r[2], reverse=True)
         except OSError:
             return []
+        state = voice_lib.load_state()
         out = []
-        for path, _size, mtime in rows[:limit]:
+        for path, _size, mtime in rows:
+            if len(out) >= limit:
+                break
             label = self.labels[path] if path in self.labels else self._ensure_label(path)
+            # A row you cannot usefully tick: it is silent for a reason of its
+            # own, and offering to un-mute it would be a lie.
+            if self._unattended(path, state):
+                continue
             out.append({
                 "path": path,
                 "label": label or f"session {os.path.basename(path)[:8]}",
@@ -994,9 +1036,29 @@ class TranscriptWatcher(threading.Thread):
             if not state.get("enabled") or not state.get("watch", True):
                 continue
             self._ensure_label(path)
+            if self._unattended(path, state):
+                continue
             for line in chunk.splitlines():
                 self._consider(line, state, path)
         self._save_offsets()
+
+    def _unattended(self, path, state):
+        """A run with nobody in front of it, which we have been told to skip.
+
+        The offset has already moved on by the time this is asked, so turning
+        the setting on later starts speaking the *next* thing such a run says
+        rather than reciting everything it said while unheard.
+        """
+        if state.get("watchHeadless", False) or not self.headless.get(path):
+            return False
+        # Once per session rather than once per sweep: silence with no trace
+        # reads as the voice having broken again, which is the one failure this
+        # project keeps re-learning -- but a line every 0.7 seconds is its own
+        # kind of nothing.
+        if path not in self.hushed:
+            self.hushed.add(path)
+            log(f"watcher: headless run <{self.labels.get(path)}>, staying quiet")
+        return True
 
     def _ensure_label(self, path):
         """What to call this session out loud, read once from the transcript.
@@ -1007,7 +1069,7 @@ class TranscriptWatcher(threading.Thread):
         """
         if path in self.labels:
             return self.labels[path]
-        custom = ai = cwd = None
+        custom = ai = cwd = entrypoint = None
         try:
             with open(path, encoding="utf-8", errors="replace") as fh:
                 for line in fh:
@@ -1016,6 +1078,7 @@ class TranscriptWatcher(threading.Thread):
                     except ValueError:
                         continue
                     cwd = cwd or e.get("cwd")
+                    entrypoint = entrypoint or e.get("entrypoint")
                     if e.get("type") == "custom-title":
                         custom = e.get("customTitle") or custom
                     elif e.get("type") == "ai-title":
@@ -1025,6 +1088,9 @@ class TranscriptWatcher(threading.Thread):
         # Which project this session is in. Two sessions can carry near-enough
         # the same title in different repos, and then the title alone tells you
         # nothing about which one is talking.
+        # Decided here because this is the one place the whole file is read,
+        # and the answer never changes for a given session.
+        self.headless[path] = entrypoint in HEADLESS_ENTRYPOINTS
         self.projects[path] = os.path.basename(cwd) if cwd else None
         label = custom or ai or self.projects[path]
         self.labels[path] = _tidy_label(label)
