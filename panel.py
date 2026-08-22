@@ -8,8 +8,8 @@ deliberately plain:
 
     what is playing now, and which session it came from
     which voice is speaking, and how big to draw them
-    load the engine or give its memory back, turn the voice off, skip a line,
-    skip everything -- the two switches are green while working, red while not
+    load the engine or give its memory back, pause her, skip a line, skip
+    everything -- the two switches are green while working, red while not
     how loud it is
     what is queued behind it, and a box to add a line of your own to it
     what has been said -- click a line to hear it again
@@ -190,16 +190,16 @@ TYPED_PROJECT = "manual input"
 # And what the test line is filed under. It is not something you typed and it
 # is not something Claude said, so it gets a column of its own to be honest in.
 TEST_PROJECT = "voice test"
-# The master switch says what pressing it *does*; its colour says what is
-# happening *now*. So a green button reads "turn off", and that is the right way
-# round -- green is the voice working, and the label is what you would be doing
-# to it. Getting these two the same way round would mean either a button that
-# does not say what it does or a colour that does not say how things are.
+# A switch says what pressing it *does*; its colour says what is happening
+# *now*. So a green button wears two bars, and that is the right way round --
+# green is sound coming out of the speakers, and the icon is what you would be
+# doing to it. Getting these two the same way round would mean either a button
+# that does not say what it does or a colour that does not say how things are.
 #
 # Face, then the same again lighter for the pointer being over it. Both
-# switches wear them: the engine either holds the model or it does not, and the
-# voice either speaks or it does not, and green-means-working reads the same on
-# either one.
+# switches wear them: the engine either holds the model or it does not, and she
+# is either talking or held, and green-means-working reads the same on either
+# one.
 POWER_ON = ("#2f7d4f", "#3a9a61")
 POWER_OFF = ("#a33a3a", "#c04a4a")
 # Nothing to ask, so the switch has nothing to report -- the voice switch while
@@ -219,10 +219,11 @@ POWER_DEAD = ("#6b6e76", "#6b6e76")
 GLYPH = {
     "engine": ("\u2638", "engine"),        # see MDL2_CHIP, preferred over this
     "settings": ("\u2699", "settings"),    # and MDL2_GEAR over this one
-    "play": ("\u25b6", "turn on"),         # the voice is off; this starts it
-    "stop": ("\u25a0", "turn off"),        # it is on; this stops it. Not a
-                                           # pause: there is no coming back to
-                                           # the sentence it cut off.
+    "play": ("\u25b6", "play"),            # held; this picks it up again
+    "pause": ("\u23f8", "pause"),          # speaking; this holds it. A real
+                                           # pause: the piece is cut at the
+                                           # sample it reached and the rest of
+                                           # it is kept for the way back.
     "skip": ("\u23e9", "skip line"),       # >>
     "skip_all": ("\u23ed", "skip all"),    # >|
     "add": ("+", "read custom text"),      # into the queue, in your own words
@@ -762,9 +763,12 @@ class Panel:
         self.tips["engine"] = Tip(self.engine_btn, self._engine_says, self.dark.get)
         self.paint_engine(None)
 
-        # The master switch second: it is the one reached for most, and the two
-        # beside it are about the line being spoken, not about the voice.
-        self.power = self._switch(bar, "stop", self.toggle_voice)
+        # Pause second: it is the one reached for most, and alone in this row
+        # nothing it does is final -- the place is kept, the queue is kept, and
+        # pressing it again picks the sentence up where it stopped. Turning the
+        # voice off altogether is a setting and lives with the settings; this
+        # one is about the next half second.
+        self.power = self._switch(bar, "pause", self.toggle_pause)
         self.power.pack(side="left", padx=(0, 6), fill="y")
         self.tips["power"] = Tip(self.power, self._power_says, self.dark.get)
         self.paint_power(None)       # until the first poll says otherwise
@@ -774,8 +778,11 @@ class Panel:
         # The queue is the whole difference between these two, so the labels
         # say so rather than leaving it to be discovered: 'skip line' gives up
         # on this sentence and goes straight to the next, 'skip all' throws
-        # away everything waiting as well. Nothing here is called stop, because
-        # neither of them pauses anything -- there is no coming back to it.
+        # away everything waiting as well. Neither of them is a pause: there is
+        # no coming back to a line either has passed, which is the whole
+        # difference between these two and the switch on their left -- and it
+        # is why 'skip all' is the answer to coming back from a long pause to a
+        # queue you would rather not sit through.
         # Skipping one line is the small, everyday one, so it is nearest.
         for key, route, says in (("skip", "/skip", "skip this line"),
                                  ("skip_all", "/stop", "skip everything waiting")):
@@ -1549,7 +1556,9 @@ class Panel:
     def _power_says(self):
         if not self.drawn.get("engine_up"):
             return "no engine to speak with"
-        return "stop speaking" if self.drawn.get("enabled") else "start speaking"
+        if self.drawn.get("paused"):
+            return "carry on from where it stopped"
+        return "pause — keeps the place and the queue"
 
     def paint_engine(self, up):
         """The engine switch. None is "loading", which is neither yet.
@@ -1586,7 +1595,7 @@ class Panel:
         self.hold("enabled")
         self.drawn["enabled"] = False
         self.drawn["engine_up"] = False
-        self.paint_power(False)
+        self.paint_power(None)                 # no engine, so no idea
         self.paint_engine(False)               # answer the click at once
         self.status.configure(text="engine: unloading…")
         self.act("/quit")
@@ -1664,12 +1673,19 @@ class Panel:
         self.render_sessions(st.get("sessions") or [], st.get("voice"))
         self.render_voices(st)
 
-        on = bool(st.get("enabled"))
-        if self.held("enabled"):
-            on = self.drawn.get("enabled", on)     # just clicked; let it settle
+        # The switch says whether she is talking or held, which is not the same
+        # question as whether the voice is on at all: "off" is a setting and
+        # lives in the config, "held" is about right now and lives in the
+        # engine. The status line under the row still says when the voice is
+        # off, because that is the one that explains a silence.
+        if not self.held("enabled"):
+            self.drawn["enabled"] = bool(st.get("enabled"))
+        held = bool(st.get("paused"))
+        if self.held("paused"):
+            held = self.drawn.get("paused", held)  # just clicked; let it settle
         else:
-            self.drawn["enabled"] = on
-        self.paint_power(on)
+            self.drawn["paused"] = held
+        self.paint_power(not held)
 
         # The engine owns the level: it is the process making the noise, and
         # the mixer slider being moved is that process's own. So this only ever
@@ -1696,7 +1712,9 @@ class Panel:
             note = "engine: speaking"
         else:
             note = "engine: ready"
-        if not st.get("enabled"):
+        if st.get("paused"):
+            note += " · held"
+        elif not st.get("enabled"):
             note += " · voice off"
         elif not st.get("watching"):
             note += " · not watching"
@@ -1808,28 +1826,39 @@ class Panel:
         self._rewrap()
         self.hold_the_floor()
 
-    def paint_power(self, on):
-        """The switch, wearing whether the voice is working.
+    def paint_power(self, playing):
+        """The switch, wearing whether anything is coming out of the speakers.
 
         None is "no engine, so no idea" -- and that has no label of its own,
         because the last one it had is still the truthful thing to press.
         """
-        if on is None:
+        if playing is None:
             face, hover = POWER_DEAD
         else:
-            face, hover = POWER_ON if on else POWER_OFF
-            # A square while it is speaking, a triangle while it is not: the
+            face, hover = POWER_ON if playing else POWER_OFF
+            # Two bars while it is speaking, a triangle while it is held: the
             # icon is what pressing it does, exactly as the words were.
-            self.power.configure(text=self._glyph("stop" if on else "play"))
+            self.power.configure(text=self._glyph("pause" if playing else "play"))
         self.power.configure(background=face, activebackground=hover)
 
-    def toggle_voice(self):
-        """The switch itself: speaking, or not speaking anywhere."""
-        on = not self.drawn.get("enabled", True)
-        self.hold("enabled")
-        self.drawn["enabled"] = on
-        self.paint_power(on)
-        self.act("/enabled", {"on": on})
+    def toggle_pause(self):
+        """Hold what is being said, or pick it up again.
+
+        Not the master switch this replaced. Nothing is turned off and nothing
+        is dropped: the queue goes on filling while it is held, the engine
+        keeps its model, and the piece in the air is cut where it got to rather
+        than lost. Held with nothing playing is still worth pressing -- it is
+        what keeps the next thing she is handed from being said out loud.
+
+        Emptying the queue is the button two along, which is the honest place
+        for it: "quiet now" and "I do not want to hear any of that later" are
+        two different wishes, and one button could only ever grant one.
+        """
+        held = not self.drawn.get("paused", False)
+        self.hold("paused")
+        self.drawn["paused"] = held
+        self.paint_power(not held)
+        self.act("/pause", {"on": held})
 
     def slide_volume(self, value):
         """Dragging is continuous; the engine only needs where you stopped.

@@ -160,6 +160,11 @@ DEFAULTS = {
 
     # --- runtime state, written by voice_cli ------------------------------
     "enabled": False,
+    # Whether the play/pause key -- on a keyboard's media row, on a pair of
+    # headphones -- works the pause button. It is only taken while she has
+    # something to pause or resume; the rest of the time the key is left to
+    # whatever else is playing, because that is whose key it is.
+    "mediaKey": True,
     "voice": "abby",
     "source": "embedding",     # or 'icl': closer clone, larger files
     # Speak an answer as ONE generation, played as it is made, instead of a

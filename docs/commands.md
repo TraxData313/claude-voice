@@ -32,6 +32,8 @@ command — it is `/voice on`, never `/voice_on`.
 | `repeat-all [n]` | Say the whole of that answer, not just its summary. |
 | `say <text>` | Speak a line of your own, right now. |
 | `stop` | Cut off what is playing now. The voice stays on. ('break' works too.) |
+| `pause [on\|off]` | Hold her where she is, keeping the place and the queue. No argument toggles. |
+| `play` | Carry on from the exact spot the pause landed on. |
 
 ## Tuning what you hear
 
@@ -45,6 +47,7 @@ command — it is `/voice on`, never `/voice_on`.
 | `narrate on\|off` | Whether the short lines said mid-work are spoken. |
 | `watch on\|off` | Follow sessions directly. Off means relying on hooks alone. |
 | `headless on\|off` | Speak runs a program started -- `claude -p` and SDK callers. Off by default. |
+| `mediakey on\|off` | Let the play/pause key on a keyboard or headphones work the pause. On by default. |
 | `source embedding\|icl` | Which clone to use. 'icl' is closer, and heavier. |
 
 ## The engine itself
@@ -64,7 +67,7 @@ command — it is `/voice on`, never `/voice_on`.
 
 ## Also worth knowing
 
-- Aliases: `repeat` = `replay, again`; `repeat-all` = `replay-all, all`; `volume` = `vol, loud`; `playback` = `buffer`.
+- Aliases: `repeat` = `replay, again`; `repeat-all` = `replay-all, all`; `volume` = `vol, loud`; `playback` = `buffer`; `pause` = `hold, wait`; `play` = `resume, carry-on`.
 - The voice is **one setting shared by every session**. Change it anywhere and it
   changes everywhere at once, including sessions already open, and it survives a
   reboot.

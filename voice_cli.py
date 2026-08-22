@@ -51,6 +51,8 @@ def cmd_status(state, _args):
     else:
         engine = "loading model..."
 
+    if health and health.get("paused"):
+        engine += ", held"
     print(f"  voice output : {'ON' if state['enabled'] else 'off'}")
     print(f"  voice        : {_voice_label(state)}")
     print(f"  source       : {state['source']}")
@@ -274,6 +276,45 @@ def cmd_stop(state, _args):
         print("Stopped.")
     except Exception:
         print("Engine not running.")
+
+
+def cmd_pause(state, args):
+    """Hold what is being said, keeping both the place and the queue.
+
+    Not 'off'. The engine keeps its model, the queue goes on filling, and the
+    sentence in the air is cut where it got to rather than lost -- so 'play'
+    carries on from there. If you would rather not sit through what piled up
+    while you were away, 'stop' empties the queue first.
+    """
+    want = None
+    if args and args[0] in ("on", "off"):
+        want = args[0] == "on"
+    try:
+        r = voice_lib.post(state["port"], "/pause",
+                           {} if want is None else {"on": want}, timeout=3)
+    except Exception:
+        raise SystemExit("Engine not running.")
+    print("Held. 'play' carries on from where it stopped."
+          if r.get("paused") else "Carrying on.")
+
+
+def cmd_resume(state, _args):
+    try:
+        voice_lib.post(state["port"], "/pause", {"on": False}, timeout=3)
+    except Exception:
+        raise SystemExit("Engine not running.")
+    print("Carrying on.")
+
+
+def cmd_mediakey(state, args):
+    if not args or args[0] not in ("on", "off"):
+        raise SystemExit("usage: voice_cli.py mediakey on|off")
+    state["mediaKey"] = args[0] == "on"
+    voice_lib.save_state(state)
+    print("The play/pause key pauses her while she has something to say,"
+          " and is left alone the rest of the time."
+          if state["mediaKey"] else
+          "The play/pause key is left to whatever else is playing.")
 
 
 def cmd_start(state, _args):
@@ -641,6 +682,8 @@ HELP = [
         ("repeat-all", "[n]", "Say the whole of that answer, not just its summary."),
         ("say", "<text>", "Speak a line of your own, right now."),
         ("stop", "", "Cut off what is playing now. The voice stays on. ('break' works too.)"),
+        ("pause", "[on|off]", "Hold her where she is, keeping the place and the queue. No argument toggles."),
+        ("play", "", "Carry on from the exact spot the pause landed on."),
     ]),
     ("Tuning what you hear", [
         ("volume", "<0-100>", "How loud. It is this app's own slider in the Windows mixer."),
@@ -651,6 +694,7 @@ HELP = [
         ("narrate", "on|off", "Whether the short lines said mid-work are spoken."),
         ("watch", "on|off", "Follow sessions directly. Off means relying on hooks alone."),
         ("headless", "on|off", "Speak runs a program started -- `claude -p` and SDK callers. Off by default."),
+        ("mediakey", "on|off", "Let the play/pause key on a keyboard or headphones work the pause. On by default."),
         ("source", "embedding|icl", "Which clone to use. 'icl' is closer, and heavier."),
     ]),
     ("The engine itself", [
@@ -665,7 +709,8 @@ HELP = [
 ]
 
 ALIASES = {"repeat": "replay, again", "repeat-all": "replay-all, all",
-           "volume": "vol, loud", "playback": "buffer"}
+           "volume": "vol, loud", "playback": "buffer",
+           "pause": "hold, wait", "play": "resume, carry-on"}
 
 
 def cmd_help(state, args):
@@ -808,6 +853,9 @@ COMMANDS = {
     "panel": cmd_panel, "window": cmd_panel,
     "list": cmd_list, "set": cmd_set, "say": cmd_say,
     "stop": cmd_stop, "break": cmd_stop, "shush": cmd_stop,
+    "pause": cmd_pause, "hold": cmd_pause, "wait": cmd_pause,
+    "play": cmd_resume, "resume": cmd_resume, "carry-on": cmd_resume,
+    "mediakey": cmd_mediakey, "media": cmd_mediakey,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,
     "history": cmd_history, "playback": cmd_playback, "buffer": cmd_playback,
     "volume": cmd_volume, "vol": cmd_volume, "loud": cmd_volume,

@@ -92,7 +92,8 @@ tool either way. Mind the space: `/voice on`, never `/voice_on`.
 | `on` / `off` | the switch. `off` leaves the engine warm, so `on` is instant |
 | `set abby` | change voice. Any unambiguous substring: `set ab` works |
 | `repeat` | say the last answer again. `repeat-all` for the whole thing |
-| `stop` | cut off what is playing. The voice stays on (`break` works too) |
+| `stop` | cut off what is playing, and empty the queue (`break` works too) |
+| `pause` / `play` | hold her mid-word and carry on from there. Nothing is dropped |
 | `volume 40` | how loud, 0 to 100 — audible mid-sentence |
 | `playback auto` | breaking up on a busy machine? This works out the wait per message. Default |
 | `list` | every voice available |
@@ -107,7 +108,7 @@ go stale.
 
 <p align="center">
   <img src="docs/panel.png" width="390"
-       alt="The Abby for Claude panel: a settings cog in the top corner, Abby's portrait and the voice picker beside the line she is speaking, a chip for the engine, turn off, skip line and skip all, a volume slider, a queue, a clickable history, a tick per session, and Abby herself along the bottom">
+       alt="The Abby for Claude panel: a settings cog in the top corner, Abby's portrait and the voice picker beside the line she is speaking, a chip for the engine, pause, skip line and skip all, a volume slider, a queue, a clickable history, a tick per session, and Abby herself along the bottom">
 </p>
 
 **`/voice panel`**, or the **Abby for Claude** icon the installer leaves on your Desktop —
@@ -116,9 +117,13 @@ twice a second:
 
 - **who is speaking**, what they are saying, and which project it came from — click her
   portrait to hear one known line, right-click to swap voice
-- **a chip to load the engine or hand its memory back**, and a **stop/play** switch for the
-  voice — both green while working, red while not; then **⏩ skip line · ⏭ skip all** and a
+- **a chip to load the engine or hand its memory back**, and a **⏸ pause / ▶ play**
+  switch — both green while working, red while not; then **⏩ skip line · ⏭ skip all** and a
   **volume** slider that bites mid-sentence. Rest on any of them and it says what it does
+- **pause really pauses.** It stops mid-word and carries on from that word, and while it
+  is held nothing is lost — the queue goes on filling and the engine keeps its model. The
+  **play/pause key** on your keyboard or your headphones works it too, and is left alone
+  the moment she has nothing to say, so it goes back to whatever you were listening to
 - **+ on the queue** — type any text and it is read out, behind whatever is already waiting
 - **history — click any line to hear it again**, from the audio you already heard
 - **a tick per session** — untick one and it stops being read aloud

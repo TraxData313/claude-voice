@@ -7,6 +7,7 @@ behind a tiny HTTP API on localhost:
 
     POST /speak   {"text": "...", "voice": "abby", "source": "embedding"}
     POST /stop    stop talking now, drop anything queued
+    POST /pause   hold it where it is, keeping the place; no argument toggles
     POST /health  {"ready": true, "speaking": false, ...}
     POST /quit    shut the process down
 
@@ -15,6 +16,7 @@ whatever /state last said and turns every click into one of these:
 
     POST /state         now playing, queue, history, sessions, voices
     POST /enabled       {"on": false} -- the master switch, as 'voice off' does
+    POST /pause         {"on": true} -- hold everything, losing nothing
     POST /skip          drop this line, keep the queue
     POST /play          say the current line again from its start
     POST /replay-id     {"id": 16} -- play kept audio, synthesising nothing
@@ -33,6 +35,7 @@ makes speech start on the first sentence instead of the last.
 import argparse
 import array
 import collections
+import ctypes
 import itertools
 import json
 import os
@@ -41,7 +44,9 @@ import sys
 import tempfile
 import threading
 import time
+import wave
 import winsound
+from ctypes import wintypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -173,6 +178,13 @@ class Speaker:
         self.ready = threading.Event()
         self.error = None
         self.speaking = False
+        # Held, not off. The model stays loaded, the watcher goes on queueing,
+        # and the piece in the air is cut where it got to so it can be picked
+        # up from there. Set means playing: an engine that came back from a
+        # restart already silent would read as a fault rather than as a
+        # setting, so this lives here and dies with the process.
+        self.resume = threading.Event()
+        self.resume.set()
         self.spoken = 0
         self.underruns = 0            # times the player ran dry, all messages
         # Measured seams: how long the silence between two pieces of one
@@ -247,6 +259,36 @@ class Speaker:
         winsound.PlaySound(None, winsound.SND_PURGE)
         return True
 
+    @property
+    def paused(self):
+        return not self.resume.is_set()
+
+    def pause(self, on=None):
+        """Hold what is being said, or pick it up where it stopped.
+
+        Not the master switch and not a skip: nothing is turned off and nothing
+        is thrown away. The engine keeps its model, the watcher goes on
+        queueing, and the piece in the air is cut at the sample it reached so
+        the same words can carry on from there.
+
+        Whatever is waiting stays waiting, which is the point -- and if that is
+        not what you want when you come back, the skip-everything button beside
+        it empties the queue. "Quiet now" and "I never want to hear that" are
+        two different wishes, and one button could only ever grant one of them.
+
+        No argument toggles, because a toggle is the only thing a media key can
+        say.
+        """
+        want = (not self.paused) if on is None else bool(on)
+        if want == self.paused:
+            return want
+        if want:
+            self.resume.clear()
+        else:
+            self.resume.set()
+        log("paused" if want else "resumed")
+        return want
+
     def repeat_current(self):
         """Say the current line again from its start.
 
@@ -261,6 +303,9 @@ class Speaker:
                 job = self.history[-1]["job"] if self.history else None
         if job is None or not job.chunks:
             return None
+        # Asking to hear something is asking to hear it, so it lifts a hold
+        # rather than queueing up behind one.
+        self.pause(False)
         again = Job(job.chunks, job.voice, job.kwargs, job.text, job.session)
         self.submit(again, barge=True)
         return again
@@ -278,6 +323,7 @@ class Speaker:
             return None
         src = rec["job"]
         self.cancel()            # asking for this one is asking for it now
+        self.pause(False)        # and "now" is not "once you press play"
         again = Job(src.chunks, src.voice, src.kwargs, src.text, src.session)
         # The play queue is deliberately short, so feeding it blocks -- and an
         # HTTP handler must not. Hand it to a thread that only ever enqueues.
@@ -312,6 +358,7 @@ class Speaker:
             "ready": self.ready.is_set() and self.error is None,
             "error": str(self.error) if self.error else None,
             "speaking": self.speaking,
+            "paused": self.paused,
             "queued": self.jobs.qsize() + self.play_q.qsize(),
             "spoken": self.spoken,
             "underruns": self.underruns,
@@ -334,6 +381,44 @@ class Speaker:
     # clipping the tail off every chunk would be heard as a stutter.
     TAIL = 0.2
 
+    # How far back a resume starts from the moment the pause landed. A pause
+    # almost never falls on a word boundary, and coming back on the exact
+    # sample means coming back mid-syllable, which is heard as a fault rather
+    # than as a continuation. A fifth of a second gives the word its start
+    # back. It is also why holding and resuming the same spot over and over
+    # walks slowly backwards, which is the right direction to be wrong in.
+    REWIND = 0.2
+
+    def _tail(self, path, offset):
+        """A copy of a chunk from `offset` seconds in. None if nothing is left.
+
+        winsound plays a file from its beginning and has no notion of a
+        position, so resuming where a pause landed means handing it a shorter
+        file. The audio is mono 16-bit PCM at a rate the header carries --
+        write_wav made it -- so this is a seek and a copy: nothing is decoded,
+        and nothing here has to agree with the engine about anything.
+        """
+        dest = os.path.join(CACHE_DIR, f"held-{os.getpid()}-{time.time_ns()}.wav")
+        try:
+            with wave.open(path, "rb") as src:
+                rate = src.getframerate()
+                start = min(int(offset * rate), src.getnframes())
+                left = src.getnframes() - start
+                if left <= 0:
+                    return None
+                src.setpos(start)
+                frames = src.readframes(left)
+                with wave.open(dest, "wb") as out:
+                    out.setnchannels(src.getnchannels())
+                    out.setsampwidth(src.getsampwidth())
+                    out.setframerate(rate)
+                    out.writeframes(frames)
+        except (OSError, wave.Error) as exc:
+            log(f"could not cut the held piece: {exc}")
+            _unlink(dest)
+            return None
+        return dest
+
     def _play(self, job, path):
         """Play one chunk, and come back the instant it is cancelled.
 
@@ -344,15 +429,62 @@ class Speaker:
         measurably so on a long one. Played async, the same purge cuts within a
         twentieth of a second, and the wav's own header says how long to wait
         for one that nobody cuts.
+
+        A pause is that same purge with the place kept. `at` is how far into
+        this chunk the sound had got when it landed, and what plays on the way
+        back is a copy of the rest -- cut while the hold is still on, so that
+        pressing play is a PlaySound and not a file write.
+
+        Returns the moment the audio ended, or 0.0 if it never got there. Not
+        a bare yes: a chunk that was held for five minutes and then finished
+        did finish, but `began` plus its length is five minutes in the past,
+        and the seam meter reading that as a six-second gap between pieces is
+        exactly what it looked like the first time this was tried.
         """
-        winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC
-                           | winsound.SND_NODEFAULT)
-        end = time.monotonic() + _wav_seconds(path) + self.TAIL
-        while time.monotonic() < end:
+        at, ended = 0.0, 0.0
+        piece, cut = path, False      # what is playing, and whether it is ours
+        while True:
+            if not self.resume.is_set():
+                self.speaking = False
+                # Waited in slices rather than in one go: skipping a line while
+                # it is held has to take the line away now, not whenever play
+                # is next pressed -- which might be an hour, or never.
+                while not self.resume.is_set() and not job.cancelled:
+                    self.resume.wait(0.1)
+                self.speaking = True
             if job.cancelled:
-                winsound.PlaySound(None, winsound.SND_PURGE)
-                return
-            time.sleep(0.05)
+                break
+            winsound.PlaySound(piece, winsound.SND_FILENAME | winsound.SND_ASYNC
+                               | winsound.SND_NODEFAULT)
+            length = _wav_seconds(piece)
+            began = time.monotonic()
+            end = began + length + self.TAIL
+            while time.monotonic() < end:
+                if job.cancelled:
+                    winsound.PlaySound(None, winsound.SND_PURGE)
+                    break
+                if not self.resume.is_set():
+                    winsound.PlaySound(None, winsound.SND_PURGE)
+                    # Where the audio got to, not where the clock did: the last
+                    # loop of a chunk is waiting out TAIL as well, and counting
+                    # that would resume a fifth of a second past the end.
+                    at = max(0.0, at + min(time.monotonic() - began, length)
+                             - self.REWIND)
+                    break
+                time.sleep(0.05)
+            else:
+                ended = began + length     # when this chunk's audio ran out
+                break
+            if job.cancelled:
+                break
+            if cut:
+                _unlink(piece)
+            piece, cut = self._tail(path, at), True
+            if piece is None:
+                break             # the pause landed on the last few samples
+        if cut and piece:
+            _unlink(piece)
+        return ended
 
     def _feed(self, job, wavs):
         for path in wavs:
@@ -738,6 +870,10 @@ class Speaker:
         # sounds wrong in a way that stretching a full stop does not.
         last, audio_ended = None, 0.0
         while True:
+            # Held before the queue is touched, not after: a piece taken out of
+            # it and kept in here would vanish from the panel, which counts
+            # what is waiting by looking in the queue.
+            self.resume.wait()
             job, path, keep = self.play_q.get()
             # A beat between one message and the next. The seam is useful --
             # it is how you hear that a new line has started rather than the
@@ -759,10 +895,11 @@ class Speaker:
                             log(f"seam of {seam:.2f}s between pieces "
                                 f"({len(self.seams)} timed, "
                                 f"{self.seam_typical():.2f}s typical)")
-                    length = _wav_seconds(path)
-                    began = time.monotonic()
-                    self._play(job, path)
-                    audio_ended = began + length
+                    # When the audio ran out, straight from the player: a
+                    # chunk that was held part way through ends long after
+                    # began-plus-its-length says, and a seam measured from
+                    # there is the length of the pause, not of a gap.
+                    audio_ended = self._play(job, path)
                     self.spoken += 1
                     played = True
                     # Did the player just run out of things to play while this
@@ -792,6 +929,96 @@ class Speaker:
                     self._keep(job, path)     # heard once, so worth keeping
                 else:
                     _unlink(path)             # cancelled before it was ever heard
+
+
+# The play/pause key: on a keyboard's media row, on the button on a pair of
+# headphones, on the little remote halfway down a cable. All three send this
+# one virtual key, which is what makes it worth answering -- it is the button
+# already under your thumb at the moment you want her to stop.
+VK_MEDIA_PLAY_PAUSE = 0xB3
+WM_HOTKEY = 0x0312
+MOD_NOREPEAT = 0x4000         # a held-down key is one press, not forty
+HOTKEY_ID = 0xC1A0            # ours alone, and only within this thread
+
+
+class MediaKey(threading.Thread):
+    """Answer the play/pause key, but only while there is something to answer.
+
+    RegisterHotKey takes a key away from every other program on the machine for
+    as long as it is held, and play/pause is not ours to keep: it belongs to
+    whatever is playing. So it is taken while she is speaking, holding a queue,
+    or paused -- and handed straight back the moment she is idle, which is when
+    it belongs to Spotify again. Pressing it with nothing to say therefore does
+    what it always did, and nothing in here needs to know what that was.
+
+    The register and the message loop have to be the same thread: Windows
+    delivers WM_HOTKEY to the thread that asked for the key and to no other, so
+    a hotkey registered from a thread that never reads its own queue is a key
+    taken away from the machine and then answered by nobody.
+
+    What this cannot promise: a keyboard whose media keys are handled by its
+    own driver -- some Logitech and Corsair software does this -- never lets
+    the key reach Windows at all, and there is nothing on this side to be done
+    about that. The panel button is the same action either way.
+    """
+
+    POLL = 0.25
+    # The setting is a file read and this loop runs four times a second.
+    SETTING_EVERY = 8
+
+    def __init__(self, speaker):
+        super().__init__(name="mediakey", daemon=True)
+        self.speaker = speaker
+        self.held = False           # do we currently own the key
+        self.allowed = True
+        self.ticks = 0
+        self.complained = False
+
+    def _wanted(self):
+        """Is there anything here for the key to do?"""
+        if self.ticks % self.SETTING_EVERY == 0:
+            self.allowed = bool(self.speaker._live().get("mediaKey", True))
+        self.ticks += 1
+        sp = self.speaker
+        # Being made counts as much as being played. There are three or four
+        # seconds between a message arriving and its first word, and asking
+        # only about `speaking` left the key with Spotify for all of them --
+        # so the first press of a new answer went to the wrong program.
+        #
+        # Paused counts too, and counts most: that is the state whose whole
+        # purpose is the press that ends it.
+        return bool(self.allowed and (sp.paused or sp.speaking
+                                      or sp.playing or sp.current
+                                      or sp.jobs.qsize() or sp.play_q.qsize()))
+
+    def run(self):
+        user32 = ctypes.windll.user32
+        msg = wintypes.MSG()
+        while True:
+            want = self._wanted()
+            if want != self.held:
+                if want:
+                    self.held = bool(user32.RegisterHotKey(
+                        None, HOTKEY_ID, MOD_NOREPEAT, VK_MEDIA_PLAY_PAUSE))
+                    if self.held:
+                        self.complained = False
+                    elif not self.complained:
+                        # Once per spell of failing, not once every quarter
+                        # second: this is a thing to notice, not a thing to
+                        # drown the log in.
+                        self.complained = True
+                        log("media key: play/pause is held by something else, "
+                            "so it stays with it")
+                else:
+                    user32.UnregisterHotKey(None, HOTKEY_ID)
+                    self.held = False
+            # Peek rather than Get: this thread has to come back to the question
+            # above, and GetMessage would sit on the key until one arrived --
+            # which, on an idle machine, is never.
+            while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
+                if msg.message == WM_HOTKEY and msg.wParam == HOTKEY_ID:
+                    self.speaker.pause()
+            time.sleep(self.POLL)
 
 
 def _tidy_label(label, words=6):
@@ -1272,6 +1499,15 @@ class Handler(BaseHTTPRequestHandler):
             sp.cancel()
             return self._reply(200, {"stopped": True})
 
+        if route == "/pause":
+            # Not the master switch. Nothing is turned off, nothing is dropped,
+            # and the engine keeps its model -- so this is not written to the
+            # config either. Sent with no argument it toggles, which is all a
+            # media key is able to say.
+            want = payload.get("on")
+            held = sp.pause(None if want is None else bool(want))
+            return self._reply(200, {"paused": held})
+
         if route == "/enabled":
             # The master switch, same as 'voice on' and 'voice off': the setting
             # itself, and silence now if it is going off. The watcher re-reads
@@ -1416,6 +1652,9 @@ def main():
         log("speaking notes in CLAUDE.md were out of date; refreshed")
 
     Handler.speaker = Speaker(state)
+    # Started whatever the setting says: it reads it itself, every couple of
+    # seconds, so turning it on does not need the engine restarting.
+    MediaKey(Handler.speaker).start()
     if state.get("watch", True):
         Handler.watcher = TranscriptWatcher(Handler.speaker)
         Handler.watcher.start()

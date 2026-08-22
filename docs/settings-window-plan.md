@@ -36,7 +36,7 @@ The working tree already carries **finished, uncommitted** work from earlier the
   poll answer, the panel loads an engine if none is running and turns the voice on. See
   `open_up` / `turn_voice_on` in `panel.py` — the voice is turned on by *writing the
   config*, not posting, because the engine being started is not up yet to be posted to.
-- The two coloured `tk.Button` switches (engine, stop/play) copy their size off the themed
+- The two coloured `tk.Button` switches (engine, pause/play) copy their size off the themed
   skip button — `_match_switches`, called from `apply_theme`, and it **cannot** be called
   from `_build` (settling the layout mid-build delivers resize events to a half-built
   window; the comments explain).

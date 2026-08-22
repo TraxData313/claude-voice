@@ -655,3 +655,21 @@ running the old code with nothing on its face saying so.
   the line gives — exactly the “below about 396 it truncates” that is written beside
   `MIN_WIDE`. That it is the same number is the point: the tick box that left the row was
   about as wide as the button that came back.
+
+## What the master switch became
+
+Everything above about the **master switch** — the second button in the row, green while
+working and red while not — describes it as it was: a voice on/off, where off dropped the
+lines that arrived while it was off.
+
+In 1.8.0 it became a **pause**, and the reasoning above survives the change intact. It
+still says what pressing it *does* (two bars while she talks, a triangle while she is
+held) and its colour still says how things *are*. It is still the control reached for
+most, which is why it is still second. What changed is only what it costs to press:
+nothing is turned off and nothing is thrown away, the queue goes on filling, and the
+sentence in the air is cut where it got to rather than lost.
+
+The one thing the old design got right and had to keep saying out loud is that *quiet now*
+and *I never want to hear that* are two different wishes. They are two buttons now, side by
+side: pause holds, ⏭ skip all empties. Turning the voice off altogether stayed a setting,
+where a setting belongs.

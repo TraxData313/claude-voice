@@ -103,6 +103,50 @@ The pieces **double** in size — 2.5 seconds, then 5, then 10, up to 12 — bec
 has to buy the time to make the next. See *Things that cost real time to find* for what
 happens when they do not.
 
+### Pausing, which winsound cannot do
+
+The player is `winsound`, which plays a **file** from its beginning and has no notion of a
+position — so for a long time the panel had a stop button rather than a pause one, and
+said so in a comment. What makes a pause possible anyway is that every piece is already on
+disk as plain mono 16-bit PCM, and the player already knows when it started one:
+
+- **Between pieces it is free.** The player pulls from a queue, and pausing is not pulling.
+  Nothing is lost and nothing is written.
+- **Inside a piece it is a purge and a slice.** The cancel check runs every 50ms, so the
+  place is known to a twentieth of a second. The rest of the piece is copied to a new wav
+  — a seek and a copy, nothing decoded — and that is what plays on the way back.
+
+Pieces run up to twelve seconds, which is why the second half matters: pausing only at a
+seam would mean pressing the button and being talked at for another ten.
+
+A resume starts **0.2s before** where the pause landed, because a pause almost never falls
+on a word boundary and coming back on the exact sample comes back mid-syllable.
+
+Two things follow from pause being a hold rather than a stop. The **queue goes on filling**
+while it is held — the engine keeps its model, the watcher keeps queueing, and synthesis
+stops on its own after two pieces because the play queue is capped at two and blocks. And
+**"quiet now" is not "I never want to hear that"**: emptying the queue is ⏭ skip all,
+sitting next to the pause button, which is the honest place for it.
+
+### The play/pause key
+
+The key on a keyboard's media row, on a headphone cable, on the button on a pair of
+earbuds: all of them send `VK_MEDIA_PLAY_PAUSE`, and the engine answers it.
+
+`RegisterHotKey` takes a key from **every** program on the machine for as long as it is
+held, and play/pause is not ours to keep — it belongs to whatever is playing. So it is
+taken while she is speaking, holding a queue, or paused, and handed straight back the
+moment she is idle. Pressing it with nothing to say does what it always did, and nothing
+on this side needs to know what that was.
+
+Two things worth knowing. The register and the message loop must be the **same thread** —
+Windows delivers `WM_HOTKEY` to the thread that asked and to no other, so a hotkey
+registered by a thread that never reads its own queue is a key taken from the machine and
+answered by nobody. And a keyboard whose media keys are handled by **its own driver**
+never lets the key reach Windows at all; there is nothing on this side to be done about
+that, and the panel button is the same action either way. `/voice mediakey off` gives the
+key up for good.
+
 ### When the first word is played
 
 None of the above helps if the next piece is simply not finished when the last one ends.

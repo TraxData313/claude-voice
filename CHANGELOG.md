@@ -6,6 +6,36 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.8.0 — 2026-08-22
+
+**The square that stopped her is a pause now: it holds her mid-word and carries on from
+that word, and the play/pause key on your keyboard or your headphones works it too.**
+
+- **⏸ pause, where the ⏹ stop used to be.** It stops where you pressed it and starts again
+  there, rather than at the top of the line. `winsound` plays a file from its beginning and
+  cannot seek, which is why the button said stop for so long — but every piece is already
+  on disk as plain PCM, so the rest of one is a seek and a copy. The place is known to a
+  twentieth of a second, and the resume starts a fifth of a second early, because a pause
+  almost never lands on a word boundary. **[How it works →](docs/how-it-works.md)**
+- **Nothing is lost while it is held.** The engine keeps its model, the watcher goes on
+  queueing, and synthesis stops of its own accord after two pieces. So pausing to take a
+  call and coming back to press play means hearing what arrived while you were gone,
+  rather than finding it was thrown away.
+- **And if you would rather not hear all of it**, ⏭ skip all is the button beside it. That
+  is the honest split: *quiet now* and *I never want to hear that* are two different
+  wishes, and one button could only ever grant one of them.
+- **The play/pause key on your keyboard or your headphones** does the same thing — but
+  only while she has something to say. `RegisterHotKey` takes a key from every program on
+  the machine, and play/pause belongs to whatever is playing, so it is taken while she is
+  speaking, queueing or held, and given straight back when she is idle. Press it with
+  nothing to say and your music answers, exactly as before. `/voice mediakey off` gives it
+  up for good; a keyboard whose own driver eats the key never lets it through to anything.
+- **`/voice pause` and `/voice play`** do it from the terminal, and `status` says *held*.
+- **A pause is no longer timed as a gap.** The seam meter reads from the end of one piece
+  to the start of the next, and a piece held for five minutes ended five minutes after its
+  own arithmetic said — which it duly reported as a six-second stumble. It asks the player
+  when the sound actually ran out now.
+
 ## 1.7.1 — 2026-08-20
 
 **The button that looks for a newer version is back in the corner of the panel, so what
