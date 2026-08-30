@@ -1,21 +1,21 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
 
-  "version": "1.8.0",
-  "date": "2026-08-22",
+  "version": "1.8.1",
+  "date": "2026-08-30",
 
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "The square that stopped her is a pause now: it holds her mid-word and carries on from that word, and the play pause key on your keyboard or your headphones works it too.",
+  "headline": "Windows had been quietly deleting the speaking engine out of your Downloads folder after thirty days, and the installer was the one that put it there. It moves it somewhere safe now.",
 
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "The stop button in the panel is a pause button now. It holds her where she is, mid word if that is where you pressed it, and carries on from that same word rather than starting the line again.",
-    "Nothing is lost while it is held. The queue goes on filling and the engine keeps its model, so you can pause to take a call and hear what arrived while you were gone. If you would rather not, the skip all button beside it empties the queue.",
-    "The play pause key on your keyboard or your headphones works it as well, but only while she has something to say. The rest of the time the key is left to whatever you were listening to."
+    "The engine was being installed into your Downloads folder, and Windows empties that folder of anything untouched for thirty days. It did. The voice then failed to start, naming a path that had been right for weeks.",
+    "The installer put it there in the first place: it looked in Downloads before anywhere else and settled wherever it found a copy. It now moves that copy somewhere Windows will not sweep, and the second installer warns you instead of recording a path with a month to live.",
+    "Worth re-running setup for this one. If your engine is sitting in Downloads right now, that is what moves it out, and a plain update will not."
   ],
 
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
-  "needsSetup": false,
+  "needsSetup": true,
 
   "changelog": "https://github.com/TraxData313/claude-voice/blob/main/CHANGELOG.md"
 }

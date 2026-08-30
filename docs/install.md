@@ -125,6 +125,10 @@ The size of the talker is not a preference:
 - **1.7b** produces **2048-dimension** speaker embeddings — what the shipped voices are.
 - 0.6b produces 1024, and **will not work** with a voice made by the larger model.
 
+An *unpacked* Studio already sitting in `Downloads` is moved out rather than used where
+it stands: Windows Storage Sense empties that folder after 30 days and has taken one
+before now. A `.zip` or `.msi` may stay there — losing it costs a download, not the install.
+
 Studio lands in `%LOCALAPPDATA%\Programs\qwen-tts-studio`, the models in
 `~\.qwen-tts-studio\models`. You never have to open Studio's own window — it is welcome to
 be opened, it is a perfectly good GUI, but nothing here needs it.

@@ -75,11 +75,15 @@ Say "python        : $PythonExe" "Green"
 
 # --- Qwen-TTS Studio ------------------------------------------------------
 if (-not $StudioDir) {
+    # Downloads comes last on purpose. Storage Sense is on by default and
+    # deletes anything there left untouched for 30 days, so a path recorded
+    # from it works now and is gone in a month. Any real install beats it;
+    # if it is genuinely the only copy we still use it, but say so.
     $guesses = @(
-        "$env:USERPROFILE\Downloads\qwen-tts-studio",
         "$env:LOCALAPPDATA\Programs\qwen-tts-studio",
         "$env:ProgramFiles\qwen-tts-studio",
-        "C:\qwen-tts-studio"
+        "C:\qwen-tts-studio",
+        "$env:USERPROFILE\Downloads\qwen-tts-studio"
     )
     $StudioDir = $guesses | Where-Object { Test-Path (Join-Path $_ "runtime\bin\server\jvm.dll") } | Select-Object -First 1
 }
@@ -87,6 +91,10 @@ if (-not $StudioDir -or -not (Test-Path (Join-Path $StudioDir "runtime\bin\serve
     throw "Qwen-TTS Studio not found. Pass -StudioDir pointing at the folder containing app\ and runtime\."
 }
 Say "studio        : $StudioDir" "Green"
+if ($StudioDir.StartsWith("$env:USERPROFILE\Downloads\", [StringComparison]::OrdinalIgnoreCase)) {
+    Say "              ^ that is inside Downloads, which Windows Storage Sense empties" "Yellow"
+    Say "                after 30 days. Move it and re-run, or run setup.ps1 to move it." "Yellow"
+}
 
 $modelDir = Join-Path $env:USERPROFILE ".qwen-tts-studio\models"
 $talker = "qwen-talker-1.7b-base-Q8_0.gguf"

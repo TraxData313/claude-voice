@@ -58,6 +58,22 @@ function Test-Studio($dir) {
     return $dir -and (Test-Path (Join-Path $dir "runtime\bin\server\jvm.dll"))
 }
 
+# Move a Studio tree to where it belongs, contents first rather than the folder
+# itself. The destination is often already there and half full: the ImmersiveAI
+# mod for Bannerlord fetches this same engine and unpacks only its DLLs into
+# %LOCALAPPDATA%\Programs\qwen-tts-studio. Move-Item onto an existing directory
+# puts the source *inside* it, which yields qwen-tts-studio\qwen-tts-studio and
+# a Test-Studio that keeps saying no.
+function Move-StudioInto($src, $dst) {
+    New-Item -ItemType Directory -Force -Path $dst | Out-Null
+    Get-ChildItem -LiteralPath $src -Force | ForEach-Object {
+        $target = Join-Path $dst $_.Name
+        if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+        Move-Item -LiteralPath $_.FullName -Destination $target
+    }
+    Remove-Item -LiteralPath $src -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 # Invoke-WebRequest buffers the whole response in memory before writing a byte,
 # which is survivable for a jar and not for a 2 GB model. Stream it, and send a
 # Range header when a part-file is already on disk so an interrupted download
@@ -218,8 +234,22 @@ if (Test-Studio $StudioDir) {
     ) | Where-Object { Test-Studio $_ } | Select-Object -First 1
 
     if ($found) {
-        $StudioDir = $found
-        Say "studio        : found at $StudioDir" "Green"
+        # Downloads is where a browser drops a file, not where a program lives.
+        # Storage Sense deletes anything there left untouched for 30 days, and it
+        # is on by default -- it took an 831 MB Studio once, and the engine then
+        # failed with a folder-not-found that looks nothing like "Windows tidied
+        # up". Every other location is adopted where it stands; this one is moved.
+        if ($found.StartsWith("$env:USERPROFILE\Downloads\", [StringComparison]::OrdinalIgnoreCase)) {
+            if ($WhatIf) {
+                Say "would move    : $found -> $StudioDir" "Yellow"
+            } else {
+                Move-StudioInto $found $StudioDir
+                Say "studio        : moved out of Downloads -> $StudioDir" "Green"
+            }
+        } else {
+            $StudioDir = $found
+            Say "studio        : found at $StudioDir" "Green"
+        }
     } else {
         # A package already in Downloads beats a second 663 MB off the internet.
         # Someone who tried the .msi and was refused by Windows has one.
@@ -273,8 +303,7 @@ if (Test-Studio $StudioDir) {
                             Select-Object -First 1).FullName }
             if (-not $root) { throw "unpacked $($local.Name) but found no runtime\bin\server\jvm.dll under $staging" }
 
-            New-Item -ItemType Directory -Force -Path (Split-Path $StudioDir) | Out-Null
-            Move-Item $root $StudioDir
+            Move-StudioInto $root $StudioDir
             Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
             Say "studio        : $StudioDir" "Green"
         }

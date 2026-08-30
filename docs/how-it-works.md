@@ -375,3 +375,24 @@ installs into.
 **A BOM is not invisible.** `install.ps1` writes UTF-8 without one, because Claude Code
 stops reading `settings.json` the moment it finds a BOM there — and PowerShell's `>`
 redirect adds one by default.
+
+**Downloads is not a place to install anything.** Windows Storage Sense is on by default
+and deletes whatever has sat there untouched for 30 days. It took an unpacked 831 MB
+Studio with it, and the engine then failed to start with a folder-not-found naming a path
+that had been correct for weeks — which reads like a bug in this project, not like Windows
+tidying up. Both installers had listed `~\Downloads\qwen-tts-studio` *first* among the
+places to look and adopted it where it stood, so a folder that only ever landed there by
+accident became the recorded home. `setup.ps1` now moves such a copy to
+`%LOCALAPPDATA%\Programs`; `install.ps1` looks there last and says out loud what will
+happen if that is genuinely the only copy. A *package* left in `Downloads` is still read
+from there — losing a `.zip` costs one download, not the install.
+
+**The same engine can have another program depending on it.** The ImmersiveAI mod for
+Bannerlord fetches this identical Qwen-TTS build, checks `~\Downloads\qwen-tts-studio`
+before anywhere else, and shares `~\.qwen-tts-studio\models`. One Storage Sense sweep
+therefore broke a game and this project on the same afternoon, which makes each look like
+the cause of the other. Its repair button fetches a *headless* build — the DLLs and no
+`app\` or `runtime\` — into `%LOCALAPPDATA%\Programs\qwen-tts-studio`, enough for the game
+and not for us. So the destination is often already there and half full, and `Move-Item`
+onto an existing directory moves the source *inside* it. `Move-StudioInto` moves the
+contents instead, and leaves files it did not bring alone.

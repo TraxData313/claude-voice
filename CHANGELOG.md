@@ -6,6 +6,37 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.8.1 — 2026-08-30
+
+**Windows had been quietly deleting the speaking engine out of your `Downloads` folder
+after thirty days, and the installer was the one that put it there. It moves it somewhere
+safe now.**
+
+- **`Downloads` is a doormat, not a shelf.** Storage Sense is on by default and empties it
+  of anything untouched for thirty days. It took an unpacked 831 MB Studio, and the engine
+  then failed to start naming a path that had been correct for weeks — which reads like a
+  bug here rather than like Windows tidying up.
+- **The installer had chosen that folder.** Both of them listed `~\Downloads\qwen-tts-studio`
+  *first* among the places to look and adopted it where it stood, so a copy that only ever
+  landed there by accident became the recorded home. `setup.ps1` now moves such a copy to
+  `%LOCALAPPDATA%\Programs`; `install.ps1` looks there last and says out loud what will happen
+  if it is genuinely the only one. A `.zip` or `.msi` left in `Downloads` is still read from
+  there — losing a package costs one download, not the install.
+- **A destination that already exists is no longer nested into.** `Move-Item` onto an
+  existing directory puts the source *inside* it, and that directory is often already there
+  and half full: the ImmersiveAI mod for Bannerlord fetches this same engine, checks the same
+  `Downloads` folder first, and unpacks a headless build — the DLLs and no `app\` or
+  `runtime\` — into `%LOCALAPPDATA%\Programs\qwen-tts-studio`. One Storage Sense sweep breaks
+  a game and this on the same afternoon, and each then looks like the cause of the other.
+  Moving now merges the contents in and leaves files it did not bring alone.
+- **The fallback path pointed somewhere nothing installs to.** `config.json` is
+  machine-specific and not committed, so a lost one fell back to `C:\Program Files\qwen-tts-studio`
+  — a folder `setup.ps1` has never used and could not write to without rights it does not ask
+  for. It matches the installer now.
+
+**Worth re-running `setup.ps1` for this one.** If your Studio is in `Downloads` right now,
+that is what moves it out; a plain `git pull` will not. **[How it works →](docs/how-it-works.md)**
+
 ## 1.8.0 — 2026-08-22
 
 **The square that stopped her is a pause now: it holds her mid-word and carries on from

@@ -149,7 +149,10 @@ def auto_lead(expected, recent, floor):
 
 DEFAULTS = {
     # --- machine-specific, written by install.ps1 -------------------------
-    "studioDir": r"C:\Program Files\qwen-tts-studio",
+    # Where setup.ps1 puts it. Not Program Files, which needs rights nothing here
+    # asks for, and not Downloads, which Windows empties after 30 days. config.json
+    # is machine-specific and not committed, so this is what a lost one falls back to.
+    "studioDir": os.path.expandvars(r"%LOCALAPPDATA%\Programs\qwen-tts-studio"),
     "modelDir": os.path.expanduser(r"~\.qwen-tts-studio\models"),
     "talker": "qwen-talker-1.7b-base-Q8_0.gguf",   # d2048; the 0.6b model gives d1024
     # Voices shipped with this repo. Anything here is public.
