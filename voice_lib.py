@@ -226,6 +226,19 @@ DEFAULTS = {
     # Only a label boundary now: below this a message reads as a passing remark,
     # above it as a spoken answer. Both are read in full.
     "narrateMaxChars": 240,
+    # Say something when Claude Code stops and waits on you -- a permission
+    # prompt, a question left unanswered too long. Deliberately separate from
+    # 'narrate': narration is chatter about work in progress and turning it off
+    # is a taste, while these are the moments the session is halted and nothing
+    # more happens until somebody looks. Whoever has the chatter off wants this
+    # one more than ever, not less. Hook-only -- a notification never reaches a
+    # transcript, so the watcher cannot see it. See notification_speech.
+    "alerts": True,
+    # Speak a thinking block when it is the only thing a response said.
+    # Claude Code renders those on screen like any other line, and on Fable 5.1
+    # they *are* the narration -- so with this off, roughly half of what you can
+    # read goes unsaid. See thinking_speech for which ones qualify and why.
+    "speakThinking": True,
     # The ceiling on a message with no TL;DR. Roughly five minutes of speech.
     "fullMaxChars": 4000,
     # Follow the session transcripts directly instead of waiting to be called.
@@ -922,6 +935,86 @@ def speech_for(text, state):
     return spoken, kind
 
 
+# Claude Code writes the model's working-out into a thinking block, and the
+# client renders it on screen with everything else. On Fable 5.1 it is not
+# working-out at all: that model puts its between-tool narration there instead,
+# and never beside a text block -- across every transcript on this machine, not
+# one of its 354 responses carried both. So what the screen showed and what this
+# tool said had quietly drifted apart, and about half of the lines written were
+# never spoken. That is the bug this exists to close.
+#
+# Saying all of it is not the answer either. On Opus 5 the same block really is
+# the scratchpad: a median of 495 characters against Fable's 214, running to
+# 35,854 at the worst, in paragraphs, arguing with itself. Two tests separate
+# them, and both were measured over 7,800 real blocks rather than guessed:
+#
+#   *The response said nothing else.* Blocks are grouped by the API response
+#   they came from, not by transcript line. If a text block sits in the same
+#   response then that text is the line, and the reasoning behind it is not for
+#   saying. This alone excludes half of Opus 5's thinking and none of Fable
+#   5.1's, which never pairs the two.
+#
+#   *It reads as one spoken line.* A single paragraph, short, with no code in
+#   it, asking itself nothing, and free of the words somebody uses while still
+#   making their mind up.
+#
+# Together they recover 97% of Fable 5.1's narration and let through under a
+# quarter of Opus 5's thinking -- the quarter that already reads as narration.
+#
+# Ordering is what makes the first test cheap while tailing a file. Thinking
+# always precedes text within a response (3,094 of 3,094 measured) and every
+# tool call comes after both (10,361 of 10,361), so a reader going backwards
+# meets the text first, and a reader going forwards can hold the thinking until
+# the tool call proves nothing else was said.
+
+# 500 rather than a rounder 250: Fable 5.1's longest measured narration was 453
+# characters, and a ceiling that cuts real lines in half is worse than one that
+# occasionally lets a long one through.
+THINKING_MAX_CHARS = 500
+
+# The words a mind changes course with. Narration says what is about to happen;
+# deliberation is still deciding, and that belongs on the screen only.
+_DELIBERATING = re.compile(
+    r"""(?ix)
+    (?: ^ | [.!?]["')\]]? \s+ ) \s*
+    (?: wait | hmm+ | actually | ok | okay | alternatively | maybe | perhaps
+      | let \s+ me \s+ think | hold \s+ on | i \s+ wonder
+      | no[,.] | so[,.] | right[,.] )
+    \b""")
+
+
+def reads_as_narration(text):
+    """Whether a thinking block is a line that was meant to be heard.
+
+    Deliberately cheap and conservative. Every test here throws away something
+    nobody would read aloud anyway, so a block that fails is not lost -- it is
+    still on the screen, which is where working-out belongs.
+    """
+    text = (text or "").strip()
+    if not text or len(text) > THINKING_MAX_CHARS:
+        return False
+    if "\n" in text:                 # more than one paragraph: it is reasoning
+        return False
+    if "`" in text:                  # code, a path, an identifier
+        return False
+    if "?" in text:                  # a question it is putting to itself
+        return False
+    return not _DELIBERATING.search(text)
+
+
+def thinking_speech(text, state):
+    """What to say for a thinking block that stood alone, or nothing at all.
+
+    The caller owns the harder half of the decision -- proving the response
+    said nothing else. This only judges the words.
+    """
+    if not state.get("speakThinking", True):
+        return ""
+    if not reads_as_narration(text):
+        return ""
+    return clean_text(text, state.get("fullMaxChars", 4000))
+
+
 _RECOMMENDED = re.compile(r"\(\s*recommended\s*\)", re.I)
 _ORDINALS = ("First", "Second", "Third", "Fourth", "Fifth", "Sixth")
 _COUNTS = ("no", "one", "two", "three", "four", "five", "six")
@@ -969,6 +1062,72 @@ def question_speech(tool_input, max_chars=4000):
             parts.append(("Any of: " if q.get("multiSelect") else "The options are: ")
                          + _listed(labels) + ".")
     return clean_text(" ".join(parts), max_chars)
+
+
+# Claude Code's own wording, handed to the hook as `message`. Both of the ones
+# it sends often speak of her in the third person -- right on screen beside her
+# name, wrong in her own mouth -- so those two get answers of her own and
+# everything else is repeated as it came.
+_NEEDS_PERMISSION = re.compile(r"needs\s+your\s+permission", re.I)
+_WAITING_FOR_YOU = re.compile(r"waiting\s+for\s+your\s+input", re.I)
+
+
+def notification_speech(message, subject="", max_chars=240):
+    """What to say when Claude Code raises a notification.
+
+    These are the moments the session stops and waits: a tool asking to be
+    allowed, a turn gone quiet with a question in it. They are exactly the
+    moments somebody has looked away -- which is the whole point of a voice --
+    and nothing else here would ever say them, because a notification is not a
+    message and never reaches the transcript for the watcher to find.
+
+    One short sentence on purpose. It is an interruption, and its job is to say
+    that something wants an answer, not to explain what: the dialog is on
+    screen, where it can be read as slowly as it takes.
+    """
+    message = (message or "").strip()
+    if _NEEDS_PERMISSION.search(message):
+        return "I need your permission" + (" to use " + subject + "." if subject else ".")
+    if _WAITING_FOR_YOU.search(message):
+        return "I'm still waiting for you."
+    return clean_text(message, max_chars)
+
+
+NOTIFIED_PATH = os.path.join(LOG_DIR, "notified.json")
+
+
+def notification_due(speech, within=10.0):
+    """False if this exact announcement went out a moment ago.
+
+    Deliberately not already_spoken: repeating is normal here. Three permission
+    prompts in a row are three separate halts and each one is worth hearing, so
+    this forgets after a few seconds. What it does swallow is the double-fire
+    you get when the same hook is registered in a project's settings and in
+    yours -- two calls, same instant, one dialog.
+    """
+    import time
+
+    now = time.time()
+    try:
+        with open(NOTIFIED_PATH, encoding="utf-8") as fh:
+            recent = json.load(fh)
+    except (OSError, ValueError):
+        recent = {}
+    if not isinstance(recent, dict):
+        recent = {}
+    last = recent.get(speech)
+    if isinstance(last, (int, float)) and 0 <= now - last < within:
+        return False
+    recent = {k: v for k, v in recent.items()
+              if isinstance(v, (int, float)) and now - v < 3600}
+    recent[speech] = now
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        with open(NOTIFIED_PATH, "w", encoding="utf-8") as fh:
+            json.dump(recent, fh)
+    except OSError:
+        pass
+    return True
 
 
 CLAUDE_MD = os.path.expanduser(os.path.join("~", ".claude", "CLAUDE.md"))

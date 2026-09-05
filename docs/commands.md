@@ -1,6 +1,5 @@
-# Commands
-
-Everything below works two ways: `/voice status` inside Claude Code, or
+Wrote C:\Users\Trax\Documents\claude-voice\docs\commands.md
+` inside Claude Code, or
 `python voice_cli.py status` in a terminal. Mind the space in the slash
 command — it is `/voice on`, never `/voice_on`.
 
@@ -45,6 +44,8 @@ command — it is `/voice on`, never `/voice_on`.
 | `playback <mode>` | auto, instant, buffered or whole: how much speech is ready before the first word. |
 | `playback report` | What the traces say this machine needed. Reads local files, sends nothing. |
 | `narrate on\|off` | Whether the short lines said mid-work are spoken. |
+| `thinking on\|off` | Speak a thinking block when the response said nothing else. On by default. |
+| `alerts on\|off` | Say so when the session stops for you -- a permission prompt, a question left waiting. |
 | `watch on\|off` | Follow sessions directly. Off means relying on hooks alone. |
 | `headless on\|off` | Speak runs a program started -- `claude -p` and SDK callers. Off by default. |
 | `mediakey on\|off` | Let the play/pause key on a keyboard or headphones work the pause. On by default. |

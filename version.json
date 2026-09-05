@@ -1,21 +1,16 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
-
-  "version": "1.8.1",
-  "date": "2026-08-30",
-
+  "version": "1.10.0",
+  "date": "2026-09-05",
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "Windows had been quietly deleting the speaking engine out of your Downloads folder after thirty days, and the installer was the one that put it there. It moves it somewhere safe now.",
-
+  "headline": "About half of what she wrote on screen was never being said out loud, because some models put her narration somewhere she was not looking. She reads it from there now.",
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "The engine was being installed into your Downloads folder, and Windows empties that folder of anything untouched for thirty days. It did. The voice then failed to start, naming a path that had been right for weeks.",
-    "The installer put it there in the first place: it looked in Downloads before anywhere else and settled wherever it found a copy. It now moves that copy somewhere Windows will not sweep, and the second installer warns you instead of recording a path with a month to live.",
-    "Worth re-running setup for this one. If your engine is sitting in Downloads right now, that is what moves it out, and a plain update will not."
+    "Some models write their between-tool narration into a thinking block rather than a text block, and this only ever read text blocks. On Fable 5.1 that was about half of every line on screen, said to nobody.",
+    "Only the ones worth hearing. A thinking block is spoken when the response said nothing else and the line reads as one plain sentence -- so a model that genuinely thinks in paragraphs is left alone. Replayed over sixty real transcripts, Fable 5.1 gains 65% more spoken lines and Opus 5 moves by 1%. Turn it off with /voice thinking off.",
+    "The narrate switch works again. It had quietly stopped doing anything at all when Claude Code changed how it writes a turn to disk, and nothing anywhere said so."
   ],
-
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
-  "needsSetup": true,
-
+  "needsSetup": false,
   "changelog": "https://github.com/TraxData313/claude-voice/blob/main/CHANGELOG.md"
 }

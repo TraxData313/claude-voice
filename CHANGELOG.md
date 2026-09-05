@@ -6,6 +6,58 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.10.0 — 2026-09-05
+
+**About half of the lines written on screen were never being said out loud. Some models put
+their between-tool narration in a thinking block, and this only ever read text blocks — so
+the voice fell quiet in the middle of sessions that were plainly still working, which is
+the one failure indistinguishable from it being broken.**
+
+- **A thinking block is spoken when the response said nothing else.** On Fable 5.1 that is
+  simply where the narration goes. Measured across every transcript on the machine this was
+  found on: not one of its 354 responses carried a thinking block *and* a text block.
+  Whichever it reached for, it reached for only one, and this heard only the one kind.
+- **Not all of it, and the line between was measured rather than guessed.** On Opus 5 the
+  same block really is the working-out, running to 35,854 characters of a model arguing
+  with itself. Two tests separate them: the response has to have said nothing else, and the
+  line has to read as one plain sentence — one paragraph, no code, no question to itself,
+  none of the words somebody uses while still making their mind up. Replayed over sixty
+  real transcripts, that recovers 65% more spoken lines on Fable 5.1 and moves Opus 5 by 1%.
+- **`/voice thinking off`** if you would rather have none of it.
+- **`narrate off` works again**, and had quietly stopped. The watcher told a mid-work line
+  from a finished answer by looking for text sitting *beside* a tool call in the same
+  transcript entry. Claude Code now writes one block per entry, so the two never share one:
+  4 entries out of some 20,000 had both, and the test had been false for every message on
+  every recent model. Nothing failed and nothing logged — the switch simply did nothing. It
+  reads the response's own `stop_reason` now, which says it outright.
+
+## 1.9.0 — 2026-08-31
+
+**When Claude Code stops and waits on you, she now says so. A permission dialog is the one
+thing that never reaches a transcript, so it was also the one thing you were never told
+about.**
+
+- **She announces a prompt that is waiting on you.** "I need your permission to use Web
+  Fetch." A dialog can sit there for twenty minutes with the work stopped behind it, and
+  until now nothing said a word — which from the next room is indistinguishable from a
+  session still thinking. A turn gone quiet gets the same treatment: "I'm still waiting
+  for you."
+- **This is hook-only, and it has to be.** The watcher reads transcripts, and a
+  notification is not a message: nothing is written while a session waits. So `Notification`
+  joins `Stop` and `PreToolUse` in what the installer registers, and it needs Claude Code
+  restarted once to take effect — the one part of this that a pull alone cannot fix.
+- **The message never names the tool**, so the announcement reads it out of the transcript
+  instead. `Claude needs your permission` is the entire payload; the newest `tool_use`
+  block is already written by the time the dialog appears, and that is what turns a
+  startling noise into a useful one.
+- **These repeat on purpose.** Everything else here refuses to say the same words twice.
+  Three permission prompts in a row are three separate halts, and each one is worth
+  hearing, so this dedupes on time — a few seconds, enough to swallow the double-fire from
+  a hook registered in two settings files at once, and nothing more.
+- **`/voice alerts off`** if you would rather they stayed quiet. Separate from `narrate` on
+  purpose: narration is chatter about work in progress and turning it off is a taste, while
+  this is the session halted, which whoever silenced the chatter needs more, not less.
+
 ## 1.8.1 — 2026-08-30
 
 **Windows had been quietly deleting the speaking engine out of your `Downloads` folder

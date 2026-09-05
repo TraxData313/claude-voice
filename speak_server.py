@@ -1165,6 +1165,9 @@ class TranscriptWatcher(threading.Thread):
         # Sessions the panel has silenced. Kept in config too, so muting one and
         # restarting the engine does not un-mute it behind your back.
         self.muted = set(voice_lib.load_state().get("mutedSessions") or [])
+        # transcript -> a thinking line waiting to find out whether the response
+        # it came from went on to say anything else. See _flush_thinking.
+        self.held = {}
 
     def _load_offsets(self):
         try:
@@ -1279,6 +1282,7 @@ class TranscriptWatcher(threading.Thread):
                 continue
             for line in chunk.splitlines():
                 self._consider(line, state, path)
+        self._flush_stale(state)
         self._save_offsets()
 
     def _unattended(self, path, state):
@@ -1350,6 +1354,36 @@ class TranscriptWatcher(threading.Thread):
             return False
         return age > state.get("catchupSeconds", 300)
 
+    # How long a thinking line waits for proof that nothing else is coming.
+    # Almost always resolved in well under a second, by the tool call that
+    # follows it; this only covers the response that says one line and then
+    # ends the turn, where there is no tool call to wait for.
+    HOLD_SECONDS = 5.0
+
+    def _flush_thinking(self, path, state, why):
+        """Say a held thinking line: the response it came from said nothing else."""
+        held = self.held.pop(path, None)
+        if not held:
+            return
+        if held["mid_work"] and not state.get("narrate", True):
+            return log(f"watcher: narration off, not saying {held['speech'][:40]}...")
+        # No log line of its own: _say already writes one for everything it
+        # queues, and one per narration line here doubled the log for nothing.
+        self._say(held["speech"], "thinking", state, path)
+
+    def _flush_stale(self, state):
+        """Release anything still waiting past HOLD_SECONDS.
+
+        A response that says one thinking line and then ends the turn never
+        makes a tool call, so nothing would ever prove it had finished and the
+        line would sit here until the next response arrived -- which, at the end
+        of a session, is never.
+        """
+        now = time.time()
+        for path, held in list(self.held.items()):
+            if now - held["when"] >= self.HOLD_SECONDS:
+                self._flush_thinking(path, state, "nothing else arrived")
+
     # Not _handle: threading.Thread keeps a _handle attribute of its own on the
     # instance, and it shadows any method of that name.
     def _consider(self, line, state, path):
@@ -1376,22 +1410,66 @@ class TranscriptWatcher(threading.Thread):
         text = content if isinstance(content, str) else "\n".join(
             b.get("text", "") for b in blocks
             if isinstance(b, dict) and b.get("type") == "text")
+
+        # One API response reaches the transcript as several lines -- the
+        # thinking on one, the answer on the next, every tool call on its own --
+        # and all of them carry the same message id. That id is the only thing
+        # that can tell a held thinking line whether the response it belongs to
+        # went on to say anything else. See voice_lib.thinking_speech.
+        response = msg.get("id")
+        held = self.held.get(path)
+        if held and held["id"] != response:
+            self._flush_thinking(path, state, "a new response began")
+
         # 'narrate' covers the short lines said while work is going on, and the
-        # watcher is handed no events to tell those from a finished answer --
-        # but the shape of the message says it plainly. Text sitting alongside
-        # tool calls is a line said before doing something; text on its own ends
-        # the turn. That is the same cut the hook makes between PreToolUse and
-        # Stop, and without it 'narrate off' silenced only the hook and left the
-        # watcher to say the very same line -- a switch that looked broken
-        # because it did nothing, rather than because it did the wrong thing.
-        mid_work = any(isinstance(b, dict) and b.get("type") == "tool_use"
-                       for b in blocks)
+        # watcher is handed no events to tell those from a finished answer. It
+        # used to read that off the blocks -- text sitting beside a tool call is
+        # a line said before doing something, text alone ends the turn -- but
+        # Claude Code now writes one block per transcript line, so the two never
+        # share an entry any more and that test was false for every message on
+        # every recent model. The switch had quietly stopped doing anything at
+        # all: measured across this machine's transcripts, 4 entries out of some
+        # 20,000 had text beside a tool call. The response's own stop_reason
+        # says it outright instead -- 'tool_use' means it broke off to go and do
+        # something, 'end_turn' means it had finished -- and the old test stays
+        # underneath for a transcript too old to carry one.
+        stop = msg.get("stop_reason")
+        if stop:
+            mid_work = stop == "tool_use"
+        else:
+            mid_work = any(isinstance(b, dict) and b.get("type") == "tool_use"
+                           for b in blocks)
+
         if text.strip():
+            # The response spoke for itself, so whatever it was thinking on the
+            # way there is working-out, and stays on the screen where it belongs.
+            if held and held["id"] == response and self.held.pop(path, None):
+                log(f"watcher: said it out loud, dropping the thinking behind it")
             if mid_work and not state.get("narrate", True):
                 log(f"watcher: narration off, not saying {text.strip()[:40]}...")
             else:
                 speech, what = voice_lib.speech_for(text, state)
                 self._say(speech, what, state, path)
+        else:
+            # Held rather than said, because a text block may still be coming in
+            # this same response and would be the better line. Thinking always
+            # precedes text within a response, so waiting is the only way to
+            # find out.
+            for b in blocks:
+                if isinstance(b, dict) and b.get("type") == "thinking":
+                    speech = voice_lib.thinking_speech(b.get("thinking"), state)
+                    if speech:
+                        self.held[path] = {"id": response, "speech": speech,
+                                           "mid_work": mid_work, "when": time.time()}
+
+        # Every tool call in a response comes after everything that response
+        # said, without exception in 10,361 measured. So a tool call is the
+        # proof that nothing else is coming, and the held line goes out now --
+        # before the tool runs, which is the entire point of narration.
+        held = self.held.get(path)
+        if held and held["id"] == response and any(
+                isinstance(b, dict) and b.get("type") == "tool_use" for b in blocks):
+            self._flush_thinking(path, state, "it went on to a tool")
 
         # A question is spoken as its own utterance rather than as a tail on the
         # line before it, so that it matches what the PreToolUse hook says word

@@ -1,7 +1,7 @@
 <#
     Wires Claude Code up to speak.
 
-    Writes config.json (paths for this machine), installs the Stop hook into a
+    Writes config.json (paths for this machine), installs the speech hooks into a
     project's .claude\settings.json, drops the /voice slash command next to it,
     puts the note about writing to be heard into ~\.claude\CLAUDE.md, and puts a
     shortcut to the panel on the Desktop.
@@ -145,7 +145,7 @@ if (-not $WhatIf) {
     Write-Utf8 $configPath ($cfg | ConvertTo-Json -Depth 10)
 }
 
-# --- the Stop hook --------------------------------------------------------
+# --- the speech hooks ------------------------------------------------------
 $claudeDir = Join-Path $ProjectDir ".claude"
 $settingsPath = Join-Path $claudeDir "settings.json"
 $hookScript = Join-Path $repo "speak_hook.py"
@@ -170,11 +170,16 @@ if (-not (Has-Prop $settings "hooks")) {
 }
 
 # Stop catches the finished answer; PreToolUse catches the short lines said
-# mid-work, which Stop never sees because the turn has not ended.
-foreach ($event in @("Stop", "PreToolUse")) {
+# mid-work, which Stop never sees because the turn has not ended; Notification
+# catches the moments the session stops and waits for you, which reach no
+# transcript at all and so can be heard no other way.
+foreach ($event in @("Stop", "PreToolUse", "Notification")) {
     # PreToolUse entries are matched against the tool name and want a "matcher";
-    # Stop fires once per turn and takes none. An entry missing the field its
-    # event expects can invalidate the whole hooks block, silencing both.
+    # the other two take none -- and Notification wants none in particular,
+    # since its matcher is a regex over the notification kind and the "*" that
+    # means "everything" for a tool name is not a valid one. An entry missing
+    # the field its event expects can invalidate the whole hooks block,
+    # silencing all of them.
     if ($event -eq "PreToolUse") {
         $entry = [PSCustomObject]@{
             matcher = "*"
@@ -203,7 +208,7 @@ foreach ($event in @("Stop", "PreToolUse")) {
 }
 
 Say "hook command  : $command" "Green"
-Say "hook events   : Stop (answers), PreToolUse (narration)" "Green"
+Say "hook events   : Stop (answers), PreToolUse (narration), Notification (prompts waiting on you)" "Green"
 Say "settings      : $settingsPath"
 
 if (-not $WhatIf) {

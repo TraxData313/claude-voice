@@ -68,6 +68,47 @@ Details that matter:
   `entrypoint` that wrote it, and a headless run says `sdk-cli` where a window says `cli`
   or `claude-desktop`. `/voice headless on` if you would rather hear yours come home.
 
+## The one thing the watcher cannot see
+
+Everything above works off transcripts, which is why it is dependable. But a session that
+stops and waits for you writes **nothing** to the transcript while it waits. A permission
+dialog is not a message. Neither is a turn that has gone quiet with a question in it. So
+the moment you most want a voice — you looked away, and the work silently stopped fifteen
+minutes ago — is the one moment the watcher has nothing to read.
+
+Claude Code raises those as a `Notification` hook event, and the hook is the only way to
+hear them. `speak_hook.py` answers it, and `/voice alerts off` turns it off.
+
+What the event actually carries, since the shape is not obvious and was read out of the
+client itself:
+
+```json
+{ "hook_event_name": "Notification",
+  "message": "Claude needs your permission",
+  "title": "Claude Code",
+  "notification_type": "permission_prompt" }
+```
+
+`notification_type` is one of `permission_prompt`, `idle_prompt`, `auth_success`,
+`elicitation_dialog`, `elicitation_complete`, `elicitation_response`, `agent_needs_input`
+or `agent_completed`. Three things worth knowing:
+
+- **The message never says which tool.** `"Claude needs your permission"` is the whole of
+  it — the tool name lives in the dialog on screen and nowhere in the payload. The
+  announcement would be useless without it, so `pending_tool()` reads the newest
+  `tool_use` block out of the transcript instead, which is already written by the time the
+  dialog appears.
+- **A matcher on this event is a regex over `notification_type`, not a tool name.** The
+  `"*"` that means "everything" for `PreToolUse` is not a valid regex, so the entry the
+  installer writes carries no matcher at all.
+- **These dedupe on time, not on text.** Everything else here refuses to say the same
+  words twice; three permission prompts in a row are three separate halts and every one of
+  them is worth hearing. `notification_due()` only swallows the double-fire you get when
+  the same hook is registered in a project's settings and in your own.
+
+Hooks are read at session start, so this one needs Claude Code restarted after an install
+— unlike everything the watcher does.
+
 ## Choosing what to say
 
 `voice_lib.speech_for()` holds the whole contract, and it is one rule: **a message with a
@@ -78,6 +119,50 @@ fenced code, tables, links, URLs, headings, bullet markers — and paths in back
 dropped rather than spelled out. `snake_case` becomes words. Typography a terminal shows
 happily and a speech model cannot pronounce (`—`, `×`, `≥`, emoji, box drawing) is either
 translated or removed.
+
+### The line is not always in a text block
+
+A turn reaches the transcript as several lines, and the sentence you read on screen is not
+always in the one this used to look at. Claude Code writes the model's working-out into a
+`thinking` block and renders it like anything else — and on Fable 5.1 that block is not
+working-out at all. That model puts its between-tool narration there instead. Across every
+transcript on this machine, not one of its 354 responses carried a thinking block *and* a
+text block: whichever it reached for, it reached for only one. So about half of what was
+written on screen was never said, and from the listening side the voice had gone quiet in
+the middle of a session that was plainly still working — which is this project's oldest
+failure wearing a new coat.
+
+Saying all of it is not the fix either. On Opus 5 the same block really is the scratchpad:
+
+| | median | longest | one paragraph |
+|---|---|---|---|
+| Fable 5.1 | 214 chars | 453 | 100% |
+| Opus 5 | 495 chars | 35,854 | a minority |
+
+Two tests separate them, and both were measured over 7,800 real blocks rather than picked:
+
+- **The response said nothing else.** Blocks are grouped by the API response they came from
+  rather than by transcript line — one response, one `message.id`, several lines. If a text
+  block sits in the same response then that text *is* the line, and the reasoning behind it
+  stays on the screen where it belongs. This alone drops half of Opus 5's thinking, and none
+  of Fable 5.1's.
+- **It reads as one spoken line.** A single paragraph, under 500 characters, no code in it,
+  putting no question to itself, and free of the words somebody uses while still making
+  their mind up — *wait*, *actually*, *alternatively*, *hold on*.
+
+Replayed over sixty real transcripts, that recovers 65% more spoken lines on Fable 5.1 and
+moves Opus 5 by 1%. `/voice thinking off` if you would rather have none of it.
+
+Two facts about ordering are what make the first test cheap, and both are exact rather than
+merely usual: within a response the thinking always precedes the text (3,094 of 3,094), and
+every tool call comes after everything that response said (10,361 of 10,361). So the hook,
+which reads backwards, meets the text first and never reaches the thinking behind it — the
+rule costs it nothing at all. The watcher reads forwards and cannot see what is coming, so
+it **holds** a thinking line instead, and lets it go the moment a tool call proves nothing
+else was said. That is still before the tool runs, which is the entire point of narration.
+A response that says one line and then ends the turn has no tool call to wait for, so a
+five-second timer releases it.
+
 
 ## Speaking and playing
 
@@ -333,6 +418,19 @@ realtime*. So there was a gap about two seconds into every message, and it was b
 the machine being busy for a long time before anybody did the arithmetic. Doubling costs
 nothing — the first word still arrives on the first 2.5 seconds — and it removes the step
 entirely.
+
+**A switch can stop working without anybody touching it.** `narrate off` silenced the hook
+and left the watcher saying the very same lines. The watcher told narration from a finished
+answer by looking for text sitting *beside* a tool call in the same entry, which was true
+when it was written. Claude Code now writes one block per transcript line, so the two never
+share an entry any more: measured across this machine, 4 entries out of some 20,000 had
+both, and the test had been false for every message on every recent model. Nothing failed,
+nothing logged, and the switch had quietly done nothing for months. The response's own
+`stop_reason` says it outright instead — `tool_use` means it broke off to go and do
+something, `end_turn` means it had finished — and it is written on every entry that matters.
+*A test that reads the shape of somebody else's file format is a test with an expiry date
+on it, and no alarm attached.*
+
 
 **Hooks are not dependable, so this does not need them.** A hook runs only if the client
 chooses to run it, and nothing from outside can tell whether it did — which looks exactly

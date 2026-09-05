@@ -96,6 +96,8 @@ tool either way. Mind the space: `/voice on`, never `/voice_on`.
 | `pause` / `play` | hold her mid-word and carry on from there. Nothing is dropped |
 | `volume 40` | how loud, 0 to 100 — audible mid-sentence |
 | `playback auto` | breaking up on a busy machine? This works out the wait per message. Default |
+| `alerts off` | stop her saying so when a permission prompt is waiting on you. On by default |
+| `thinking off` | some models write their narration into a thinking block. This is her reading it. On by default |
 | `list` | every voice available |
 | `panel` | the window below |
 | `update` | is there a newer claude-voice? It only ever looks when you ask |
