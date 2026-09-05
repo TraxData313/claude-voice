@@ -528,7 +528,12 @@ _EMPH = re.compile(r"(\*\*|\*|__|_|~~)")
 # listed and not a letter/digit (emoji, box drawing, check marks) is dropped
 # rather than handed to the model as an unpronounceable token.
 _SPOKEN = {
-    "—": ",", "–": ",", "―": ",",
+    # A comma *and a space*. Without the space, a dash with no room around it --
+    # "steps one and two only—pairs" -- came out as "only,pairs", two words run
+    # into one, which the model reads as one unpronounceable token. A dash that
+    # did have spaces was always fine, so this went unnoticed: the tidy-up below
+    # strips the space *before* a comma but cannot invent the one after it.
+    "—": ", ", "–": ", ", "―": ", ",
     "‘": "'", "’": "'", "“": '"', "”": '"',
     "…": ".", " ": " ", "​": "",
     "×": " times ", "°": " degrees ", "±": " plus or minus ",
@@ -537,6 +542,14 @@ _SPOKEN = {
     "•": " ", "·": " ", "✓": " ", "✗": " ",
 }
 _KEEP_PUNCT = set(" \n\t.,;:!?'\"()-/%$&+=@#")
+
+# An en dash between two numbers is a range, and a comma there is not merely
+# untidy -- it changes the number. "10–20 items" read as "10,20 items" is a
+# different quantity in most of the world. Only the en dash, which is what a
+# range is actually written with: an em dash between digits is more often an
+# aside, and a plain hyphen is a date as often as it is a span.
+_RANGE = re.compile(r"(?<=\d)\s*–\s*(?=\d)")
+
 
 # Is there anything in this worth saying out loud? A letter or a digit in any
 # script, not only a Latin one -- asking for [A-Za-z0-9] threw away every line
@@ -572,7 +585,7 @@ def clean_text(md, max_chars=600):
     """Strip the markdown a terminal renders but an ear does not want."""
     if not md:
         return ""
-    t = _normalize(md)
+    t = _normalize(_RANGE.sub(" to ", md))
     t = _FENCE.sub(" ", t)
     t = _TABLE.sub(" ", t)
     t = _RULE.sub(" ", t)

@@ -6,6 +6,20 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.10.1 — 2026-09-05
+
+**A dash with no room around it was gluing two words together, and a dash between two
+numbers was changing the number.**
+
+- **`only—pairs` was spoken as `only,pairs`.** A dash became a comma with no space after
+  it, so the words ran into one token the model could not pronounce. A dash that *did* have
+  spaces around it was always fine, which is why this survived so long: the tidy-up strips
+  the space before a comma, but nothing could invent the one after it.
+- **`10–20 items` was spoken as `10,20 items`**, which in most of the world is a different
+  quantity altogether. An en dash between two digits now reads as *to*. Only the en dash,
+  which is what a range is actually written with — an em dash between numbers is more often
+  an aside, and a plain hyphen is as likely to be a date as a span.
+
 ## 1.10.0 — 2026-09-05
 
 **About half of the lines written on screen were never being said out loud. Some models put

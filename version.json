@@ -1,14 +1,13 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "date": "2026-09-05",
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "About half of what she wrote on screen was never being said out loud, because some models put her narration somewhere she was not looking. She reads it from there now.",
+  "headline": "A dash with no room around it was gluing two words into one, and a dash between two numbers was quietly changing the number. Both read properly now.",
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "Some models write their between-tool narration into a thinking block rather than a text block, and this only ever read text blocks. On Fable 5.1 that was about half of every line on screen, said to nobody.",
-    "Only the ones worth hearing. A thinking block is spoken when the response said nothing else and the line reads as one plain sentence -- so a model that genuinely thinks in paragraphs is left alone. Replayed over sixty real transcripts, Fable 5.1 gains 65% more spoken lines and Opus 5 moves by 1%. Turn it off with /voice thinking off.",
-    "The narrate switch works again. It had quietly stopped doing anything at all when Claude Code changed how it writes a turn to disk, and nothing anywhere said so."
+    "A dash became a comma with no space after it, so a phrase like 'steps one and two only-pairs' came out as one unpronounceable word. A dash with spaces around it was always fine, which is why nobody caught it.",
+    "An en dash between two numbers was becoming a comma, and 10 to 20 read as ten thousand and twenty is a different quantity. It reads as 'to' now."
   ],
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
   "needsSetup": false,
