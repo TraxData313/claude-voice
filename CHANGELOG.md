@@ -6,6 +6,22 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.11.1 — 2026-09-12
+
+**Codex tasks now keep speaking after they have been open for a while or resumed later.**
+
+- **A Codex rollout keeps the modification time from when the task began**, even while new
+  messages are appended to it. The first Codex watcher used that time as its definition of
+  "active," so it silently stopped following a task after fifteen minutes — exactly the
+  kind of long-running task where hearing progress matters most.
+- **File growth is the activity signal now.** The watcher takes a size baseline for an old
+  task, notices the next append, and starts at that boundary rather than replaying its
+  history. Once it speaks, the task stays in the panel's session list while it remains
+  active. This also catches a task resumed long after the day it began.
+- **The repair was checked against a live resumed Codex task.** Its progress line reached
+  Abby and appeared under the Codex session in the panel. Six automated transcript tests
+  pass, including a fixture whose timestamp is deliberately held in the past while it grows.
+
 ## 1.11.0 — 2026-09-12
 
 **Abby can now narrate Codex as well as Claude Code, using the same voice, controls, and

@@ -1163,6 +1163,8 @@ class TranscriptWatcher(threading.Thread):
         self.labels = {}        # transcript -> what to call that session aloud
         self.projects = {}      # transcript -> the folder it is being run in
         self.headless = {}      # transcript -> was it started with nobody there
+        self.codex_sizes = {}   # Codex preserves a task's original mtime
+        self.activity = {}      # transcript -> when its size last changed
         self.hushed = set()     # headless ones already said to be skipped
         # Sessions the panel has silenced. Kept in config too, so muting one and
         # restarting the engine does not un-mute it behind your back.
@@ -1199,7 +1201,8 @@ class TranscriptWatcher(threading.Thread):
             time.sleep(self.interval)
 
     def _transcripts(self):
-        cutoff = time.time() - self.FRESH_SECONDS
+        now = time.time()
+        cutoff = now - self.FRESH_SECONDS
         for proj in os.scandir(self.PROJECTS) if os.path.isdir(self.PROJECTS) else []:
             if not proj.is_dir():
                 continue
@@ -1211,11 +1214,24 @@ class TranscriptWatcher(threading.Thread):
                     yield f.path, st.st_size, st.st_mtime
         if voice_lib.load_state().get("watchCodex", False):
             # Rollouts live under year/month/day, including older tasks that
-            # have been resumed today. File freshness matters, not folder date.
+            # have been resumed today. Codex preserves a rollout's original
+            # modification time while appending, so size is the only reliable
+            # sign that an older task has become active again.
             import glob
             for path in glob.iglob(os.path.join(self.CODEX_SESSIONS, "*", "*", "*", "*.jsonl")):
                 st = os.stat(path)
-                if st.st_mtime > cutoff:
+                previous = self.codex_sizes.get(path)
+                self.codex_sizes[path] = st.st_size
+                seen = self.offsets.get(path)
+                changed = ((previous is not None and st.st_size != previous)
+                           or (seen is not None and st.st_size != seen))
+                active = now - self.activity.get(path, 0) < self.FRESH_SECONDS
+                if changed and seen is None:
+                    # The first pass merely took a baseline for this old task.
+                    # Start at that baseline now, so its first new words survive.
+                    self.offsets[path] = previous
+                    self.dirty = True
+                if st.st_mtime > cutoff or changed or active:
                     yield path, st.st_size, st.st_mtime
 
     def sessions(self, limit=10):
@@ -1274,6 +1290,7 @@ class TranscriptWatcher(threading.Thread):
             if size <= seen:
                 self.offsets[path] = min(seen, size)   # truncated or rewritten
                 continue
+            self.activity[path] = time.time()
             with open(path, "rb") as fh:
                 fh.seek(seen)
                 chunk = fh.read()

@@ -2,6 +2,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -77,6 +78,35 @@ class CodexVoiceTests(unittest.TestCase):
                 self.assertEqual(len(list(self.watcher._transcripts())), 1)
             self.watcher._ensure_label(str(path))
             self.assertTrue(self.watcher.headless[str(path)])
+
+    def test_resumed_old_codex_task_is_followed_by_size(self):
+        with tempfile.TemporaryDirectory() as directory:
+            watcher = self.watcher
+            watcher.PROJECTS = os.path.join(directory, "absent")
+            watcher.CODEX_SESSIONS = directory
+            watcher.OFFSETS = str(Path(directory) / "offsets.json")
+            watcher.offsets = {}
+            path = Path(directory) / "2026" / "01" / "01" / "rollout.jsonl"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"type": "session_meta", "payload": {
+                "cwd": r"C:\work\demo", "source": "vscode",
+                "thread_source": "user"}}) + "\n", encoding="utf-8")
+            old = time.time() - watcher.FRESH_SECONDS - 60
+            os.utime(path, (old, old))
+            state = {**self.state, "enabled": True, "watch": True, "watchCodex": True}
+            with patch.object(voice_lib, "load_state", return_value=state):
+                self.assertEqual(list(watcher._transcripts()), [])
+                baseline = path.stat().st_size
+                with path.open("ab") as output:
+                    output.write((self.message("This resumed task speaks.") + "\n").encode("utf-8"))
+                # Match Codex Desktop: appending does not make the rollout look new.
+                os.utime(path, (old, old))
+                found = list(watcher._transcripts())
+                self.assertEqual([row[0] for row in found], [str(path)])
+                self.assertEqual(watcher.offsets[str(path)], baseline)
+                watcher._sweep()
+                self.assertEqual(self.spoken, ["This resumed task speaks."])
+                self.assertEqual(len(watcher.sessions()), 1)
 
 
 if __name__ == "__main__":
