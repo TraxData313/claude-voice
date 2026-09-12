@@ -1145,6 +1145,8 @@ class TranscriptWatcher(threading.Thread):
     """
 
     PROJECTS = os.path.expanduser(os.path.join("~", ".claude", "projects"))
+    CODEX_SESSIONS = os.path.join(
+        os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "sessions")
     FRESH_SECONDS = 15 * 60      # ignore transcripts nobody has touched lately
     OFFSETS = os.path.join(voice_lib.LOG_DIR, "watch-offsets.json")
 
@@ -1188,9 +1190,6 @@ class TranscriptWatcher(threading.Thread):
             pass
 
     def run(self):
-        if not os.path.isdir(self.PROJECTS):
-            log(f"watcher: no transcripts at {self.PROJECTS}, not watching")
-            return
         log("watcher: following session transcripts")
         while True:
             try:
@@ -1201,7 +1200,7 @@ class TranscriptWatcher(threading.Thread):
 
     def _transcripts(self):
         cutoff = time.time() - self.FRESH_SECONDS
-        for proj in os.scandir(self.PROJECTS):
+        for proj in os.scandir(self.PROJECTS) if os.path.isdir(self.PROJECTS) else []:
             if not proj.is_dir():
                 continue
             for f in os.scandir(proj.path):
@@ -1210,6 +1209,14 @@ class TranscriptWatcher(threading.Thread):
                 st = f.stat()
                 if st.st_mtime > cutoff:
                     yield f.path, st.st_size, st.st_mtime
+        if voice_lib.load_state().get("watchCodex", False):
+            # Rollouts live under year/month/day, including older tasks that
+            # have been resumed today. File freshness matters, not folder date.
+            import glob
+            for path in glob.iglob(os.path.join(self.CODEX_SESSIONS, "*", "*", "*", "*.jsonl")):
+                st = os.stat(path)
+                if st.st_mtime > cutoff:
+                    yield path, st.st_size, st.st_mtime
 
     def sessions(self, limit=10):
         """Who is talking at the moment, newest first, and who is muted.
@@ -1218,8 +1225,6 @@ class TranscriptWatcher(threading.Thread):
         cached by the sweep; a session first seen here is read once and then
         remembered like any other.
         """
-        if not os.path.isdir(self.PROJECTS):
-            return []
         try:
             rows = sorted(self._transcripts(), key=lambda r: r[2], reverse=True)
         except OSError:
@@ -1269,10 +1274,13 @@ class TranscriptWatcher(threading.Thread):
             if size <= seen:
                 self.offsets[path] = min(seen, size)   # truncated or rewritten
                 continue
-            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            with open(path, "rb") as fh:
                 fh.seek(seen)
                 chunk = fh.read()
-                self.offsets[path] = fh.tell()
+                # A writer may be midway through a JSON record or UTF-8
+                # character. Leave that suffix for the next sweep.
+                complete = chunk.rfind(b"\n") + 1
+                self.offsets[path] = seen + complete
                 self.dirty = True
             # Config is re-read every sweep so 'voice off' takes effect at once.
             if not state.get("enabled") or not state.get("watch", True):
@@ -1280,7 +1288,7 @@ class TranscriptWatcher(threading.Thread):
             self._ensure_label(path)
             if self._unattended(path, state):
                 continue
-            for line in chunk.splitlines():
+            for line in chunk[:complete].decode("utf-8", errors="replace").splitlines():
                 self._consider(line, state, path)
         self._flush_stale(state)
         self._save_offsets()
@@ -1322,6 +1330,16 @@ class TranscriptWatcher(threading.Thread):
                         continue
                     cwd = cwd or e.get("cwd")
                     entrypoint = entrypoint or e.get("entrypoint")
+                    if e.get("type") == "session_meta":
+                        meta = e.get("payload") or {}
+                        cwd = cwd or meta.get("cwd")
+                        source = meta.get("source")
+                        # Background agents should not compete with the task
+                        # the user is actually talking to.
+                        if (isinstance(source, dict) or source == "exec"
+                                or meta.get("thread_source") not in (None, "user")):
+                            entrypoint = "codex-background"
+                        ai = "Codex " + (os.path.basename(cwd) if cwd else "task")
                     if e.get("type") == "custom-title":
                         custom = e.get("customTitle") or custom
                     elif e.get("type") == "ai-title":
@@ -1333,7 +1351,7 @@ class TranscriptWatcher(threading.Thread):
         # nothing about which one is talking.
         # Decided here because this is the one place the whole file is read,
         # and the answer never changes for a given session.
-        self.headless[path] = entrypoint in HEADLESS_ENTRYPOINTS
+        self.headless[path] = entrypoint in HEADLESS_ENTRYPOINTS or entrypoint == "codex-background"
         self.projects[path] = os.path.basename(cwd) if cwd else None
         label = custom or ai or self.projects[path]
         self.labels[path] = _tidy_label(label)
@@ -1394,6 +1412,23 @@ class TranscriptWatcher(threading.Thread):
             entry = json.loads(line)
         except ValueError:
             return                                  # a half-written final line
+        if entry.get("type") == "response_item":
+            # Codex also records event notifications for the same message.
+            # Only completed response items carry the text we want to read.
+            msg = entry.get("payload") or {}
+            if (msg.get("type") != "message" or msg.get("role") != "assistant"
+                    or msg.get("phase") not in (None, "commentary", "final_answer")
+                    or msg.get("channel") not in (None, "commentary", "final")
+                    or msg.get("recipient") not in (None, "all")
+                    or self._too_old(entry, state)):
+                return
+            if msg.get("phase") == "commentary" and not state.get("narrate", True):
+                return
+            text = "\n".join(b.get("text", "") for b in msg.get("content", [])
+                             if isinstance(b, dict) and b.get("type") == "output_text")
+            speech, what = voice_lib.speech_for(text, state)
+            self._say(speech, what, state, path)
+            return
         # A session can be renamed mid-flight; keep up with it.
         if entry.get("type") in ("custom-title", "ai-title"):
             new = _tidy_label(entry.get("customTitle") or entry.get("aiTitle"))

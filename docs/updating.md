@@ -199,7 +199,7 @@ It is deliberately timid, because the alternative is losing someone's work:
 
 ## Releasing one (for whoever maintains this)
 
-A release is two files and one commit:
+A release is four files, one commit, and one annotated tag:
 
 1. **`version.json`** — bump `version`, set `date`, write a `headline` that will be *read
    aloud*, and two or three `notes`. Set `needsSetup` to `true` if the release touches
@@ -207,9 +207,13 @@ A release is two files and one commit:
    itself back after a pull, so a release that only changes the wording needs no installer.
 2. **`CHANGELOG.md`** — a new `## <version> — <date>` section at the top. `--apply` prints
    this section to whoever just took the update, so write it for them rather than for git.
+3. **`.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`** — set both plugin
+   versions to the same number.
+4. **Tag the release commit as `v<version>`** after the checks pass, then push the branch
+   and tag together.
 
 Versions are plain numbers compared piece by piece (`1.10.0` beats `1.9.9`). A suffix like
 `-beta` is ignored, so do not rely on one to mean anything.
 
-There are no tags and no GitHub Releases in this scheme, on purpose: one file that the tool
-itself reads is one thing to keep true, and a tag nobody parses is another thing to forget.
+There is no separate GitHub Release in this scheme. The annotated tag is the plugin release
+marker, and `version.json` remains what the update checker reads.

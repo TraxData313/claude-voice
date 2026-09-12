@@ -11,6 +11,8 @@
 
   "_watch": "Follow session transcripts directly rather than waiting for Claude Code to call the hooks. Works in any client, no restart. Turn off to rely on hooks alone.",
   "watch": true,
+  "_watchCodex": "Also narrate local Codex task transcripts with the same TL;DR rule and panel controls. Restart the engine after updating the code.",
+  "watchCodex": false,
   "narrate": true,
   "narrateMaxChars": 240,
 

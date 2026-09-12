@@ -6,6 +6,24 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.11.0 — 2026-09-12
+
+**Abby can now narrate Codex as well as Claude Code, using the same voice, controls, and
+short spoken summaries.**
+
+- **The watcher understands local Codex task transcripts.** It says the short progress
+  lines while Codex works; when a finished answer has a `## TL;DR`, it says that section
+  alone. A task appears in the existing panel and uses the same mute, pause, queue, history,
+  volume, and voice controls as a Claude Code session.
+- **Only words intended for the user reach the speaker.** Private reasoning, tool calls and
+  their output, duplicate event records, and background-agent tasks stay quiet. A partly
+  written transcript record is left untouched until the next pass, so a non-ASCII character
+  arriving in two writes cannot corrupt the line or make it disappear.
+- **Codex support is opt-in.** Set `watchCodex` in `config.json`, restart the engine, and put
+  the short Abby preference block described in `docs/codex.md` into the global Codex
+  instructions. New tasks then know her name, keep her personality light, and write the
+  spoken summary that makes a long technical answer pleasant to listen to.
+
 ## 1.10.1 — 2026-09-05
 
 **A dash with no room around it was gluing two words together, and a dash between two

@@ -244,6 +244,9 @@ DEFAULTS = {
     # Follow the session transcripts directly instead of waiting to be called.
     # Hooks need the client to run them; this needs nothing but the files.
     "watch": True,
+    # Codex writes a different local transcript format under ~/.codex. Opt in:
+    # existing Claude-only installations must not suddenly hear another app.
+    "watchCodex": False,
     # Speak the runs nobody is sitting in front of. A headless run -- `claude
     # -p`, an SDK call, an errand one of your own programs sends off -- writes
     # a transcript like every other session, and the watcher needs no hook to

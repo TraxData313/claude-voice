@@ -1,13 +1,14 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
-  "version": "1.10.1",
-  "date": "2026-09-05",
+  "version": "1.11.0",
+  "date": "2026-09-12",
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "A dash with no room around it was gluing two words into one, and a dash between two numbers was quietly changing the number. Both read properly now.",
+  "headline": "Abby can now narrate Codex as well as Claude Code, using the same voice, controls, and short spoken summaries.",
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "A dash became a comma with no space after it, so a phrase like 'steps one and two only-pairs' came out as one unpronounceable word. A dash with spaces around it was always fine, which is why nobody caught it.",
-    "An en dash between two numbers was becoming a comma, and 10 to 20 read as ten thousand and twenty is a different quantity. It reads as 'to' now."
+    "The transcript watcher can follow local Codex tasks. Progress lines are spoken while Codex works, and a long answer speaks only its short summary.",
+    "Codex reasoning, tool output, duplicate event records, and background agents stay quiet. Codex tasks also appear in the existing panel with its mute, pause, and volume controls.",
+    "Codex narration is opt-in. Turn it on in the config and save the included Abby writing preferences as global Codex instructions."
   ],
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
   "needsSetup": false,
