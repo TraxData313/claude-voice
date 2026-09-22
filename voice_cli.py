@@ -55,7 +55,14 @@ def cmd_status(state, _args):
 
     if health and health.get("paused"):
         engine += ", held"
+    which = voice_lib.engine_of(state)
+    loaded = (health or {}).get("engineLoaded")
+    if loaded and loaded != which:
+        # Worth a word only while the two disagree, which lasts until the next
+        # thing is said. The swap is lazy on purpose -- see build_engine.
+        which += f"  (still {loaded}; swaps on the next thing said)"
     print(f"  voice output : {'ON' if state['enabled'] else 'off'}")
+    print(f"  synthesiser  : {which}")
     print(f"  voice        : {_voice_label(state)}")
     print(f"  source       : {state['source']}")
     print(f"  volume       : {_volume_percent(state)}%")
@@ -68,8 +75,12 @@ def cmd_status(state, _args):
     else:
         how = "off -- relying on Claude Code hooks instead"
     print(f"  watching     : {how}")
-    print(f"  voices from  : {len(voice_lib.catalog(state))} in "
-          f"{len(voice_lib.voice_roots(state))} folder(s)")
+    if voice_lib.engine_of(state) == "pocket":
+        print(f"  voices from  : {len(voice_lib.catalog(state))} built into "
+              f"pocket-tts ({voice_lib.engine_language(state)})")
+    else:
+        print(f"  voices from  : {len(voice_lib.catalog(state))} in "
+              f"{len(voice_lib.voice_roots(state))} folder(s)")
     # Reads the last look off disk; it never checks from here. Quote this
     # version when reporting a bug -- until now there was nothing to quote.
     import update_check
@@ -167,6 +178,29 @@ def cmd_set(state, args):
     if announced:
         print("  New sessions will know they are speaking as "
               f"{voice['name']} without being asked.")
+
+
+def cmd_engine(state, args):
+    """Switch between the two roads to sound.
+
+    Printed rather than silent, because the two do not have a voice in common:
+    changing engine changes who is speaking, and being told which name you
+    landed on saves a trip to 'list' to find out.
+    """
+    if not args:
+        here = voice_lib.engine_of(state)
+        print(f"Engine: {here}")
+        for name in voice_lib.ENGINES:
+            print(f"  {'*' if name == here else ' '} {name}")
+        raise SystemExit(0)
+    engine, voice = voice_lib.set_engine(args[0], state)
+    state["engine"] = engine
+    print(f"Engine set to {engine}"
+          + (f", speaking as {voice['name']}" if voice else ""))
+    if engine == "pocket":
+        print("  It runs on the CPU and needs no Studio, and it cannot read")
+        print("  Cyrillic at all -- a Bulgarian line is skipped and said so.")
+    print("  It loads on the next thing spoken, so the first one is slower.")
 
 
 def cmd_say(state, args):
@@ -677,6 +711,7 @@ HELP = [
     ("Choosing a voice", [
         ("list", "[filter]", "Every voice available. Filter by name or culture."),
         ("set", "<voice>", "Switch voice. Any unambiguous substring: 'set ab' finds Abby."),
+        ("engine", "[qwen|pocket]", "Which synthesiser speaks. No argument lists them."),
         ("clone", "<file.wav> --name X", "Make a new voice from a 20-40s clip of one person."),
     ]),
     ("Hearing something again", [
@@ -877,7 +912,7 @@ def cmd_alerts(state, args):
 COMMANDS = {
     "on": cmd_on, "off": cmd_off, "toggle": cmd_toggle, "status": cmd_status,
     "panel": cmd_panel, "window": cmd_panel,
-    "list": cmd_list, "set": cmd_set, "say": cmd_say,
+    "list": cmd_list, "set": cmd_set, "engine": cmd_engine, "say": cmd_say,
     "stop": cmd_stop, "break": cmd_stop, "shush": cmd_stop,
     "pause": cmd_pause, "hold": cmd_pause, "wait": cmd_pause,
     "play": cmd_resume, "resume": cmd_resume, "carry-on": cmd_resume,

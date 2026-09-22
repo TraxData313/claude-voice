@@ -183,6 +183,16 @@ VOLUME_WIDE = 90
 MAX_SESSIONS = 5
 # The two voices the repo ships. Clicking the portrait swaps between them.
 SHIPPED = ("abby", "max")
+# The two roads to sound, as the dropdown says them. Short on purpose: the
+# tooltip has room to explain, a combobox does not.
+ENGINE_LABELS = {"qwen": "Qwen — GPU", "pocket": "Pocket TTS — CPU"}
+# What each engine costs and gives, for the tooltip. The point of putting it
+# here is that somebody deciding between them is deciding about exactly these
+# two things, and the numbers are measured rather than claimed.
+ENGINE_NOTES = {
+    "qwen": "the original: needs Studio and a GPU\nspeaks Cyrillic, and the voices are cloned here",
+    "pocket": "small, runs on the CPU, no Studio needed\nfaster to the first word; no Cyrillic at all",
+}
 # What a line you typed yourself is filed under. Every other line in the queue
 # came from a folder Claude was working in, and the column says which; this one
 # came from the box in this window, and an empty cell would not say that.
@@ -560,6 +570,20 @@ def voice_labels(voices):
 
     Two voices can share a display name across cultures, so a repeated name
     carries its id; a unique one does not need to.
+
+    Each carries (f) or (m), and how it reads where that is known. With two
+    voices you learn which is which once and never look again; with twenty-one
+    of them named Azelma, Eponine, Javert and Marius, the name is not the
+    answer -- and the portrait only tells you after you have already picked. So
+    it goes in the list, which is where the choice is actually made.
+
+    The name is not even a reliable hint: `alba` is a man. That is the whole
+    argument for printing this rather than leaving it to be guessed.
+
+    Style matters as much as sex here and is less obvious. This tool reads
+    summaries out loud, and somebody who narrates and somebody who talks are
+    genuinely different to listen to for that. Where it is not known, nothing
+    is printed -- an empty bracket would be a claim.
     """
     times = {}
     for v in voices:
@@ -567,6 +591,17 @@ def voice_labels(voices):
     out = {}
     for v in voices:
         label = v["name"] if times[v["name"]] == 1 else f"{v['name']} ({v['id']})"
+        # Language first where there is one, because it is the thing that makes
+        # a voice different in kind rather than in degree: Estelle needs her own
+        # model loaded, and reads English with a French accent.
+        bits = [v["tag"]] if v.get("tag") else []
+        mark = (v.get("sex") or "").lower()[:1]
+        if mark in ("f", "m"):
+            bits.append(mark)
+        if v.get("style"):
+            bits.append(v["style"])
+        if bits:
+            label += f" ({', '.join(bits)})"
         out[label] = v["id"]
     return out
 
@@ -579,6 +614,8 @@ class Panel:
         self.stopping = threading.Event()
         self.voice_ids = {}          # what the dropdown shows -> voice id
         self.voice_names = {}        # voice id -> its display name
+        self.voice_sexes = {}        # voice id -> female/male, for the stand-in face
+        self.engine = None           # which engine the config asks for
         self.session_vars = {}       # transcript path -> its checkbox
         self.drawn = {}              # last drawn content, to skip pointless redraws
         self.pending = {}            # clicked, not yet confirmed by a poll
@@ -714,9 +751,24 @@ class Panel:
         # already click to change voice, so it is where the control belongs.
         # The size box beside it is the size of the picture above them both,
         # which is not something a box on its own in a corner ever said.
+        # Which engine, above which voice, because that is the order the two
+        # questions come in: the engine decides what the voice list contains,
+        # and picking a voice the other engine cannot speak in is not a thing
+        # the window should let you do.
+        whose_engine = ttk.Frame(who)
+        whose_engine.pack(pady=(3, 0))
+        self.engine_box = ttk.Combobox(whose_engine, state="readonly", width=24,
+                                       font=FONT_SMALL)
+        self.engine_box.pack(side="left")
+        self.engine_box.bind("<<ComboboxSelected>>", self.pick_engine)
+        self.tips["engine"] = Tip(self.engine_box, self._engine_says, self.dark.get)
         picks = ttk.Frame(who)
         picks.pack(pady=(3, 0))
-        self.voice_box = ttk.Combobox(picks, state="readonly", width=12, font=FONT_SMALL)
+        # Wider than it was. The dropdown list is only as wide as the box, so a
+        # narrow one cuts "Peter Yearsley (m)" off in the list as well as in the
+        # entry -- and the button row is what sets this window's width anyway,
+        # so the space costs nothing.
+        self.voice_box = ttk.Combobox(picks, state="readonly", width=24, font=FONT_SMALL)
         self.voice_box.pack(side="left")
         self.voice_box.bind("<<ComboboxSelected>>", self.pick_voice)
         # Not read-only: pick one of the sizes or type your own.
@@ -1062,6 +1114,16 @@ class Panel:
     def _face_says(self):
         who = self.voice_names.get(self.drawn.get("voice")) or "this voice"
         return f"click to hear {who}\nright-click swaps voice"
+
+    def _engine_says(self):
+        note = ENGINE_NOTES.get(self.engine, "")
+        loaded = self.drawn.get("engineLoaded")
+        # Only worth saying while the two disagree, which is until the next
+        # thing is spoken. Said always, it would read as a fault.
+        if loaded and self.engine and loaded != self.engine:
+            note += f"\n\nstill loaded: {ENGINE_LABELS.get(loaded, loaded)}"
+            note += "\nthe swap happens on the next thing said"
+        return note
 
     def _switch(self, parent, key, command):
         """A button that can actually be green.
@@ -1644,6 +1706,9 @@ class Panel:
         self.drawn["engine_loading"] = False
         self.paint_engine(True)
 
+        # Engine first of the three: it decides what the catalogue contains,
+        # and stand_in reads it to choose which portrait a voice borrows.
+        self.render_engine(st)
         # Before the portrait: it puts the voice's name under it, and that
         # comes from the catalogue this reads.
         self.render_voices(st)
@@ -1736,14 +1801,40 @@ class Panel:
         self.paint_engine(False)
         self.status.configure(text="engine: down")
 
+    def stand_in(self, voice_id):
+        """Which portrait to draw for a voice, when it has none of its own.
+
+        There are two pictures in this repo and twenty-one voices on the other
+        engine, so Pocket's speakers borrow the shipped face of their own sex:
+        Abby for a female voice, Max for a male one. It is a stand-in and it is
+        meant to read as one -- the dropdown right underneath says who is
+        actually speaking, and the picture only has to answer "roughly who am I
+        listening to" from across the room.
+
+        Only on that engine. A voice you cloned yourself keeps its coloured
+        initial, because a local voice with no picture is one you could give a
+        picture to, and quietly showing Abby instead would hide that.
+        """
+        if self.engine != "pocket" or self.icons.stored(voice_id):
+            return voice_id
+        sex = (self.voice_sexes.get(voice_id) or "").lower()
+        if sex.startswith("f"):
+            return SHIPPED[0]
+        if sex.startswith("m"):
+            return SHIPPED[1]
+        return voice_id
+
     def draw_face(self, voice_id):
         """The portrait, or a coloured initial for a voice with no picture.
         The name is not drawn here: the dropdown underneath says it."""
-        if self.drawn.get("face") == voice_id:
+        art = self.stand_in(voice_id)
+        # Both, because the same voice can change picture without changing
+        # name: switching engine moves a female voice onto Abby's portrait.
+        if self.drawn.get("face") == (voice_id, art):
             return
-        self.drawn["face"] = voice_id
+        self.drawn["face"] = (voice_id, art)
         self.face.delete("all")
-        picture, size = self.icons.at(voice_id, self.face_size)
+        picture, size = self.icons.at(art, self.face_size)
         # The canvas takes the size actually drawn, so nothing is cropped and
         # nothing sits in a box of empty space.
         self.face.configure(width=size, height=size)
@@ -1886,9 +1977,25 @@ class Panel:
         self.act("/volume", {"level": self.drawn.get("volume", 100) / 100.0})
 
     def flip_voice(self, _event=None):
-        """Click the portrait to swap between the two shipped voices."""
+        """Right-click the portrait to swap to a voice of the other sex.
+
+        On the shipped engine that is Abby and Max, which is what this has
+        always done. It is written as "the other sex" rather than as those two
+        names so that it still means something on an engine that has twenty-one
+        voices and neither of them among them.
+        """
         current = (self.drawn.get("voice") or "").lower()
-        want = SHIPPED[1] if current == SHIPPED[0] else SHIPPED[0]
+        here = (self.voice_sexes.get(current) or "").lower()
+        wanted = "m" if here.startswith("f") else "f"
+        others = [vid for vid in self.voice_ids.values()
+                  if (self.voice_sexes.get(vid) or "").lower().startswith(wanted)]
+        if not others:
+            return
+        # The shipped pair first, so this stays exactly abby-max where both are
+        # there, and falls to whoever is first in the catalogue where they are not.
+        want = next((v for v in others if v in SHIPPED), others[0])
+        if want == current:
+            return
         self.hold("voice")
         self.drawn["voice"] = want
         self.draw_face(want)                      # answer the click at once
@@ -1988,13 +2095,57 @@ class Panel:
         rather than who would.
         """
         state = voice_lib.load_state()
+        engine = voice_lib.engine_of(state)
         try:
             voices = [{"id": v["id"], "name": v["name"], "culture": v["culture"],
-                       "sex": v["sex"]} for v in voice_lib.catalog(state)]
-        except OSError:
+                       "sex": v["sex"], "style": v.get("style") or "",
+                       "tag": v.get("tag") or ""}
+                      for v in voice_lib.catalog(state, engine)]
+        except (OSError, ImportError, LookupError):
             voices = []            # no voices folder; the dropdown stays empty
+        import pocket_engine
+
+        self.render_engine({"engine": engine, "engines": list(voice_lib.ENGINES),
+                            "pocketReady": pocket_engine.available()})
         self.render_voices({"voices": voices, "voice": state.get("voice")})
         self.draw_face(state.get("voice"))
+
+    def render_engine(self, st):
+        """Which engine the config asks for, and which ones are on offer.
+
+        Pocket TTS is only listed when it is installed. A dropdown entry that
+        answers "pip install pocket-tts" when you pick it is a worse way to say
+        that than not offering it, because the choice looks available right up
+        until it fails.
+        """
+        offer = [e for e in (st.get("engines") or list(ENGINE_LABELS))
+                 if e != "pocket" or st.get("pocketReady", True)]
+        if offer != self.drawn.get("tts-engines"):
+            self.drawn["tts-engines"] = offer
+            self.engine_box.configure(
+                values=[ENGINE_LABELS.get(e, e) for e in offer])
+        self.drawn["engineLoaded"] = st.get("engineLoaded")
+        current = st.get("engine")
+        if current != self.engine and not self.held("tts-engine"):
+            self.engine = current
+            self.engine_box.set(ENGINE_LABELS.get(current, current or ""))
+
+    def pick_engine(self, _event=None):
+        shown = self.engine_box.get()
+        want = next((e for e, label in ENGINE_LABELS.items() if label == shown), None)
+        if not want or want == self.engine:
+            return
+        # "tts-engine" rather than "engine": that key is already taken by the
+        # load/unload switch, which holds it for twenty-five seconds while a
+        # model comes up. Sharing it would make each control redraw the other.
+        #
+        # Held for longer than a voice change is, because the reply comes back
+        # at once while the poll behind it is still carrying the old engine's
+        # voice list -- and letting that draw would put the dropdown back.
+        self.hold("tts-engine", 4.0)
+        self.hold("voice", 4.0)
+        self.engine = want
+        self.act("/set-engine", {"engine": want})
 
     def render_voices(self, st):
         voices = st.get("voices") or []
@@ -2003,6 +2154,7 @@ class Panel:
             self.drawn["voices"] = ids
             self.voice_ids = voice_labels(voices)
             self.voice_names = {v["id"]: v["name"] for v in voices}
+            self.voice_sexes = {v["id"]: (v.get("sex") or "") for v in voices}
             self.voice_box.configure(values=list(self.voice_ids))
             self.drawn.pop("face", None)          # the name under it may have changed
         current = st.get("voice")

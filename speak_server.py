@@ -53,7 +53,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import voice_lib
 import win_volume
-from qwen_engine import SAMPLE_RATE, Engine, write_wav
+from qwen_engine import SAMPLE_RATE, write_wav
 
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "claude-voice")
 # Played wavs move here instead of being deleted, so hearing something again
@@ -125,6 +125,97 @@ def set_volume(level):
     return level
 
 
+def rss_mb():
+    """This process's working set, or None where it cannot be asked.
+
+    Only used to write down what a switch actually cost. The engines are swapped
+    so that two models are never resident at once, and a number in the log is
+    the difference between that being true and being believed.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _Counters(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD),
+                        ("PageFaultCount", wintypes.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t)]
+
+        # The argtypes are not optional. GetCurrentProcess returns the
+        # pseudo-handle -1, and left to guess, ctypes declares the result an
+        # int and then refuses to pass it where a HANDLE belongs -- which
+        # failed silently here and printed no memory at all.
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        info = ctypes.windll.psapi.GetProcessMemoryInfo
+        info.argtypes = [wintypes.HANDLE, ctypes.POINTER(_Counters), wintypes.DWORD]
+        info.restype = wintypes.BOOL
+
+        counters = _Counters()
+        counters.cb = ctypes.sizeof(_Counters)
+        if not info(kernel32.GetCurrentProcess(),
+                    ctypes.byref(counters), counters.cb):
+            return None
+        return counters.WorkingSetSize / (1024 * 1024)
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def build_engine(state):
+    """Whichever engine the config asks for, loaded and ready to speak.
+
+    Both are held to the same three calls -- load_models, synthesize_streaming,
+    synthesize -- so everything below this line is written once and does not
+    know which one it got. The difference lives in what voice_lib.resolve puts
+    in a job's kwargs, and that is handed through without being read.
+
+    The voice is warmed here rather than on the first answer. Pocket TTS pays
+    about two seconds the first time it meets a voice, while it fetches that
+    speaker's state, and paying it during "engine ready" is invisible where
+    paying it in front of the first sentence is not.
+    """
+    which = voice_lib.engine_of(state)
+    if which == "pocket":
+        import pocket_engine
+
+        # The voice decides which of the six models to load, so ask what the
+        # current one needs before loading anything. Getting this from the
+        # config instead would load English and then immediately swap it for
+        # French the moment Estelle said a word.
+        warm = {}
+        try:
+            _, warm = voice_lib.resolve(state.get("voice"),
+                                        state.get("source"), state)
+        except LookupError:
+            pass
+        eng = pocket_engine.Engine(
+            language=warm.get("pocket_language") or voice_lib.engine_language(state),
+            log=log)
+        eng.load_models()
+        try:
+            eng.voice_state(warm.get("pocket_voice") or state.get("voice"),
+                            warm.get("pocket_language"))
+        except Exception as exc:
+            # Not fatal. A voice that cannot be fetched is the next answer's
+            # problem, and it says so there with the text in hand; refusing to
+            # start over it would take the whole engine down for one bad name.
+            log(f"could not warm the voice: {exc}")
+        return which, eng
+
+    from qwen_engine import Engine
+
+    eng = Engine(state["studioDir"], verbose=True)
+    eng.load_models(state["modelDir"], state["talker"])
+    return which, eng
+
+
 class Job:
     """One utterance: the chunks it was split into, and where it came from.
 
@@ -178,6 +269,11 @@ class Speaker:
         self.ready = threading.Event()
         self.error = None
         self.speaking = False
+        # Which engine is actually loaded, as against which one the config asks
+        # for. They differ for as long as it takes the next message to arrive,
+        # and the panel draws the difference rather than pretending a switch
+        # that has not happened yet did.
+        self.engine_name = None
         # Held, not off. The model stays loaded, the watcher goes on queueing,
         # and the piece in the air is cut where it got to so it can be picked
         # up from there. Set means playing: an engine that came back from a
@@ -375,6 +471,7 @@ class Speaker:
             "spoken": self.spoken,
             "underruns": self.underruns,
             "seam": round(self.seam_typical(), 3),
+            "engineLoaded": self.engine_name,
             "pid": os.getpid(),
         }
 
@@ -524,9 +621,8 @@ class Speaker:
 
     def _engine_loop(self):
         try:
-            eng = Engine(self.state["studioDir"], verbose=True)
-            eng.load_models(self.state["modelDir"], self.state["talker"])
-            log("engine ready")
+            self.engine_name, eng = build_engine(self.state)
+            log(f"engine ready ({self.engine_name})")
         except Exception as exc:
             self.error = exc
             log(f"engine failed to start: {exc}")
@@ -538,6 +634,50 @@ class Speaker:
             job = self.jobs.get()
             with self.lock:
                 self.current = job
+            # Changing engine is a config edit like any other, and it takes
+            # effect here -- on the next thing said, not on a restart. Loading
+            # the other model costs seconds, so doing it when a message arrives
+            # rather than when the dropdown moves means the wait lands where
+            # somebody is already waiting for speech.
+            want = voice_lib.engine_of(self._live())
+            if want != self.engine_name:
+                log(f"switching engine: {self.engine_name} -> {want}")
+                # Closed before the new one is built, never after. Only one
+                # model is ever resident: whichever engine is not speaking is
+                # not loaded, and the two numbers in this log say so rather
+                # than asking to be believed.
+                #
+                # What a switch cannot give back is Qwen's JVM and its CUDA
+                # context. Those are created once per process and stay for its
+                # life -- the model weights go, the runtime around them does
+                # not -- so a run that has used Qwen keeps a floor under it.
+                before = rss_mb()
+                try:
+                    if eng is not None:
+                        eng.close()
+                except Exception as exc:
+                    log(f"the old engine did not close cleanly: {exc}")
+                eng = None
+                freed = rss_mb()
+                if before and freed:
+                    log(f"  unloaded {self.engine_name}: "
+                        f"{before:.0f} MB -> {freed:.0f} MB")
+                try:
+                    self.engine_name, eng = build_engine(self._live())
+                    self.error = None
+                    now = rss_mb()
+                    log(f"engine ready ({self.engine_name})"
+                        + (f", {now:.0f} MB resident" if now else ""))
+                except Exception as exc:
+                    # Nothing can be spoken now, and the job in hand is lost.
+                    # Say so once and keep the thread alive: putting the old
+                    # name back means the next message tries the swap again,
+                    # which is what somebody fixing their config wants.
+                    self.error = exc
+                    log(f"{want} failed to start: {exc}")
+                    with self.lock:
+                        self.current = None
+                    continue
             # Read the config again here rather than trusting the snapshot this
             # process started with. Playback mode is the one setting somebody
             # changes *because* the voice is breaking up, and "restart the
@@ -1291,6 +1431,13 @@ class TranscriptWatcher(threading.Thread):
                 self.offsets[path] = min(seen, size)   # truncated or rewritten
                 continue
             self.activity[path] = time.time()
+            if path in self.codex_sizes:
+                self._ensure_label(path)
+                if path not in self.headless:
+                    # The panel can notice a new file before Codex finishes its
+                    # first metadata record. Do not consume anything until we
+                    # know whether this is the user's task or an internal agent.
+                    continue
             with open(path, "rb") as fh:
                 fh.seek(seen)
                 chunk = fh.read()
@@ -1329,7 +1476,7 @@ class TranscriptWatcher(threading.Thread):
         return True
 
     def _ensure_label(self, path):
-        """What to call this session out loud, read once from the transcript.
+        """What to call this session out loud, once its identity is complete.
 
         A title the user set wins over the one Claude generated; failing both,
         the project folder. Titles arrive as their own entries and can appear
@@ -1363,6 +1510,11 @@ class TranscriptWatcher(threading.Thread):
                         ai = e.get("aiTitle") or ai
         except OSError:
             pass
+        if not any((custom, ai, cwd, entrypoint)):
+            # A twice-a-second panel poll can land between file creation and
+            # the first complete JSON record. Caching that empty answer made a
+            # guardian review look like a user session forever.
+            return None
         # Which project this session is in. Two sessions can carry near-enough
         # the same title in different repos, and then the title alone tells you
         # nothing about which one is talking.
@@ -1562,6 +1714,11 @@ class TranscriptWatcher(threading.Thread):
         label = self.labels.get(path)
         announced = _last_speaker.prefix(self.projects.get(path), state)
 
+        # After the project name, before the words: the name says who is
+        # speaking and the notice says what they are about to leave out.
+        speech, dropped = voice_lib.speakable(speech, state=state)
+        if dropped:
+            log(f"watcher: {dropped}")
         pieces = voice_lib.chunks(announced + speech)
         if pieces:
             job = Job(pieces, voice["id"], kwargs, text=speech, session=label,
@@ -1571,7 +1728,24 @@ class TranscriptWatcher(threading.Thread):
                 f"{'<' + announced.strip() + '> ' if announced else ''}{speech[:40]}...")
 
 
-_VOICES = {"when": 0.0, "rows": []}
+_VOICES = {"when": 0.0, "rows": [], "engine": None}
+
+
+def _pocket_ready():
+    """Whether the panel may offer the other engine at all.
+
+    Answered once. It is an import-machinery lookup rather than an import, so
+    it costs nothing much, but the panel asks twice a second and the answer
+    cannot change without the process being restarted anyway.
+    """
+    if _POCKET["known"] is None:
+        import pocket_engine
+
+        _POCKET["known"] = pocket_engine.available()
+    return _POCKET["known"]
+
+
+_POCKET = {"known": None}
 
 
 def _voice_list(state, ttl=15.0):
@@ -1581,14 +1755,22 @@ def _voice_list(state, ttl=15.0):
     reads; nobody adds a voice that fast.
     """
     now = time.monotonic()
-    if now - _VOICES["when"] > ttl or not _VOICES["rows"]:
+    engine = voice_lib.engine_of(state)
+    # The engine is part of the key, not just the clock. Switching engines
+    # replaces the catalogue wholesale, and waiting out a fifteen-second cache
+    # would leave the dropdown offering voices the new engine cannot speak in.
+    stale = (now - _VOICES["when"] > ttl or not _VOICES["rows"]
+             or _VOICES["engine"] != engine)
+    if stale:
         try:
             _VOICES["rows"] = [{"id": v["id"], "name": v["name"],
-                                "culture": v["culture"], "sex": v["sex"]}
-                               for v in voice_lib.catalog(state)]
-        except OSError:
+                                "culture": v["culture"], "sex": v["sex"],
+                                "style": v.get("style") or "",
+                                "tag": v.get("tag") or ""}
+                               for v in voice_lib.catalog(state, engine)]
+        except (OSError, ImportError, LookupError):
             _VOICES["rows"] = []
-        _VOICES["when"] = now
+        _VOICES["when"], _VOICES["engine"] = now, engine
     return _VOICES["rows"]
 
 
@@ -1633,6 +1815,9 @@ class Handler(BaseHTTPRequestHandler):
                 "voices": _voice_list(state),
                 "voice": state.get("voice"),
                 "source": state.get("source"),
+                "engine": voice_lib.engine_of(state),
+                "engines": list(voice_lib.ENGINES),
+                "pocketReady": _pocket_ready(),
                 "volume": win_volume.clamp(state.get("volume", 1.0)),
                 "enabled": bool(state.get("enabled")),
             })
@@ -1705,6 +1890,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._reply(200, {"voice": voice["id"], "name": voice["name"],
                                      "announced": announced})
 
+        if route == "/set-engine":
+            try:
+                engine, voice = voice_lib.set_engine(payload.get("engine"))
+            except LookupError as exc:
+                return self._reply(404, {"error": str(exc)})
+            # The model is not loaded here. The engine thread picks the change
+            # up when the next message arrives, so that this returns at once
+            # and the dropdown does not sit frozen for the length of a load.
+            log(f"engine set to {engine}"
+                + (f", voice {voice['id']}" if voice else ""))
+            return self._reply(200, {
+                "engine": engine,
+                "voice": voice["id"] if voice else None,
+                "name": voice["name"] if voice else None,
+            })
+
         if route == "/quit":
             sp.cancel()
             threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -1720,13 +1921,25 @@ class Handler(BaseHTTPRequestHandler):
             text = (payload.get("text") or "").strip()
             if not text:
                 return self._reply(400, {"error": "no text"})
+            # Against the config as it is now, not as it was when this process
+            # started. It always mattered a little -- a voice added since would
+            # not be found -- and with two engines it matters completely: the
+            # startup snapshot names the old engine, so every voice on the new
+            # one would come back as a 404 until a restart.
+            live = sp._live()
             try:
                 voice, kwargs = voice_lib.resolve(
-                    payload.get("voice") or sp.state.get("voice"),
-                    payload.get("source") or sp.state.get("source"), sp.state)
+                    payload.get("voice") or live.get("voice"),
+                    payload.get("source") or live.get("source"), live)
             except LookupError as exc:
                 return self._reply(404, {"error": str(exc)})
 
+            # The same guard the watcher applies, and for the same reason: a
+            # line typed into the panel in Cyrillic would otherwise be handed
+            # to an engine that cannot read it.
+            text, dropped = voice_lib.speakable(text, state=sp._live())
+            if dropped:
+                log(f"speak: {dropped}")
             pieces = voice_lib.chunks(text)
             if not pieces:
                 return self._reply(400, {"error": "nothing speakable"})

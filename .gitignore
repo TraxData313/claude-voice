@@ -14,3 +14,10 @@ __pycache__/
 # Voices you may keep locally but not publish live outside this repo, via
 # "extraVoicesDirs" in config.json. Nothing derived from someone else's
 # recording belongs in voices/ -- see VOICES.md.
+
+# Working files from make_pocket_voice.py: the render a voice was cloned from
+# and the same words read back in the clone. A megabyte each, regenerable, and
+# only wanted while somebody is comparing the two. The pocket.safetensors they
+# produce is the artefact and does belong in the repo.
+voices/**/pocket-reference.wav
+voices/**/pocket-after.wav

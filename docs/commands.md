@@ -21,6 +21,7 @@ command — it is `/voice on`, never `/voice_on`.
 |---|---|
 | `list [filter]` | Every voice available. Filter by name or culture. |
 | `set <voice>` | Switch voice. Any unambiguous substring: 'set ab' finds Abby. |
+| `engine [qwen\|pocket]` | Which synthesiser speaks. No argument lists them. |
 | `clone <file.wav> --name X` | Make a new voice from a 20-40s clip of one person. |
 
 ## Hearing something again

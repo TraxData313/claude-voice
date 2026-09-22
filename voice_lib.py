@@ -340,6 +340,40 @@ def patch_state(**changes):
     return state
 
 
+# --------------------------------------------------------------------------
+# which engine is speaking
+# --------------------------------------------------------------------------
+
+# Two roads to sound, and they do not share a voice between them. Qwen's voices
+# are folders in voices/ holding an embedding this repo made; Pocket's are
+# names the model fetches states for. So the engine decides what the catalogue
+# even contains, which is why every caller of catalog() gets it from here
+# rather than assuming.
+DEFAULT_ENGINE = "qwen"
+ENGINES = ("qwen", "pocket")
+
+
+def engine_of(state=None):
+    """Which engine the config asks for, sanity-checked.
+
+    An unknown name falls back rather than raising. This is read on the path to
+    speaking, and a typo in the config should cost the wrong engine at worst,
+    never silence with no explanation.
+    """
+    state = state if state is not None else load_state()
+    want = (state.get("engine") or DEFAULT_ENGINE).strip().lower()
+    return want if want in ENGINES else DEFAULT_ENGINE
+
+
+def engine_language(state=None):
+    """The language Pocket TTS should load. Means nothing to the other engine."""
+    import pocket_engine
+
+    state = state if state is not None else load_state()
+    want = (state.get("pocketLanguage") or pocket_engine.DEFAULT_LANGUAGE).strip().lower()
+    return want if want in pocket_engine.LANGUAGES else pocket_engine.DEFAULT_LANGUAGE
+
+
 def voice_roots(state=None):
     state = state or load_state()
     roots = [state.get("voicesDir") or "voices"]
@@ -356,13 +390,20 @@ def voice_roots(state=None):
 # voice catalogue
 # --------------------------------------------------------------------------
 
+# What a cloned Pocket TTS voice is called inside a voice folder. A baked
+# speaker state rather than an embedding: the model turns a wav into one of
+# these once, and loading it afterwards is instant.
+POCKET_VOICE = "pocket.safetensors"
+
+
 def _is_voice_dir(d):
     return (os.path.exists(os.path.join(d, "embedding.json"))
-            or os.path.exists(os.path.join(d, "icl-prompt.json")))
+            or os.path.exists(os.path.join(d, "icl-prompt.json"))
+            or os.path.exists(os.path.join(d, POCKET_VOICE)))
 
 
 def _read_voice(d, vid, sex, culture, root):
-    name, persona = vid, ""
+    name, persona, style, pocket_lang = vid, "", "", ""
     try:
         with open(os.path.join(d, "voice.json"), encoding="utf-8-sig") as fh:
             doc = json.load(fh)
@@ -370,23 +411,41 @@ def _read_voice(d, vid, sex, culture, root):
         # How this voice behaves, not just how it sounds. Being addressed by
         # name is natural once a voice has one, so the manner should match it.
         persona = doc.get("Persona") or ""
+        # Narrating or talking. Optional, and shown in the dropdown beside the
+        # sex -- the two together are most of what you want to know about a
+        # voice before you pick it.
+        style = doc.get("Style") or ""
+        # Which Pocket TTS model this voice was baked against. A speaker state
+        # belongs to exactly one of the six, and handing it to another gives
+        # nonsense rather than an error -- so a carried-across voice records
+        # its own, and make_pocket_voice.py writes it.
+        pocket_lang = doc.get("PocketLanguage") or ""
     except (OSError, ValueError):
         pass
     emb = os.path.join(d, "embedding.json")
     icl = os.path.join(d, "icl-prompt.json")
+    pkt = os.path.join(d, POCKET_VOICE)
     return {
         "id": vid, "name": name, "sex": sex, "culture": culture,
-        "persona": persona, "dir": d, "root": root,
+        "persona": persona, "style": style, "dir": d, "root": root,
+        "tag": "" if culture in ("other", "english") else culture.title(),
+        "pocketLanguage": pocket_lang,
         "embedding": emb if os.path.exists(emb) else None,
         "icl": icl if os.path.exists(icl) else None,
+        "pocket": pkt if os.path.exists(pkt) else None,
     }
 
 
-def catalog(state=None):
-    """Every voice under every configured root, as flat dicts.
+def catalog(state=None, engine=None):
+    """Every voice the chosen engine can speak in, as flat dicts.
 
-    Two layouts are accepted, because a handful of personal voices and a whole
-    generated library want different shapes:
+    Pocket TTS keeps no voices on disk -- they are names the model fetches a
+    precomputed state for -- so on that engine this is a table rather than a
+    directory walk, and returns the same keys so that nothing downstream has to
+    ask which engine it is looking at.
+
+    For Qwen, two layouts are accepted, because a handful of personal voices
+    and a whole generated library want different shapes:
 
         <root>\\<sex>\\<id>              flat -- what this repo ships
         <root>\\<sex>\\<culture>\\<id>   grouped -- for larger collections
@@ -394,6 +453,7 @@ def catalog(state=None):
     Earlier roots win, so a bundled voice shadows a same-named local one.
     """
     state = state or load_state()
+    pocket = (engine or engine_of(state)) == "pocket"
     out, seen = [], set()
     for root in voice_roots(state):
         for sex in sorted(os.listdir(root)):
@@ -417,15 +477,38 @@ def catalog(state=None):
                         continue
                     seen.add(vid.lower())
                     out.append(_read_voice(sub, vid, sex, entry, root))
+    if pocket:
+        # Only the local voices actually cloned into this engine -- a folder
+        # with an embedding in it means nothing here -- and then the model's
+        # own catalogue behind them. Cloned first, so Abby is at the top of the
+        # dropdown where she belongs, and so a name collision resolves in
+        # favour of the one on disk.
+        import pocket_engine
+
+        cloned = [v for v in out if v["pocket"]]
+        have = {v["id"].lower() for v in cloned}
+        return cloned + [v for v in pocket_engine.catalog(engine_language(state))
+                         if v["id"].lower() not in have]
     return out
 
 
 def resolve(voice_id, source="embedding", state=None):
-    """Find a voice by id (exact first, then substring). Returns (voice, kwargs)."""
-    voices = catalog(state)
+    """Find a voice by id (exact first, then substring). Returns (voice, kwargs).
+
+    The kwargs are whatever the chosen engine's synthesize wants, and the two
+    engines want different things -- a path to an embedding on disk, or a name
+    the model knows. Deciding that here is the point: the server hands these
+    straight through without looking, so an engine added later needs no change
+    above this line.
+    """
+    state = state if state is not None else load_state()
+    engine = engine_of(state)
+    voices = catalog(state, engine)
     if not voices:
         raise LookupError(
-            "no voices found. Add one with: python voice_cli.py clone <sample.wav> --name <name>")
+            "no voices found. Add one with: python voice_cli.py clone <sample.wav> --name <name>"
+            if engine == "qwen" else
+            "pocket-tts has no voices to offer. Is it installed? pip install pocket-tts")
 
     needle = (voice_id or "").strip().lower()
     hit = next((v for v in voices if v["id"].lower() == needle), None)
@@ -440,6 +523,14 @@ def resolve(voice_id, source="embedding", state=None):
                 + ("..." if len(matches) > 8 else ""))
         else:
             raise LookupError(f"no voice matching '{voice_id}'")
+
+    if engine == "pocket":
+        # The language travels with the voice. Estelle needs the French model
+        # and Abby needs the English one, and which is loaded is decided by
+        # whoever was picked -- not by a config key set hours earlier.
+        return hit, {"pocket_voice": hit.get("pocket") or hit["id"],
+                     "pocket_language": (hit.get("pocketLanguage")
+                                         or engine_language(state))}
 
     path = hit.get("icl" if source == "icl" else "embedding") or hit["embedding"] or hit["icl"]
     if path is None:
@@ -934,6 +1025,68 @@ def already_spoken(text, remember=True):
     return False
 
 
+# --------------------------------------------------------------------------
+# what the chosen engine can actually read
+# --------------------------------------------------------------------------
+
+# Cyrillic, all four blocks of it. Basic and Supplement cover Russian and
+# Bulgarian; the other two are historic and Slavonic letters that turn up in
+# quoted scripture, which this repo's neighbouring projects are full of.
+CYRILLIC = re.compile(r"[Ѐ-ԯⷠ-ⷿꙀ-ꚟ]")
+# Is there anything left worth saying -- a letter or a digit in any alphabet.
+HAS_WORDS = re.compile(r"[^\W\d_]|\d", re.UNICODE)
+
+# Pocket TTS does not fail on Cyrillic, which would be easy to handle. It runs
+# away: measured here, "Сега ще проверя как звучи това на български." -- three
+# seconds of speech -- came back as 11.4 seconds of audio. So a Bulgarian line
+# left in costs the listener eleven seconds of babbling and buries whatever
+# English was around it.
+#
+# Hence this. The unreadable part is taken out before synthesis, and the
+# listener is told it happened, because an answer that quietly lost half of
+# itself is the one outcome worse than a bad accent. Both lines are written to
+# be heard: no abbreviations, and the count first, since that is the part
+# somebody actually wants -- "a couple of words" and "most of the answer" are
+# different situations and the number is what tells them apart.
+SKIPPED_SOME = ("There are {n} Cyrillic characters in this that I can't speak "
+                "out, so I'll skip them, just so you know.")
+SKIPPED_SOME_ONE = ("There's one Cyrillic character in this that I can't speak "
+                    "out, so I'll skip it, just so you know.")
+SKIPPED_ALL = ("That line is all Cyrillic, and Pocket TTS can't read it at "
+               "all. Switch back to the other engine and I'll say it properly.")
+
+
+def speakable(text, engine=None, state=None):
+    """Text the chosen engine can read, with a spoken note about what it can't.
+
+    Returns (speech, note). `note` is None when nothing was dropped, and a line
+    for the log otherwise -- the listener is told inside `speech` itself, as a
+    preface, so that the warning and the answer are one generation and the
+    voice does not change between them.
+
+    Only Pocket TTS is limited this way. The Qwen road reads Cyrillic -- with a
+    Russian accent on Bulgarian, see docs/languages.md -- so nothing here
+    applies to it and nothing here should grow to.
+    """
+    engine = engine or engine_of(state)
+    if engine != "pocket" or not text or not CYRILLIC.search(text):
+        return text, None
+
+    dropped = len(CYRILLIC.findall(text))
+    # Whole words rather than single letters. Cutting the Cyrillic out of a
+    # mixed word leaves a stump the model reads as a different word, which is
+    # a worse thing to hear than the word being gone.
+    kept = [w for w in text.split() if not CYRILLIC.search(w)]
+    rest = " ".join(kept)
+    rest = re.sub(r"\s+([,.;:!?…])", r"\1", rest)
+    rest = re.sub(r"\s{2,}", " ", rest).strip(" -–—,;:")
+
+    if not HAS_WORDS.search(rest):
+        return SKIPPED_ALL, f"all Cyrillic ({dropped} characters) -- nothing to say"
+    preface = SKIPPED_SOME_ONE if dropped == 1 else SKIPPED_SOME.format(n=dropped)
+    return f"{preface} {rest}", f"skipped {dropped} Cyrillic characters"
+
+
 def speech_for(text, state):
     """What should actually be said for an assistant message, if anything.
 
@@ -1313,8 +1466,54 @@ def set_voice(voice_id, state=None):
     """
     state = state or load_state()
     voice, _ = resolve(voice_id, state.get("source"), state)
-    patch_state(voice=voice["id"])
+    # Remembered per engine as well as globally. The two engines have no voice
+    # in common, so switching engine has to choose somebody -- and choosing
+    # whoever you last had *there* is the only answer that does not throw away
+    # a decision you already made.
+    by_engine = dict(state.get("voiceByEngine") or {})
+    by_engine[engine_of(state)] = voice["id"]
+    patch_state(voice=voice["id"], voiceByEngine=by_engine)
     return voice, announce_voice(voice)
+
+
+def set_engine(name, state=None):
+    """Switch engines, bringing a voice that engine actually has.
+
+    Returns (engine, voice). The voice is whoever was speaking there last, or
+    that engine's default the first time -- never the old engine's, which does
+    not exist on the new one and would leave the next answer silent with a
+    LookupError nobody sees.
+    """
+    want = (name or "").strip().lower()
+    if want not in ENGINES:
+        raise LookupError(f"no engine called '{name}'. Try: " + ", ".join(ENGINES))
+    state = state or load_state()
+
+    if want == "pocket":
+        import pocket_engine
+
+        if not pocket_engine.available():
+            raise LookupError(
+                "pocket-tts is not installed. pip install pocket-tts")
+
+    after = dict(state)
+    after["engine"] = want
+    remembered = (state.get("voiceByEngine") or {}).get(want)
+    choices = [v["id"] for v in catalog(after, want)]
+    if remembered in choices:
+        voice_id = remembered
+    elif want == "pocket":
+        import pocket_engine
+
+        voice_id = pocket_engine.default_voice(engine_language(after))
+    else:
+        voice_id = "abby" if "abby" in choices else (choices[0] if choices else None)
+
+    patch_state(engine=want)
+    if voice_id:
+        voice, _ = set_voice(voice_id, load_state())
+        return want, voice
+    return want, None
 
 
 def post(port, path, payload=None, timeout=5):

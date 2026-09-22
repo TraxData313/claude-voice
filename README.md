@@ -91,6 +91,7 @@ tool either way. Mind the space: `/voice on`, never `/voice_on`.
 |---|---|
 | `on` / `off` | the switch. `off` leaves the engine warm, so `on` is instant |
 | `set abby` | change voice. Any unambiguous substring: `set ab` works |
+| `engine pocket` | no GPU, no Studio? [Pocket TTS →](docs/engines.md) runs on the CPU |
 | `repeat` | say the last answer again. `repeat-all` for the whole thing |
 | `stop` | cut off what is playing, and empty the queue (`break` works too) |
 | `pause` / `play` | hold her mid-word and carry on from there. Nothing is dropped |
@@ -174,6 +175,7 @@ embedding is a clone of a real person, so that folder has rules.
 | **[The panel →](docs/panel-plan.md)** | how the window was built, and what changed on the way |
 | **[How it works →](docs/how-it-works.md)** | the engine, the watcher, the JNI bridge — and the things that cost real time to find |
 | **[Engine notes →](docs/engine-notes.md)** | why she sometimes stops early, changes voice, or buzzes — three different causes |
+| **[Two engines →](docs/engines.md)** | Qwen or Pocket TTS: what each costs, what each can read, and how to switch |
 | **[Writing for the ear →](docs/writing-for-the-ear.md)** | the TL;DR contract, why captions sound wrong aloud, and how much of a voice's character Claude is told to wear |
 | **[Codex →](docs/codex.md)** | hearing Codex tasks through the same local voice, panel, and TL;DR contract |
 | **[Languages →](docs/languages.md)** | what is tested, and how it fails when it fails |

@@ -1,5 +1,10 @@
 # Languages
 
+**This page is the Qwen engine.** Pocket TTS reads six Latin-script languages
+and no Cyrillic at all — it takes Cyrillic out of a line before speaking, and
+says so out loud. That is [engines.md](engines.md). Everything below is the
+other road.
+
 The voices were cloned from English, but neither the model nor anything in this project is
 tied to it. Nothing between the answer and the speaker cares which alphabet it is handed.
 

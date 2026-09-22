@@ -6,6 +6,47 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.12.0 — 2026-09-22
+
+**There is a second engine now: a small one that runs on your processor, so you no longer
+need a graphics card to be spoken to.**
+
+- **Pocket TTS, beside the original.** Kyutai's 100M model: `pip install pocket-tts`, two
+  CPU cores, no Studio and no GPU. Measured here against the numbers in
+  `docs/engine-notes.md`: **181 ms to the first audio against 812**, and 4.0–4.5× realtime
+  against 3.7–4.0× — on the processor, matching the graphics card. Both engines emit 24 kHz,
+  so nothing downstream of the engine changed.
+- **The panel chooses.** An engine dropdown above the voice one; the voice list follows it.
+  Each engine remembers who was speaking on it, so switching back and forth loses nothing.
+  It loads on the next thing said rather than when you pick it, which puts the wait where
+  somebody is already waiting.
+- **Twenty-six voices come with it**, and every voice now shows what it is —
+  `Alba (m, reading)`, `Vera (f, conversation)`. None of that is in the package: there is no
+  gender or style field anywhere in `pocket_tts`, and reading the sex off the name gets
+  `alba` backwards. The table is transcribed, with a test pinning him male.
+- **Five of those are French, German, Italian, Spanish and Brazilian Portuguese**, and the
+  voice decides which model loads — a speaker state belongs to exactly one of the six, and
+  handing it to another gives nonsense rather than an error. They read English in their own
+  accent, which is the charm. French is a 24-layer model because that is the only French
+  there is, and which config to load is read off the installed package rather than guessed.
+- **It reads no Cyrillic, and that fails badly rather than loudly.** Measured: *"Сега ще
+  проверя как звучи това на български."* — three seconds of speech — came back as **11.4
+  seconds of babbling**. So Cyrillic is removed before synthesis on that engine only, whole
+  words rather than letters, and the listener is told how much went. A line that is nothing
+  but Cyrillic is answered by saying so and naming the engine that can read it.
+- **Your own voices can be carried across.** `make_pocket_voice.py abby` needs no original
+  recording: the Qwen engine is itself a source of clean audio, so it renders a reference,
+  clones from that, and bakes `pocket.safetensors` into the voice's own folder. A render is
+  a *better* prompt than a recording — no room tone, no breath, no microphone. Cloning needs
+  a Hugging Face login because Kyutai gate those weights; the built-in voices do not.
+- **Fixed on the way: `/speak` resolved voices against the config as it stood when the
+  server started**, so any voice added since was a 404. Invisible with one engine and
+  constant with two.
+- **Fixed: a failed model reload left the engine unable to speak at all** — it dropped the
+  old model before loading the new one, so every later answer said `load_models() first`
+  instead of naming the problem. It holds the old one until the new one is up.
+- 30 new tests in `test_engines.py`. **[Two engines →](docs/engines.md)**
+
 ## 1.11.1 — 2026-09-12
 
 **Codex tasks now keep speaking after they have been open for a while or resumed later.**

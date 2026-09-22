@@ -36,6 +36,23 @@ Only voices you have the right to publish:
   find. Not a celebrity, not an actor, not someone off YouTube.
 - **Anyone who has not agreed**, including friends and family. Ask first.
 
+## A voice can live on both engines
+
+A folder may hold more than one way of saying the same person. `embedding.json`
+and `icl-prompt.json` are the Qwen engine's; `pocket.safetensors` is Pocket
+TTS's, written by `make_pocket_voice.py` — see [engines.md](engines.md).
+
+**The rules above apply to each of them separately and identically.** A baked
+speaker state is the part that does the impersonation, exactly as an embedding
+is. Deriving one from a recording you were not entitled to clone does not
+launder it, and neither does deriving it from a *render* of such a clone rather
+than from the recording itself.
+
+Two small keys in `voice.json` go with it: `"Style"` — free text, shown in the
+dropdown, which is why Abby's reads `the original` — and `"PocketLanguage"`,
+which records the model the state was baked against. Handing a state to the
+wrong model gives nonsense rather than an error, so that key is not decoration.
+
 ## Keeping voices you cannot publish
 
 Cloning from a recording, on your own machine, for your own ears, is a different act

@@ -1,14 +1,15 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
-  "version": "1.11.1",
-  "date": "2026-09-12",
+  "version": "1.12.0",
+  "date": "2026-09-22",
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "Codex tasks now keep speaking after they have been open for a while or resumed later.",
+  "headline": "There is a second engine now: a small one that runs on your processor, so you no longer need a graphics card to be spoken to.",
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "Codex preserves a task file's original modification time while it keeps appending messages. The watcher treated that time as recent activity and stopped following a task after fifteen minutes.",
-    "The watcher now notices file growth instead, so long-running and resumed tasks keep speaking and remain visible in the panel.",
-    "A live resumed-task check and six automated tests pass."
+    "Pocket TTS joins the original engine. It installs with pip, runs on two CPU cores, and reaches the first word in under two hundred milliseconds -- a fifth of what the GPU engine takes.",
+    "Twenty-one English voices come with it, plus five more in French, German, Italian, Spanish and Brazilian Portuguese. Picking one loads its own model.",
+    "It reads no Cyrillic, so Cyrillic is taken out of a line before speaking and you are told it happened.",
+    "Your own voices can be carried across with make_pocket_voice.py, which needs no original recording -- it renders one from the engine you already have."
   ],
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
   "needsSetup": false,

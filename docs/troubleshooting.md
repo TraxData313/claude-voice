@@ -58,6 +58,22 @@ The watcher has no such problem, which is another reason to prefer it.
 
 ## Other things that have actually happened
 
+**She said "there are 162 Cyrillic characters I can't speak out".** She cannot,
+on Pocket TTS — six Latin-script languages and nothing else. It is said out loud
+rather than dropped quietly because the alternative is worse: that model answers
+Cyrillic by babbling, not by failing. `voice engine qwen` reads it properly.
+**[Two engines →](engines.md)**
+
+**Cloning stopped with a Hugging Face message.** The built-in voices and voice
+cloning are different weights, and Kyutai gate the ones that clone. Accept the
+terms on their page and `hf auth login`. The reference render is kept, so the
+retry costs seconds.
+
+**Picking a voice paused for half a minute the first time.** Each of Pocket's
+six languages is its own model, and the voice decides which one loads. First use
+of a language downloads it; after that it is a load. French is the big 24-layer
+model, because that is the only French there is.
+
 **It spoke a message that was not mine.** The watcher follows every session touched in the
 last fifteen minutes, so a second Claude Code window talks through the same voice. It says
 the session's name when the speaker changes. `sessionLabel: "off"` in `config.json` stops
