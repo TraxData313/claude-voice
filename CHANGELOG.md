@@ -24,6 +24,12 @@ sadly, or quick and delighted.**
   told to speak quickly and excitedly. `probe_instruction.py` is that measurement if it
   ever needs making again; it loads the talker and spends a minute of GPU, so it is run on
   purpose rather than to see whether it works.
+- **A whole instruction, not one adjective.** The thing to get right, and the thing
+  everybody gets wrong first. Measured on one line, three runs each: nothing 1.41 s,
+  `sad` 1.68 s — inside the sampler's own spread — and *Speak slowly and sadly, quiet
+  and downcast, with long pauses* 1.95 s. The instruction is tokenized into the prefill
+  and competes there with a speaker embedding that is pinned hard, so it needs some
+  weight to carry. The typing box's hint says so.
 - **The panel shows it, and lets you try one.** The mood a line was given sits
   under the words while it plays, and gets a column of its own in the queue and
   the history — a column with no width at all until some row has one, because

@@ -104,6 +104,20 @@ And it does something. The same sentence, same voice, four runs each:
 `probe_instruction.py` is that measurement, if it needs making again. It loads
 the talker and spends a minute of GPU, so run it on purpose.
 
+**A whole instruction, not one adjective**, and this is the part people get wrong
+first. The same line, the same voice, three runs each:
+
+| instruction | mean audio |
+|---|---|
+| none | 1.41 s |
+| `sad` | 1.68 s — inside the sampler's own spread |
+| `Speak slowly and sadly, quiet and downcast, with long pauses.` | 1.95 s |
+
+One word is not enough to steer it. A directive with a verb and two or three things
+about the delivery is. The instruction is tokenized into the prefill and competes
+there with a speaker embedding that is pinned hard, so it needs some weight to
+carry — `n_instruct=6` did nothing audible, `n_instruct=19` did.
+
 **Pocket has no such field**, and it is never sent one — a keyword an engine did
 not declare would raise on the sentence rather than be ignored, and that failure
 arrives as silence. The decision is made once, in `Speaker._kwargs`, against the

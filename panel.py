@@ -2361,7 +2361,12 @@ class Panel:
         # is a handful of words about delivery and not a second thing to read
         # out -- and drawn at all only when the engine would perform it.
         if self.takes_mood:
-            label = ttk.Label(frame, text="how it should sound — optional",
+            # A whole instruction, not one adjective: "sad" on its own was
+            # measured moving a line by three hundredths of a second, and a
+            # sentence with some detail in it by a third. The hint says so,
+            # because the box otherwise invites exactly the weak form.
+            label = ttk.Label(frame, text="how it should sound — a whole "
+                              "instruction, not one word",
                               font=FONT_SMALL, foreground=GREY, anchor="w")
             label.pack(fill="x", pady=(8, 2))
             self.dim.append(label)
