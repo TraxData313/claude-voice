@@ -190,17 +190,31 @@ def cmd_engine(state, args):
     if not args:
         here = voice_lib.engine_of(state)
         print(f"Engine: {here}")
+        # Listed with what each one is, because this is the screen somebody is
+        # on when they are deciding, and sending them to a doc to find out what
+        # the other name means is a trip they should not have to make.
         for name in voice_lib.ENGINES:
-            print(f"  {'*' if name == here else ' '} {name}")
+            info = voice_lib.engine_info(name)
+            print(f"  {'*' if name == here else ' '} {name:8} {info['label']}")
+            _describe(info)
         raise SystemExit(0)
     engine, voice = voice_lib.set_engine(args[0], state)
     state["engine"] = engine
     print(f"Engine set to {engine}"
           + (f", speaking as {voice['name']}" if voice else ""))
-    if engine == "pocket":
-        print("  It runs on the CPU and needs no Studio, and it cannot read")
-        print("  Cyrillic at all -- a Bulgarian line is skipped and said so.")
+    _describe(voice_lib.engine_info(engine))
     print("  It loads on the next thing spoken, so the first one is slower.")
+
+
+def _describe(info):
+    """The blurb and the link, indented under whichever engine was named."""
+    import textwrap
+
+    if info.get("blurb"):
+        for line in textwrap.wrap(info["blurb"], 68):
+            print(f"      {line}")
+    if info.get("url"):
+        print(f"      more: {info['url']}")
 
 
 def cmd_say(state, args):

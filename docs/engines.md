@@ -256,6 +256,64 @@ needs to identify a voice is its own business.
 The catalogue is the only other question: voices on disk, a table in the module,
 or both, as `catalog()` does for Pocket.
 
+## Kyutai TTS 1.6B, and why it is not the third one
+
+It was looked at properly on 2026-09-22 and turned down, so here is the finding
+rather than the search. It is the big sibling of Pocket TTS from the same lab —
+1.6B parameters, GPU, and genuinely better — and the reason to want it is
+emotion. Those facts are all true. It still does not fit here, for one reason
+that is not going to change by waiting.
+
+**You cannot put a voice of your own into it.** Kyutai never released the model
+that turns audio into a voice embedding, on purpose: the model card says they
+"prefered to restrict the voice cloning ability to the use of pre-computed voice
+embeddings". You get their repository of about 1,450 voices and no way to add a
+1,451st. This is not the Pocket TTS situation, where the gate opens if you accept
+the terms — the file that does the work, `mimi_voice.safetensors`, is referenced
+by their own script and answers 404 to everybody.
+[moshi#404](https://github.com/kyutai-labs/moshi/issues/404) is somebody trying
+all three routes, including feeding audio through the ordinary Mimi encoder,
+which produces embeddings with the wrong statistics and garbled speech. It was
+still open and unanswered when this was written.
+
+So Abby cannot live there, and a voice that cannot carry across is most of what
+this project wants an engine for.
+
+**Emotion is a voice, not a parameter.** Worth writing down because the obvious
+guess is wrong and it is the thing people ask. There is no steering string, no
+style argument and no `*laughs*` markup — the reference script takes a repo, a
+voice, and a device. The mood is baked into the embedding, which you can read
+straight off the default:
+
+```
+--voice expresso/ex03-ex01_happy_001_channel1_334s.wav
+```
+
+The `ears/` collection carries that furthest: one speaker in 23 emotions —
+adoration, amazement, amusement, anger, confusion, contentment, cuteness, desire,
+disappointment, disgust, distress, embarrassment, ecstasy, fear, guilt, interest,
+neutral, pain, pride, realization, relief, sadness, serenity — as p003 (f) and
+p031 (m). Changing mood means changing the selected voice. Beyond that the
+delivery follows the text, since punctuation drives the pacing, but nothing
+commands it.
+
+**The licences are not all the same**, which matters if a voice is going into
+something you ship. `expresso` and `ears` — precisely the two emotional
+collections — are **CC-NC, non-commercial**. `voice-donations` and `voice-zero`
+are CC0, `vctk` and `cml-tts/fr` are CC-BY-4.0.
+
+**It would also not share this Python.** `moshi` pins `torch<2.10`,
+`numpy<2.3`, `safetensors<0.8` and `huggingface-hub<1.0`, and a machine set up
+for Pocket TTS is above all four — hub by a whole major version. The floors do
+overlap, so one environment *can* satisfy both, but only by moving four packages
+backwards underneath the engine that already works. The answer if it is ever
+revisited is a separate virtual environment talking to `moshi.server` over a
+socket, not an in-process import: `close()` becomes killing a subprocess, which
+the engine-swapping here already expects.
+
+**What would change the answer:** Kyutai releasing the voice embedding model.
+Nothing else on this list is a blocker on its own.
+
 ## Why the pieces are so much smaller
 
 Pocket hands back about 80 ms of audio at a time, against Qwen's second. That

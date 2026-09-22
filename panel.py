@@ -36,6 +36,7 @@ import queue
 import re
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 import tkinter as tk
@@ -183,15 +184,17 @@ VOLUME_WIDE = 90
 MAX_SESSIONS = 5
 # The two voices the repo ships. Clicking the portrait swaps between them.
 SHIPPED = ("abby", "max")
-# The two roads to sound, as the dropdown says them. Short on purpose: the
-# tooltip has room to explain, a combobox does not.
-ENGINE_LABELS = {"qwen": "Qwen — GPU", "pocket": "Pocket TTS — CPU"}
-# What each engine costs and gives, for the tooltip. The point of putting it
-# here is that somebody deciding between them is deciding about exactly these
-# two things, and the numbers are measured rather than claimed.
+# The roads to sound, as the dropdown says them. Short on purpose: the tooltip
+# has room to explain, a combobox does not. Both these and the longer notes
+# below come from voice_lib, so that the panel and the command line describe an
+# engine the same way rather than each keeping its own opinion.
+ENGINE_LABELS = {k: v["label"] for k, v in voice_lib.ENGINE_INFO.items()}
+# Wrapped here rather than stored wrapped, because the width is the tooltip's
+# business and nobody else's. 46 characters is what sits under the dropdown
+# without the balloon growing wider than the window it belongs to.
 ENGINE_NOTES = {
-    "qwen": "the original: needs Studio and a GPU\nspeaks Cyrillic, and the voices are cloned here",
-    "pocket": "small, runs on the CPU, no Studio needed\nfaster to the first word; no Cyrillic at all",
+    k: textwrap.fill(v["blurb"], 46) + (f"\n\nmore: {v['url']}" if v["url"] else "")
+    for k, v in voice_lib.ENGINE_INFO.items()
 }
 # What a line you typed yourself is filed under. Every other line in the queue
 # came from a folder Claude was working in, and the column says which; this one

@@ -352,6 +352,42 @@ def patch_state(**changes):
 DEFAULT_ENGINE = "qwen"
 ENGINES = ("qwen", "pocket")
 
+# What each engine is, in the few facts somebody choosing between them actually
+# needs, plus where to read the rest. It lives here rather than in the panel
+# because the panel's tooltip and the CLI's 'engine' both say it, and two
+# copies of a description drift apart the first time one of them is edited.
+#
+# 'blurb' is one paragraph written to be wrapped by whoever shows it, so it
+# carries no line breaks of its own.
+ENGINE_INFO = {
+    "qwen": {
+        "label": "Qwen — GPU",
+        "blurb": (
+            "The original, and the better voice. Needs Qwen-TTS Studio and a "
+            "graphics card. Reads Cyrillic, and every voice in the voices "
+            "folder was cloned here."
+        ),
+        "url": "https://github.com/Danmoreng/qwen-tts-studio",
+    },
+    "pocket": {
+        "label": "Pocket TTS — CPU",
+        "blurb": (
+            "Small and quick. Runs on two CPU cores with no Studio and no "
+            "graphics card, and reaches the first word in about a fifth of the "
+            "time. Cannot read Cyrillic at all -- those letters are dropped and "
+            "you are told so out loud."
+        ),
+        "url": "https://kyutai.org/blog/2026-01-13-pocket-tts/",
+    },
+}
+
+
+def engine_info(name):
+    """Label, blurb and url for an engine. Never raises -- an unknown name gets
+    a usable stub, because this is only ever used to describe something and a
+    missing description should not stop a dropdown from being drawn."""
+    return ENGINE_INFO.get(name, {"label": name, "blurb": "", "url": ""})
+
 
 def engine_of(state=None):
     """Which engine the config asks for, sanity-checked.
