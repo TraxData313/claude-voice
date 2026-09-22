@@ -92,6 +92,11 @@ FONT_LINK = ("Segoe UI", 8, "underline")
 GREY = "#666666"
 LINK = "#1a5fb4"
 LINK_DARK = "#7aa7ff"
+# How a line was told to sound, where it is shown. The same ember her own room
+# marks it in, with a darker one for a light background -- the bright version
+# is legible on dark and washes out on white.
+MOOD = "#a8541b"
+MOOD_DARK = "#f0954a"
 
 # What the window is called, on its title bar and in the taskbar. The project
 # is claude-voice; the thing with a face on it is Abby, and the Desktop
@@ -688,6 +693,12 @@ class Panel:
         # time: a second copy would be two boxes with one queue behind them.
         self.typer = None
         self.typed = None
+        # The mood box inside it, and whether there is any point drawing one:
+        # only Qwen performs a mood, and a box that does nothing is worse than
+        # no box. Answered from the config before any poll, then from the
+        # engine's own answer.
+        self.typed_mood = None
+        self.takes_mood = False
         self.native_theme = ttk.Style().theme_use()
         # Asked once, and only after there is a Tk to ask. Everything the
         # transport row draws hangs off this.
@@ -805,6 +816,12 @@ class Panel:
         self.now = ttk.Label(said, text="…", font=FONT_BOLD, justify="left",
                              wraplength=270, anchor="w")
         self.now.pack(fill="x", pady=(1, 0))
+        # How it was told to sound, under the words it belongs to. Only Qwen
+        # takes one and most lines do not carry one, so this row has no height
+        # at all until there is something to put in it.
+        self.mood = ttk.Label(said, text="", font=FONT_SMALL, justify="left",
+                              wraplength=270, anchor="w")
+        self.moods = [self.mood]
 
         bar = ttk.Frame(head)
         bar.pack(fill="x", pady=(6, 0))
@@ -1335,6 +1352,8 @@ class Panel:
             label.configure(foreground=DARK["dim"] if dark else GREY)
         for label in self.links:
             label.configure(foreground=LINK_DARK if dark else LINK)
+        for label in getattr(self, "moods", ()):
+            label.configure(foreground=MOOD_DARK if dark else MOOD)
         # Not in either list: its colour says whether there is an update, so it
         # picks its own and has to be asked again when the theme changes.
         self.show_version(force=True)
@@ -1474,7 +1493,7 @@ class Panel:
 
     @staticmethod
     def _rows(parent, height, expand=False):
-        """A list of utterances: picture, time, project, session, words.
+        """A list of utterances: picture, time, project, session, mood, words.
 
         A Treeview rather than a Listbox because a Listbox holds text and
         nothing else -- no row of it can carry a picture -- and because real
@@ -1488,7 +1507,7 @@ class Panel:
         actually want to know is which repo has been doing the talking.
         """
         tree = ttk.Treeview(parent, height=height, style="Voice.Treeview",
-                            columns=("when", "project", "session", "text"),
+                            columns=("when", "project", "session", "mood", "text"),
                             show="tree", selectmode="browse")
         # Treeview adds its own indent in front of a row's picture, so this has
         # to be wider than the picture or the time beside it is sat on.
@@ -1496,6 +1515,12 @@ class Panel:
         tree.column("when", width=44, minwidth=44, stretch=False, anchor="w")
         tree.column("project", width=92, minwidth=54, stretch=False)
         tree.column("session", width=96, minwidth=54, stretch=False)
+        # No width until some row has a mood. Every column here is taking room
+        # from the line itself, which is the thing being read, and most lines
+        # carry no mood at all -- Pocket cannot perform one. show_mood_column
+        # gives it width when there is something to show and takes it back
+        # when there is not.
+        tree.column("mood", width=0, minwidth=0, stretch=False)
         tree.column("text", width=180, minwidth=80, stretch=True)
         tree.pack(fill="both" if expand else "x", expand=expand, padx=8)
         return tree
@@ -1797,6 +1822,10 @@ class Panel:
         else:
             self.now.configure(text="— nothing playing")
             self.whose.configure(text="")
+        self.show_mood((cur or {}).get("instruction"))
+        # The engine's own word on whether a mood would be used, which is what
+        # decides whether the typer offers a box for one.
+        self.takes_mood = bool(st.get("instruction"))
         # Idle, the face is whoever would speak next, which is worth seeing.
         speaker = (cur or {}).get("voice") or st.get("voice")
         if self.held("voice"):
@@ -2109,23 +2138,56 @@ class Panel:
             self.act("/speak", {"text": words, "voice": voice,
                                 "project": TEST_PROJECT})
 
+    def show_mood(self, words):
+        """The mood under the line that is speaking, or no row at all.
+
+        Packed and unpacked rather than blanked, so a line without one does not
+        leave a gap of empty space in the tallest, most-read part of the window.
+        """
+        words = (words or "").strip()
+        if not words:
+            return self.mood.pack_forget()
+        self.mood.configure(text="— " + one_line(words, 120))
+        if not self.mood.winfo_manager():
+            self.mood.pack(fill="x")
+
+    # How wide the mood column gets when there is anything to put in it. Narrow
+    # on purpose: it is taking the room from the words, and the whole of a mood
+    # is on the row's tooltip anyway.
+    MOOD_WIDTH = 104
+
+    def show_mood_column(self, tree, wanted):
+        """Give the mood a column when some row has one, and none when none do.
+
+        This window is 368 pixels and every column in it is taking width from
+        the line itself, which is the thing somebody is actually reading. Most
+        lines carry no mood -- Pocket cannot perform one at all -- so a column
+        standing there empty would be a permanent tax for an occasional answer.
+        """
+        if tree.column("mood", "width") != (self.MOOD_WIDTH if wanted else 0):
+            tree.column("mood", width=self.MOOD_WIDTH if wanted else 0,
+                        minwidth=0, stretch=False)
+
     def fill(self, tree, key, jobs):
         # "direct" is /voice say and the like, which belongs to no session and
         # no folder -- an empty project column reads better there than the word
         # repeated beside itself.
         rows = [(j["id"], j.get("voice"), j.get("when") or "",
                  one_line(j.get("project") or "", 22),
-                 one_line(j.get("session") or "direct", 22), one_line(j["text"], 200))
+                 one_line(j.get("session") or "direct", 22), one_line(j["text"], 200),
+                 one_line((j.get("instruction") or "").strip(), 60))
                 for j in jobs]
+        self.show_mood_column(tree, any(r[6] for r in rows))
         if self.drawn.get(key) == rows:
             return                                # redrawing loses the selection
         self.drawn[key] = rows
         tree.delete(*tree.get_children())
-        for jid, voice, when, project, session, text in rows:
+        for jid, voice, when, project, session, text, mood in rows:
             picture = self.icons.get(voice, ROW_ICON)
             # The utterance id is the row's own name, so a click needs no lookup
             # table to say which line was clicked.
-            tree.insert("", "end", iid=str(jid), values=(when, project, session, text),
+            tree.insert("", "end", iid=str(jid),
+                        values=(when, project, session, mood, text),
                         image=picture or "",
                         text="" if picture else f" {initial(voice)}",
                         tags=() if picture else (voice or "?",))
@@ -2183,6 +2245,7 @@ class Panel:
             voices = []            # no voices folder; the dropdown stays empty
         import pocket_engine
 
+        self.takes_mood = engine in ("qwen",)
         self.render_engine({"engine": engine, "engines": list(voice_lib.ENGINES),
                             "pocketReady": pocket_engine.available()})
         self.render_voices({"voices": voices, "voice": state.get("voice")})
@@ -2294,6 +2357,20 @@ class Panel:
         self.typed.pack(fill="both", expand=True)
         self.typed.bind("<Control-Return>", self.speak_typed)
 
+        # How it should sound, beside what it should say. One line, because it
+        # is a handful of words about delivery and not a second thing to read
+        # out -- and drawn at all only when the engine would perform it.
+        if self.takes_mood:
+            label = ttk.Label(frame, text="how it should sound — optional",
+                              font=FONT_SMALL, foreground=GREY, anchor="w")
+            label.pack(fill="x", pady=(8, 2))
+            self.dim.append(label)
+            self.typed_mood = tk.Entry(frame, font=FONT, borderwidth=1,
+                                       relief="solid", highlightthickness=0)
+            self.typed_mood.pack(fill="x")
+            self.typed_mood.bind("<Control-Return>", self.speak_typed)
+            self.typed_mood.bind("<Return>", self.speak_typed)
+
         row = ttk.Frame(frame)
         row.pack(fill="x", pady=(8, 0))
         # Enter puts in a line break, because this takes as many lines as you
@@ -2323,18 +2400,25 @@ class Panel:
         dark = bool(self.dark.get())
         self.typer.configure(background=DARK["bg"] if dark else
                              ttk.Style().lookup("TFrame", "background"))
-        self.typed.configure(
-            background=DARK["field"] if dark else "SystemWindow",
-            foreground=DARK["fg"] if dark else "SystemWindowText",
-            insertbackground=DARK["fg"] if dark else "SystemWindowText",
-            selectbackground=DARK["sel"] if dark else "SystemHighlight",
-            selectforeground=DARK["fg"] if dark else "SystemHighlightText")
+        # Both boxes, and the mood one only if it was drawn. A tk.Entry takes
+        # no ttk styles either, so it needs the same five colours by hand.
+        for box in (self.typed, self.typed_mood):
+            if box is None or not box.winfo_exists():
+                continue
+            box.configure(
+                background=DARK["field"] if dark else "SystemWindow",
+                foreground=DARK["fg"] if dark else "SystemWindowText",
+                insertbackground=DARK["fg"] if dark else "SystemWindowText",
+                selectbackground=DARK["sel"] if dark else "SystemHighlight",
+                selectforeground=DARK["fg"] if dark else "SystemHighlightText")
 
     def speak_typed(self, _event=None):
         words = self.typed.get("1.0", "end").strip()
+        mood = (self.typed_mood.get().strip()
+                if self.typed_mood is not None and self.typed_mood.winfo_exists() else "")
         if words:
             self.act("/speak", {"text": words, "project": TYPED_PROJECT,
-                                "queue": True})
+                                "queue": True, "instruction": mood})
             self.close_typer()
         # Or ctrl+enter sends the line and puts a line break in the box behind
         # it, which is only visible if it failed to send.
@@ -2350,7 +2434,7 @@ class Panel:
             # outlives the window; a dead widget left in it breaks the next
             # switch, which then leaves half the panel in the wrong colours.
             self.dim = [w for w in self.dim if w.winfo_exists()]
-        self.typer = self.typed = None
+        self.typer = self.typed = self.typed_mood = None
 
     # -- the window's own settings -----------------------------------------
     def open_settings(self):

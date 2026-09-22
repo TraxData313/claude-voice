@@ -6,6 +6,42 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.13.0 — 2026-09-22
+
+**On the graphics card she can be told how to say a line, not just what to say — slowly and
+sadly, or quick and delighted.**
+
+- **Qwen takes a mood.** `POST /speak` carries it as `instruction`, beside the text rather
+  than inside it: it steers delivery and changes no word that is read. `/state` and
+  `/health` answer `instruction: true` when the configured engine would use one, so a
+  caller can ask before offering the feature to anybody.
+- **The field was there the whole time.** `0x28` in the parameter block, mapped from
+  Studio's own ABI when the block was reverse-engineered, and passed as null every day
+  since. It is read, and the engine says so itself while building the prefill —
+  `n_instruct=0` with nothing sent, `n_instruct=15` with a sentence of steering.
+- **And it does something**, which is a different question. Same words, same voice, four
+  runs each: 4.24 s with nothing, **5.74 s** told to speak slowly and sadly, **3.88 s**
+  told to speak quickly and excitedly. `probe_instruction.py` is that measurement if it
+  ever needs making again; it loads the talker and spends a minute of GPU, so it is run on
+  purpose rather than to see whether it works.
+- **The panel shows it, and lets you try one.** The mood a line was given sits
+  under the words while it plays, and gets a column of its own in the queue and
+  the history — a column with no width at all until some row has one, because
+  this window is 368 pixels and every column is taking room from the line itself.
+  The typing box behind `+` has a second field for a mood, drawn only when the
+  configured engine would perform it.
+- **Qwen can come back.** Found while testing the above, and older than it: a
+  process gets one JVM and no way to take it down, so swapping to Pocket and back
+  met `JNI_CreateJavaVM failed: -5` — *a VM already exists* — and the engine stayed
+  dead until the whole server was restarted. It now joins the VM that is already
+  there. It asks **before** creating rather than after a refusal, because a refused
+  create leaves `JNI_GetCreatedJavaVMs` answering "no VM here" for the rest of the
+  process: by the time you have the error you can no longer find what caused it.
+- **Pocket is never sent one.** It has no such field, and handing an engine a keyword it
+  never declared would raise on the sentence rather than be ignored — a failure that
+  arrives as silence. The decision is made once, in `Speaker._kwargs`, against the engine
+  that is actually loaded rather than the one the config names.
+
 ## 1.12.0 — 2026-09-22
 
 **There is a second engine now: a small one that runs on your processor, so you no longer

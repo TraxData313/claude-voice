@@ -1,15 +1,16 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "date": "2026-09-22",
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "There is a second engine now: a small one that runs on your processor, so you no longer need a graphics card to be spoken to.",
+  "headline": "On the graphics card she can be told how to say a line, not just what to say -- slowly and sadly, or quick and delighted.",
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "Pocket TTS joins the original engine. It installs with pip, runs on two CPU cores, and reaches the first word in under two hundred milliseconds -- a fifth of what the GPU engine takes.",
-    "Twenty-one English voices come with it, plus five more in French, German, Italian, Spanish and Brazilian Portuguese. Picking one loads its own model.",
-    "It reads no Cyrillic, so Cyrillic is taken out of a line before speaking and you are told it happened.",
-    "Your own voices can be carried across with make_pocket_voice.py, which needs no original recording -- it renders one from the engine you already have."
+    "Qwen takes a second string beside the words. POST /speak carries it as \"instruction\", and it steers delivery without changing a word that is read.",
+    "The panel shows the mood a line was given -- under the words while it plays, and in a column of its own in the queue and the history. The typing box has a field for trying one by hand.",
+    "The field was in the parameter block all along, mapped from Studio and passed as null since the day it was mapped. It is read: the engine tokenizes it into the prefill, and the same sentence runs 5.74 seconds told to be slow and sad against 3.88 told to be quick and excited.",
+    "Pocket has no such field and is never sent one, so nothing about the processor engine changes.",
+    "Swapping to the processor engine and back used to leave the graphics one dead until the whole server was restarted -- one Java machine per process, and it refused to make a second. It joins the one already there now."
   ],
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
   "needsSetup": false,

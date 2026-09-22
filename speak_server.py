@@ -225,14 +225,19 @@ class Job:
     """
 
     __slots__ = ("id", "chunks", "voice", "kwargs", "text", "session", "project",
-                 "when", "cancelled", "stalled")
+                 "when", "cancelled", "stalled", "instruction")
     _ids = itertools.count(1)
 
-    def __init__(self, chunks, voice, kwargs, text=None, session=None, project=None):
+    def __init__(self, chunks, voice, kwargs, text=None, session=None, project=None,
+                 instruction=None):
         self.id = next(Job._ids)
         self.chunks = list(chunks)
         self.voice = voice
         self.kwargs = kwargs
+        # How it is to be delivered, in words -- "sound daring and brave". Not
+        # in kwargs, because kwargs identify a voice and are handed through
+        # unread; this one only means anything to an engine that takes it.
+        self.instruction = (instruction or "").strip() or None
         # What was said, without the session name the watcher may have prefixed
         # -- the label is shown in its own column rather than read as the line.
         self.text = text if text is not None else " ".join(self.chunks)
@@ -252,6 +257,7 @@ class Job:
             "session": self.session,
             "project": self.project,
             "voice": self.voice,
+            "instruction": self.instruction,
             "when": time.strftime("%H:%M", time.localtime(self.when)),
         }
 
@@ -414,7 +420,8 @@ class Speaker:
         # Asking to hear something is asking to hear it, so it lifts a hold
         # rather than queueing up behind one.
         self.pause(False)
-        again = Job(job.chunks, job.voice, job.kwargs, job.text, job.session)
+        again = Job(job.chunks, job.voice, job.kwargs, job.text, job.session,
+                    job.project, job.instruction)
         self.submit(again, barge=True)
         return again
 
@@ -432,7 +439,8 @@ class Speaker:
         src = rec["job"]
         self.cancel()            # asking for this one is asking for it now
         self.pause(False)        # and "now" is not "once you press play"
-        again = Job(src.chunks, src.voice, src.kwargs, src.text, src.session)
+        again = Job(src.chunks, src.voice, src.kwargs, src.text, src.session,
+                    src.project, src.instruction)
         # The play queue is deliberately short, so feeding it blocks -- and an
         # HTTP handler must not. Hand it to a thread that only ever enqueues.
         threading.Thread(target=self._feed, args=(again, wavs),
@@ -695,6 +703,19 @@ class Speaker:
                     if self.current is job:
                         self.current = None
 
+    def _kwargs(self, job):
+        """What the loaded engine is called with, mood included if it takes one.
+
+        Only Qwen does. Pocket's delivery is the voice and nothing else, and
+        handing it a keyword it never declared would raise on the sentence
+        rather than ignore it -- so the decision is made here, once, against
+        the engine that is actually loaded rather than the one the config
+        names.
+        """
+        if job.instruction and self.engine_name in INSTRUCTED_ENGINES:
+            return {**job.kwargs, "instruction": job.instruction}
+        return job.kwargs
+
     def _live(self):
         """The config as it is now, not as it was when this process started.
 
@@ -929,7 +950,7 @@ class Speaker:
             try:
                 eng.synthesize_streaming(text, on_piece,
                                          max_seconds=voice_lib.ceiling_seconds(text),
-                                         **job.kwargs)
+                                         **self._kwargs(job))
             except Exception as exc:
                 if spoken[0] > 0:
                     # Already speaking, so there is no going back to the old
@@ -991,7 +1012,7 @@ class Speaker:
         expect = voice_lib.expected_seconds(chunk)
         best = None
         for attempt in (1, 2):
-            samples = eng.synthesize(chunk, **job.kwargs)
+            samples = eng.synthesize(chunk, **self._kwargs(job))
             seconds = len(samples) / SAMPLE_RATE
             verdict = voice_lib.audio_verdict(chunk, seconds)
             if verdict == "ok":
@@ -1747,6 +1768,27 @@ def _pocket_ready():
 
 _POCKET = {"known": None}
 
+# Engines that take a mood alongside the words. Qwen has a field for it in its
+# own parameter block; Pocket has nothing of the kind, and its delivery is
+# whatever the voice does.
+INSTRUCTED_ENGINES = ("qwen",)
+MAX_INSTRUCTION = 200
+
+
+def _takes_instruction():
+    """Whether a mood sent with the next line would be used.
+
+    The configured engine rather than the loaded one, because the engine
+    thread swaps before it speaks: whatever the config names now is what the
+    next sentence comes out of. Reading `engine_name` here would answer about
+    the previous line and leave the first one after a swap moodless for no
+    reason anybody could see.
+    """
+    try:
+        return voice_lib.engine_of(voice_lib.load_state()) in INSTRUCTED_ENGINES
+    except Exception:
+        return False
+
 
 def _voice_list(state, ttl=15.0):
     """The catalogue, rebuilt occasionally rather than on demand.
@@ -1802,7 +1844,8 @@ class Handler(BaseHTTPRequestHandler):
         sp = Handler.speaker
 
         if route == "/health":
-            return self._reply(200, {**sp.status(), "watching": Handler.watching})
+            return self._reply(200, {**sp.status(), "watching": Handler.watching,
+                                     "instruction": _takes_instruction()})
 
         if route == "/state":
             # Everything the panel draws, in one round trip. It owns no state
@@ -1818,6 +1861,11 @@ class Handler(BaseHTTPRequestHandler):
                 "engine": voice_lib.engine_of(state),
                 "engines": list(voice_lib.ENGINES),
                 "pocketReady": _pocket_ready(),
+                # Whether a mood sent with a line would actually be used. The
+                # config's engine and the loaded engine differ for as long as
+                # a swap takes, and a caller deciding whether to offer moods
+                # wants the one that is really going to speak.
+                "instruction": _takes_instruction(),
                 "volume": win_volume.clamp(state.get("volume", 1.0)),
                 "enabled": bool(state.get("enabled")),
             })
@@ -1961,13 +2009,22 @@ class Handler(BaseHTTPRequestHandler):
             # The project is passed through because the panel draws a column of
             # them, and something typed by hand belongs to no folder; saying so
             # is better than an empty cell nobody can account for.
+            # How it is to be delivered, in the caller's own words. Kept as
+            # sent, and dropped by the engine thread if the loaded engine has
+            # no use for it -- which is why the reply says what was actually
+            # done with it rather than only that it arrived.
+            instruction = (payload.get("instruction") or "").strip()[:MAX_INSTRUCTION]
             sp.submit(Job(pieces, voice["id"], kwargs, text=text,
                           session=payload.get("session"),
-                          project=payload.get("project")),
+                          project=payload.get("project"),
+                          instruction=instruction),
                       barge=not payload.get("queue"))
             log(f"speak [{voice['id']}] {len(pieces)} chunk(s): "
+                f"{'(' + instruction + ') ' if instruction else ''}"
                 f"{'<' + announced.strip() + '> ' if announced else ''}{text[:60]}...")
-            return self._reply(202, {"queued": len(pieces), "voice": voice["id"]})
+            return self._reply(202, {"queued": len(pieces), "voice": voice["id"],
+                                     "instruction": instruction or None,
+                                     "instructed": bool(instruction) and _takes_instruction()})
 
         self._reply(404, {"error": f"no route {route}"})
 

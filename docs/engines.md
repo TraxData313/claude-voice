@@ -73,6 +73,42 @@ model costs seconds, and spending them when a message arrives puts the wait wher
 somebody is already waiting. Until then `voice_cli.py status` says which is still
 loaded.
 
+## Telling Qwen how to say it
+
+Qwen takes a second string beside the words: not more to read, but how to read
+it. `POST /speak` carries it as `instruction`, and `/state` answers
+`instruction: true` when the configured engine would use one, so a caller can
+ask before it offers the feature to anybody.
+
+```
+{"text": "I did not expect you back so soon.", "instruction": "sound daring and brave"}
+```
+
+It had been sitting in the parameter block the whole time — `0x28`, mapped from
+Studio's own ABI and passed as null since the day it was mapped. It is read. The
+engine says so itself, in the line it prints while building the prefill:
+
+```
+build_prefill_graph: n_tokens=27, n_instruct=0,  has_speaker=yes   <- no instruction
+build_prefill_graph: n_tokens=27, n_instruct=15, has_speaker=yes   <- one sent
+```
+
+And it does something. The same sentence, same voice, four runs each:
+
+| | mean audio |
+|---|---|
+| nothing | 4.24 s |
+| *speak very slowly and sadly* | 5.74 s |
+| *speak quickly and excitedly* | 3.88 s |
+
+`probe_instruction.py` is that measurement, if it needs making again. It loads
+the talker and spends a minute of GPU, so run it on purpose.
+
+**Pocket has no such field**, and it is never sent one — a keyword an engine did
+not declare would raise on the sentence rather than be ignored, and that failure
+arrives as silence. The decision is made once, in `Speaker._kwargs`, against the
+engine that is actually loaded.
+
 ## Cyrillic, and why there is a spoken warning
 
 Pocket TTS does not fail on Cyrillic. It runs away. Measured here, *"Сега ще
@@ -279,10 +315,12 @@ still open and unanswered when this was written.
 So Abby cannot live there, and a voice that cannot carry across is most of what
 this project wants an engine for.
 
-**Emotion is a voice, not a parameter.** Worth writing down because the obvious
-guess is wrong and it is the thing people ask. There is no steering string, no
-style argument and no `*laughs*` markup — the reference script takes a repo, a
-voice, and a device. The mood is baked into the embedding, which you can read
+**Emotion is a voice, not a parameter — here.** Worth writing down because the
+obvious guess is wrong and it is the thing people ask. Note that this is a fact
+about Kyutai and not about TTS: Qwen next door does take a steering string, and
+[Telling Qwen how to say it](#telling-qwen-how-to-say-it) is the measurement.
+In Kyutai there is no steering string, no style argument and no `*laughs*`
+markup — the reference script takes a repo, a voice, and a device. The mood is baked into the embedding, which you can read
 straight off the default:
 
 ```

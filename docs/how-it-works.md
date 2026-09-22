@@ -392,6 +392,18 @@ Kept because they will not be obvious to the next person either. The ones about 
 their own page now: **[engine-notes.md](engine-notes.md)**, with the measurements behind
 each and where the guards are still missing.
 
+**A refused `JNI_CreateJavaVM` hides its own cause.** A process gets one JVM and there is
+no taking it down, so the second Qwen in a process — swapped away to Pocket and back —
+gets `-5`, `JNI_EEXIST`, and the obvious fix is to catch that and join the VM already
+there. It does not work. The refused create leaves `JNI_GetCreatedJavaVMs` answering
+*no VM here* for the rest of the process: before the refused call it reports one, after it
+reports none, with a success return code both times. So by the time you are holding the
+error, the thing that caused it has become invisible. Ask **first** and create only if the
+answer is no. And give `JNI_GetCreatedJavaVMs` explicit `argtypes` — without them the count
+never comes back written, which also reads as *no VM here*, so the two failures look
+identical and neither says anything. `test_mood.py` pins the argtypes; the swap itself
+needs a real VM and cannot be tested without one.
+
 **A pause at a seam was being paid for three times.** `quiet_cut` found the quietest 40ms
 window and cut at the end of it — but a pause in speech is far longer than 40ms, so the
 rest of it survived: some trailing the piece, the remainder leading the next, and both

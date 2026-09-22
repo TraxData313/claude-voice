@@ -28,6 +28,14 @@ from ctypes import (CFUNCTYPE, POINTER, c_char_p, c_float, c_int, c_int64,
                     c_uint8, c_void_p)
 
 JNI_VERSION_1_8 = 0x00010008
+# A JVM outlives the engine that made it. There is exactly one per process and
+# no way to take it down and put another up, so the second Qwen load in a
+# process is an attach rather than a creation. These are the slots of the
+# invocation table (JNIInvokeInterface_), which is a different table from the
+# JNIEnv one above.
+JNI_EEXIST = -5
+VM_ATTACH_CURRENT_THREAD = 4
+VM_GET_ENV = 6
 
 # Slot numbers in the JNINativeInterface function table (jni.h order).
 FIND_CLASS = 6
@@ -311,6 +319,40 @@ class Jni:
             self._fn(DELETE_LOCAL_REF, None, [c_void_p, c_void_p])(self.env, ref)
 
 
+def _existing_jvm_env(jvm):
+    """A JNIEnv on the JVM this process already has, or None if it has none.
+
+    `GetEnv` answers for a thread the VM already knows and `AttachCurrentThread`
+    enrols one it does not; the engine thread is usually the same one both
+    times, but it costs nothing to survive not being.
+    """
+    # Spelled out rather than left to ctypes' defaults. Without argtypes the
+    # buffer does not come back written: the call returns 0 for success and the
+    # count is still whatever it was, which reads as "no VM" either way and so
+    # can never say yes.
+    find = jvm.JNI_GetCreatedJavaVMs
+    find.restype = c_int
+    find.argtypes = [POINTER(c_void_p), c_int, POINTER(c_int)]
+    vms = (c_void_p * 4)()
+    found = c_int(0)
+    if find(ctypes.cast(vms, POINTER(c_void_p)), 4, ctypes.byref(found)) != 0:
+        return None
+    if not found.value or not vms[0]:
+        return None
+    table = ctypes.cast(vms[0], POINTER(POINTER(c_void_p))).contents
+    env = c_void_p()
+    get_env = ctypes.CFUNCTYPE(c_int, c_void_p, POINTER(c_void_p), c_int)(
+        table[VM_GET_ENV])
+    if get_env(vms[0], ctypes.byref(env), JNI_VERSION_1_8) == 0 and env:
+        return env
+    attach = ctypes.CFUNCTYPE(c_int, c_void_p, POINTER(c_void_p), c_void_p)(
+        table[VM_ATTACH_CURRENT_THREAD])
+    rc = attach(vms[0], ctypes.byref(env), None)
+    if rc != 0 or not env:
+        raise RuntimeError(f"a JVM is here but would not have us: {rc}")
+    return env
+
+
 class Engine:
     """QwenEngine, minus the user interface.
 
@@ -354,11 +396,22 @@ class Engine:
             arr[i].optionString = o
             arr[i].extraInfo = None
 
-        args = JavaVMInitArgs(JNI_VERSION_1_8, len(opts), arr, 0)
-        pvm, penv = c_void_p(), c_void_p()
-        rc = jvm.JNI_CreateJavaVM(ctypes.byref(pvm), ctypes.byref(penv), ctypes.byref(args))
-        if rc != 0:
-            raise RuntimeError(f"JNI_CreateJavaVM failed: {rc}")
+        # Ask before creating. A process gets one JVM and no way to take it
+        # down, so the second Qwen in a process -- swapped away to Pocket and
+        # back -- has to join the first one's. Asking first rather than after
+        # a refusal is not tidiness: a refused JNI_CreateJavaVM leaves the
+        # lookup answering "no VM here" for the rest of the process, so by the
+        # time you have the error you can no longer find what caused it.
+        penv = _existing_jvm_env(jvm)
+        if penv is not None:
+            self._log("joined the JVM this process already had")
+        else:
+            args = JavaVMInitArgs(JNI_VERSION_1_8, len(opts), arr, 0)
+            pvm, penv = c_void_p(), c_void_p()
+            rc = jvm.JNI_CreateJavaVM(ctypes.byref(pvm), ctypes.byref(penv),
+                                      ctypes.byref(args))
+            if rc != 0:
+                raise RuntimeError(f"JNI_CreateJavaVM failed: {rc}")
 
         self.jni = Jni(penv)
         cls = self.jni.find_class("com/qwen/tts/studio/engine/QwenEngine")
@@ -463,7 +516,7 @@ class Engine:
 
     def synthesize_streaming(self, text, on_piece, embedding_path=None,
                              icl_prompt_path=None, language_id=-1,
-                             max_seconds=None):
+                             max_seconds=None, instruction=None):
         """One generation, handed over in pieces as it is made.
 
         `on_piece(samples, chunk)` is called for each piece, on this thread,
@@ -476,6 +529,11 @@ class Engine:
         several subtly different speakers; one streaming call keeps two seconds
         of what it has already said as context for the next piece, which is what
         carries the voice across a seam unchanged.
+
+        `instruction` is the mood, in words -- "sound daring and brave". It goes
+        into the parameter block's own 0x28 field, which Studio writes and we
+        had always left null. It steers delivery, not wording: the voice is
+        still whoever the embedding is, and the text is still the text.
 
         Returns how many samples were handed over. Truncation is safe: a derail
         drifts, so everything already handed over is good speech.
@@ -493,6 +551,12 @@ class Engine:
         budget = int(tokens * SAMPLES_PER_TOKEN * 1.1) + SAMPLE_RATE
 
         params = QwenParams.studio_defaults(language_id, tokens)
+        # The buffer, not just the pointer: a temporary would be collected
+        # while the DLL still held its address, and the bug that makes is the
+        # kind that only shows up under load.
+        mood = ctypes.create_string_buffer(instruction.encode("utf-8")) if instruction else None
+        if mood is not None:
+            params.instruction = ctypes.cast(mood, c_void_p)
         params.chunk_seconds = CHUNK_SECONDS
         params.left_context_seconds = LEFT_CONTEXT_SECONDS
         params.collect_audio = 0        # the pieces are the output; do not keep a second copy
@@ -532,6 +596,7 @@ class Engine:
 
         result = call(c_void_p(self.handle), text.encode("utf-8"), voice,
                       ctypes.byref(params), cb, None)
+        del mood                                    # held until the call returned
         try:
             if state["error"] is not None:
                 raise state["error"]
@@ -545,19 +610,24 @@ class Engine:
         return state["samples"]
 
     def synthesize(self, text, embedding_path=None, icl_prompt_path=None,
-                   reference_wav=None, language_id=-1):
-        """Speak `text` in the given voice. Returns mono float samples at SAMPLE_RATE."""
+                   reference_wav=None, language_id=-1, instruction=None):
+        """Speak `text` in the given voice. Returns mono float samples at SAMPLE_RATE.
+
+        The two trailing strings of `generate` are the two trailing pointers of
+        the parameter block, in the same order: instruction, then speaker. Only
+        the first is ours to fill.
+        """
         mid = self.jni.method_id(
             self.cls, "generate",
             "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
             "Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)[F")
 
         refs = [self.jni.new_string(s) for s in
-                (text, reference_wav, embedding_path, icl_prompt_path)]
+                (text, reference_wav, embedding_path, icl_prompt_path, instruction)]
         try:
             arr = self.jni.call_object(
                 self.engine, mid, refs[0], refs[1], refs[2], refs[3],
-                Jint(language_id), None, None)
+                Jint(language_id), refs[4], None)
             if not arr:
                 raise RuntimeError(f"generate returned null: {self.last_error()}")
             try:
