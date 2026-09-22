@@ -143,6 +143,10 @@ ART_STEP = 16                # ask in steps, so a slow drag is not a hundred red
 # always room for the whole of her. Any less and she would have to be cropped
 # to fit, and she is shown whole or not at all.
 ART_FLOOR = 180
+# The chevron on the handle above her. Down is what pressing it does to her,
+# up is what pressing it does next -- the arrow is the verb, not a state.
+ART_HIDE = "▾"
+ART_SHOW = "▴"
 FACE = 128                   # the portrait beside the line being spoken
 # The four worth offering. Any number can still be typed in, and the sizes in
 # between were a longer list saying nothing a person choosing would want said.
@@ -640,6 +644,11 @@ class Panel:
         self.links = []              # and the ones that are clickable
         saved = voice_lib.load_state()
         self.face_size = _sane_size(saved.get("panelFace", FACE))
+        # Whether she is showing along the bottom. A picture is the first thing
+        # to be in the way when the window is short and the history is long,
+        # and the last thing to want gone when it is not -- so it is a fold,
+        # not a setting, and the window opens the way it was left.
+        self.art_open = bool(saved.get("panelArt", True))
         self.on_top = tk.BooleanVar(value=bool(saved.get("panelTopmost", True)))
         self.dark = tk.BooleanVar(value=bool(saved.get("panelDark", False)))
         # Load an engine and turn the voice on as the window opens, because
@@ -764,7 +773,7 @@ class Panel:
                                        font=FONT_SMALL)
         self.engine_box.pack(side="left")
         self.engine_box.bind("<<ComboboxSelected>>", self.pick_engine)
-        self.tips["engine"] = Tip(self.engine_box, self._engine_says, self.dark.get)
+        self.tips["engines"] = Tip(self.engine_box, self._engines_say, self.dark.get)
         picks = ttk.Frame(who)
         picks.pack(pady=(3, 0))
         # Wider than it was. The dropdown list is only as wide as the box, so a
@@ -977,7 +986,31 @@ class Panel:
         self.art = tk.Canvas(root, highlightthickness=0, borderwidth=0, height=1)
         self.art.pack(side="bottom", fill="x")
 
-        ttk.Separator(root).pack(side="bottom", fill="x", padx=8, pady=(8, 4))
+        # The line above her, with a chevron sat on the end of it: the whole
+        # row is the handle that folds her away and brings her back. It is the
+        # separator that was already there, so the control costs no height --
+        # and it is right above the thing it hides, which is the only place a
+        # reader would look for it.
+        handle = ttk.Frame(root)
+        handle.pack(side="bottom", fill="x", padx=8, pady=(8, 4))
+        rule = ttk.Separator(handle)
+        # The line sits at the height it used to, which is the middle of the
+        # chevron beside it rather than the top of the row.
+        rule.pack(side="left", fill="x", expand=True, pady=(5, 0))
+        # Bigger than the small print it is coloured like: at eight point the
+        # chevron is five pixels of grey on a dark line, which is something you
+        # find by accident rather than by looking for it.
+        self.art_handle = ttk.Label(handle, font=(FONT[0], 11), foreground=GREY,
+                                    cursor="hand2")
+        self.art_handle.pack(side="right", padx=(8, 0))
+        self.dim.append(self.art_handle)
+        # All three, because a two-pixel line is not a target: anywhere along
+        # the row does it.
+        for part in (handle, rule, self.art_handle):
+            part.bind("<Button-1>", self.flip_art)
+        self.tips["art"] = Tip(self.art_handle, self._art_says, self.dark.get)
+        self.paint_art()
+
         self.sessions = ttk.Frame(root)
         self.sessions.pack(side="bottom", fill="x", padx=8)
         self._section(root, "sessions — ticked means heard").pack_configure(side="bottom")
@@ -1118,7 +1151,15 @@ class Panel:
         who = self.voice_names.get(self.drawn.get("voice")) or "this voice"
         return f"click to hear {who}\nright-click swaps voice"
 
-    def _engine_says(self):
+    def _engines_say(self):
+        """What the dropdown's two entries are, for whoever is choosing.
+
+        Named apart from _engine_says on purpose. Both used to be called that,
+        and since the button's one is defined later in the class it quietly won
+        -- so the dropdown, which asks "which engine", hovered as "turn the
+        engine OFF". Two methods of one name is not an error anywhere in
+        Python; it is just the second one.
+        """
         note = ENGINE_NOTES.get(self.engine, "")
         loaded = self.drawn.get("engineLoaded")
         # Only worth saying while the two disagree, which is until the next
@@ -1475,6 +1516,26 @@ class Panel:
             self.now.configure(wraplength=max(140, width - column - 40))
         self.draw_art()
 
+    def flip_art(self, _event=None):
+        """Fold her away, or bring her back.
+
+        The room she gives up goes to the history rather than out of the
+        window: the lists are what asked for it in the first place. Wanting the
+        window smaller as well is then a drag of its edge, which folding her
+        away is what makes possible -- see hold_the_floor.
+        """
+        self.art_open = not self.art_open
+        voice_lib.patch_state(panelArt=self.art_open)
+        self.paint_art()
+        self.draw_art(force=True)
+
+    def paint_art(self):
+        self.art_handle.configure(text=ART_HIDE if self.art_open else ART_SHOW)
+
+    def _art_says(self):
+        return ("hide the picture — the history takes the room" if self.art_open
+                else "show the picture")
+
     def draw_art(self, force=False):
         """Abby along the bottom, as big as the window can spare.
 
@@ -1483,6 +1544,18 @@ class Panel:
         little scenery off her sides rather than squashing her.
         """
         if self.drawing_art:
+            return
+        # Folded away: the canvas goes to a single pixel rather than being
+        # unpacked. Packing is by order, and she was packed between the credit
+        # line and the handle -- put back later she would land somewhere else
+        # in that order, which is a stranger bug than a pixel of background.
+        if not self.art_open:
+            if self.drawn.get("art") == "shut" and not force:
+                return
+            self.drawn["art"] = "shut"
+            self.art.configure(height=1)
+            self.art.delete("all")
+            self.hold_the_floor()
             return
         wide = max(120, self.root.winfo_width()) // ART_STEP * ART_STEP
         # Room nothing else is entitled to. The packer hands out space in the
@@ -1875,7 +1948,9 @@ class Panel:
         # lists give up their spare height to her happily, but not their own
         # rows, so without this the window could be dragged to a size where she
         # had nowhere to be.
-        least = self._least_height() + ART_FLOOR
+        # Nothing is reserved for a picture that is not being drawn, which is
+        # what lets the window be pulled properly small once she is folded.
+        least = self._least_height() + (ART_FLOOR if self.art_open else 0)
         if least == self.drawn.get("floor"):
             return
         self.drawn["floor"] = least
