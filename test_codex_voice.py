@@ -108,6 +108,35 @@ class CodexVoiceTests(unittest.TestCase):
                 self.assertEqual(self.spoken, ["This resumed task speaks."])
                 self.assertEqual(len(watcher.sessions()), 1)
 
+    def test_incomplete_guardian_identity_is_retried_and_silenced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            watcher = self.watcher
+            watcher.PROJECTS = os.path.join(directory, "absent")
+            watcher.CODEX_SESSIONS = directory
+            watcher.OFFSETS = str(Path(directory) / "offsets.json")
+            watcher.offsets = {}
+            path = Path(directory) / "2026" / "09" / "13" / "guardian.jsonl"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"")
+            state = {**self.state, "enabled": True, "watch": True, "watchCodex": True}
+            with patch.object(voice_lib, "load_state", return_value=state):
+                # Reproduce the panel polling between file creation and the
+                # first record. An unresolved identity must never be cached.
+                self.assertIsNone(watcher._ensure_label(str(path)))
+                self.assertNotIn(str(path), watcher.labels)
+                list(watcher._transcripts())
+                guardian = {"type": "session_meta", "payload": {
+                    "cwd": r"C:\work\demo", "source": {"subagent": {"other": "guardian"}},
+                    "thread_source": "guardian_review"}}
+                decision = self.message(
+                    '{"risk_level":"low","outcome":"allow"}')
+                path.write_text(json.dumps(guardian) + "\n" + decision + "\n",
+                                encoding="utf-8")
+                watcher._sweep()
+                self.assertTrue(watcher.headless[str(path)])
+                self.assertEqual(self.spoken, [])
+                self.assertEqual(watcher.sessions(), [])
+
 
 if __name__ == "__main__":
     unittest.main()
