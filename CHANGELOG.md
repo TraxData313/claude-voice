@@ -6,7 +6,7 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
-## 1.14.0 — unreleased
+## 1.14.0 — 2026-09-24
 
 **A one-window setup for people who have never seen a terminal, and a voice a game can speak its
 characters through.**
@@ -23,6 +23,9 @@ characters through.**
 - **Pocket speaks any voice with a clip**, where cloning is available — and records whether it is.
   `make_reference_clips.py` gives a whole library its clips in one pass.
 - **The panel no longer floats on top by default.** Its own tick box still does it.
+- **It uninstalls like any other program**: Settings → Apps → claude-voice → Uninstall, one
+  window that lists what goes and asks first. Only what the setup itself installed is taken
+  (`installed.json`); a git clone is refused. `uninstall.ps1 -WhatIf` shows the list.
 
 ## 1.13.0 — 2026-09-22
 

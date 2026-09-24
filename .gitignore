@@ -35,3 +35,6 @@ setup-app/dist/
 # Voices kept on this machine and never published: the Calradia library carried over from the
 # Immersive AI mod lives here. Read through "extraVoicesDirs" in config.json.
 voices-local/
+
+# What setup.ps1 installed on this machine, for uninstall.ps1. Per machine, never published.
+installed.json

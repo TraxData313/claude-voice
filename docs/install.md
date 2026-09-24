@@ -232,6 +232,26 @@ Two provisos, and neither is about permissions:
   The second one works even where the first is blocked by group policy, because the rule is
   about running script *files*.
 
+## Removing it
+
+**Settings → Apps → claude-voice → Uninstall**, when it was installed by `ClaudeVoiceSetup.exe` or
+`setup.ps1` into a folder of its own. That runs `uninstall.ps1`, which shows one window listing
+what it will take and asks first:
+
+- the claude-voice folder itself, with its voices and settings
+- Breeze, Qwen-TTS Studio and the Qwen model, Pocket's model, and Python — **each only if the
+  setup installed it**. `setup.ps1` keeps that list in `installed.json` as it goes, so a Python or
+  a Studio you already had, or one belonging to another copy of claude-voice, is never taken
+- its shortcuts, the `where.json` note games find it by, and its Claude Code hooks when it had any
+
+```powershell
+.\uninstall.ps1 -WhatIf        # says what it would remove, and removes nothing
+.\uninstall.ps1 -KeepPython    # everything but the Python it installed
+```
+
+**A git clone is refused.** It is somebody's own checkout, not an install, and it is never
+listed in Settings → Apps either — delete the folder by hand if you mean it.
+
 ## When it does not work
 
 Silence has no error message. **[When it goes quiet →](troubleshooting.md)** is the page for

@@ -136,7 +136,7 @@ namespace ClaudeVoiceSetup
         /// <summary>Everything except what belongs to this machine: its settings, its logs, a git
         /// history, and the setup program's own build output.</summary>
         private static readonly HashSet<string> NeverCopied = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            { ".git", "logs", "__pycache__", "config.json", "bin", "obj", "dist", "voices-local" };
+            { ".git", "logs", "__pycache__", "config.json", "bin", "obj", "dist", "voices-local", "installed.json" };
 
         private static void CopyTree(string from, string to)
         {

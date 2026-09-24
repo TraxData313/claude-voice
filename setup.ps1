@@ -65,6 +65,27 @@ $repo = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 
 function Say($msg, $colour = "Gray") { Write-Host $msg -ForegroundColor $colour }
 
+# What THIS setup put on the machine, as against what it found there and used. uninstall.ps1
+# removes exactly this list, so a Python, a Studio or a Breeze somebody already had -- or a second
+# claude-voice's -- is never taken away with ours. Merged across runs, because a run that stopped
+# half way and was started again finds its own earlier work and would otherwise call it found.
+$claimsPath = Join-Path $repo "installed.json"
+$claims = [ordered]@{}
+if (Test-Path $claimsPath) {
+    try {
+        ([System.IO.File]::ReadAllText($claimsPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json).PSObject.Properties |
+            ForEach-Object { $claims[$_.Name] = $_.Value }
+    } catch { }
+}
+function Claim($name, $value) { if (-not $WhatIf) { $claims[$name] = $value } }
+function Save-Claims {
+    if ($WhatIf) { return }
+    $claims["root"] = $repo
+    $claims["date"] = (Get-Date).ToString("yyyy-MM-dd HH:mm")
+    [System.IO.File]::WriteAllText($claimsPath, ($claims | ConvertTo-Json -Depth 5),
+                                   (New-Object System.Text.UTF8Encoding $false))
+}
+
 # Running this again is meant to be cheap. On a machine set up for Pocket TTS
 # because it has no graphics card, a bare re-run falling back to Qwen would
 # start pulling three gigabytes of Studio and model it can never use.
@@ -211,6 +232,8 @@ if ($PythonExe) {
     $PythonExe = Join-Path $env:LOCALAPPDATA "Programs\Python\$tag\python.exe"
     if (-not (Test-Path $PythonExe)) { $PythonExe = Find-Python }
     if (-not $PythonExe) { throw "installed Python but cannot find python.exe. Pass -PythonExe." }
+    Claim "python" $PythonExe
+    Save-Claims
     Say "python        : $PythonExe" "Green"
 }
 
@@ -271,6 +294,7 @@ if ($Engine -eq "pocket") {
         Say "pocket-tts    : installing with pip -- it brings torch's CPU build, a few hundred MB"
         & $PythonExe -m pip install pocket-tts
         if ($LASTEXITCODE -ne 0) { throw "pip install pocket-tts exited with $LASTEXITCODE" }
+        Claim "pocket" $true
         Say "pocket-tts    : installed" "Green"
     }
 }
@@ -303,6 +327,7 @@ if ($Engine -eq "pocket") {
                 Say "would move    : $found -> $StudioDir" "Yellow"
             } else {
                 Move-StudioInto $found $StudioDir
+                Claim "studio" $StudioDir
                 Say "studio        : moved out of Downloads -> $StudioDir" "Green"
             }
         } else {
@@ -364,6 +389,8 @@ if ($Engine -eq "pocket") {
 
             Move-StudioInto $root $StudioDir
             Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
+            Claim "studio" $StudioDir
+            Save-Claims
             Say "studio        : $StudioDir" "Green"
         }
     }
@@ -384,7 +411,7 @@ if ($Engine -in "pocket", "breeze") {
         $dest = Join-Path $ModelDir $m
         if (Test-Path $dest)  { Say "model         : have $m" "Green" }
         elseif ($WhatIf)      { Say "would fetch   : $m -> $ModelDir" "Yellow" }
-        else                  { Get-File "$hf/$m" $dest $m }
+        else                  { Get-File "$hf/$m" $dest $m; Claim "models" $ModelDir; Save-Claims }
     }
 }
 
@@ -411,9 +438,49 @@ if ($WhatIf) { return }   # install.ps1 has already said so
 # Asked for by name here, so the question it would ask has been answered.
 if ($Engine -eq "breeze") {
     Say ""
+    # Breeze keeps its whole self -- environment, code, weights -- in one folder, and the config
+    # names its code folder inside it. Whether that existed before is the whole question.
+    function Get-BreezeHome {
+        try {
+            $d = ([System.IO.File]::ReadAllText((Join-Path $repo "config.json"), [System.Text.Encoding]::UTF8) |
+                  ConvertFrom-Json).breezeDir
+            if ($d -and (Test-Path $d)) { return (Split-Path $d) }
+        } catch { }
+        return $null
+    }
+    $hadBreeze = Get-BreezeHome
     & $PythonExe (Join-Path $repo "voice_cli.py") install breeze --yes
     if ($LASTEXITCODE -ne 0) { throw "the Breeze install stopped (exit $LASTEXITCODE) -- run this again to carry on from where it got to" }
     & $PythonExe (Join-Path $repo "voice_cli.py") engine breeze | Out-Null
+    $breezeHome = Get-BreezeHome
+    if ($breezeHome -and -not $hadBreeze) { Claim "breeze" $breezeHome }
+}
+
+# --- how it is taken away again -------------------------------------------
+# A program a player installed from a game has to leave the way every other program does: from
+# Settings > Apps, with its own name and picture. Registered per-user (HKCU), which needs no
+# administrator and is what a per-user install is supposed to do. A git working copy is never
+# registered: that is somebody's own checkout, and an Uninstall button beside it would be a trap.
+Claim "claude" (-not $NoClaude)
+if ($ProjectDir) { Claim "project" $ProjectDir }
+Save-Claims
+if (-not $WhatIf -and -not (Test-Path (Join-Path $repo ".git"))) {
+    $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\claude-voice"
+    $ver = try { ([System.IO.File]::ReadAllText((Join-Path $repo "version.json")) | ConvertFrom-Json).version } catch { "" }
+    $size = [int]((Get-ChildItem $repo -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1KB)
+    New-Item -Path $key -Force | Out-Null
+    $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $repo 'uninstall.ps1')`""
+    $values = @{
+        DisplayName = "claude-voice"; DisplayVersion = $ver; Publisher = "TraxData313"
+        InstallLocation = $repo; DisplayIcon = (Join-Path $repo "docs\icons\abby.ico")
+        UninstallString = $uninstall; QuietUninstallString = "$uninstall -Yes"
+        URLInfoAbout = "https://github.com/TraxData313/claude-voice"
+    }
+    foreach ($k in $values.Keys) { Set-ItemProperty -Path $key -Name $k -Value $values[$k] }
+    Set-ItemProperty -Path $key -Name NoModify -Value 1 -Type DWord
+    Set-ItemProperty -Path $key -Name NoRepair -Value 1 -Type DWord
+    Set-ItemProperty -Path $key -Name EstimatedSize -Value $size -Type DWord
+    Say "uninstall     : listed in Settings > Apps as claude-voice" "Green"
 }
 
 # --- open it --------------------------------------------------------------
