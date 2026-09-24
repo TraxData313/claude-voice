@@ -159,6 +159,14 @@ if ((Claimed "claude") -eq $true) {
     }
 }
 
+# The folder chosen for the big things, once they are out of it -- only if nothing else is left.
+$data = Claimed "data"
+if ($data -and (Test-Path $data)) {
+    Plan "the voice-files folder, once empty: $data" {
+        if (-not (Get-ChildItem -LiteralPath $data -Force -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath $data -Force }
+    }
+}
+
 # Where the game and the panel look for it, when it points here.
 $whereDir = Join-Path $env:LOCALAPPDATA "claude-voice"
 $wherePath = Join-Path $whereDir "where.json"
@@ -167,6 +175,10 @@ if (Test-Path $wherePath) {
     if (Same $root $repo) {
         Plan "the note that tells games where it is: $wherePath" {
             Remove-Item -LiteralPath $wherePath -Force
+            foreach ($f in "setup-status.json", "setup-cancel") {
+                $p = Join-Path $whereDir $f
+                if (Test-Path $p) { Remove-Item -LiteralPath $p -Force }
+            }
             if (-not (Get-ChildItem -LiteralPath $whereDir -Force -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath $whereDir -Force }
         }
     }

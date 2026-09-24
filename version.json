@@ -1,14 +1,14 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
-  "version": "1.14.0",
-  "date": "2026-09-24",
+  "version": "1.15.0",
+  "date": "2026-09-25",
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "There is a window for setting me up now, with no terminal in it, and a game can give its characters my voice.",
+  "headline": "A game can install me now without a single window, and show you every step, and every gigabyte.",
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "ClaudeVoiceSetup.exe: three engines to choose from, the right one marked for your graphics card, one button, and a hello at the end.",
-    "The Immersive AI mod for Bannerlord speaks every character through this app now, and all ninety-odd of its voices work here too.",
-    "It uninstalls like any other program, from Settings, Apps, and it only takes what its own setup put there."
+    "The setup can run with no window at all and write down each step, so a game draws the progress itself: what is downloading, how much, how fast, how long is left.",
+    "The big files can go in one folder you choose, on another drive if you like, and a new route says where each engine keeps its files and how much room they take.",
+    "The setup now installs its own release's code, and Breeze's long model download finally has a bar."
   ],
   "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
   "needsSetup": false,

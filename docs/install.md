@@ -232,6 +232,15 @@ Two provisos, and neither is about permissions:
   The second one works even where the first is blocked by group policy, because the rule is
   about running script *files*.
 
+## From a game
+
+The Immersive AI mod installs this for its players without a terminal and without a window:
+it asks which engine suits their computer and which drive should hold the files, then runs
+`ClaudeVoiceSetup.exe --quiet` and draws the progress inside the game from the status file
+(see [api.md](api.md#for-a-game)). With `--data`, Studio, the Qwen model and Breeze all go in
+that one folder; Pocket's small files stay beside the app. Everything else is exactly the
+install described above.
+
 ## Removing it
 
 **Settings → Apps → claude-voice → Uninstall**, when it was installed by `ClaudeVoiceSetup.exe` or

@@ -52,10 +52,22 @@ param(
     # Claude Code at all, and should find nothing of it written on their machine.
     [switch]$NoClaude,
     [switch]$UpdateChecks,
+    # One folder for everything big -- Studio, the Qwen model, Breeze -- chosen by the person
+    # installing (the Immersive AI mod offers their drives). Left out, each keeps its usual place.
+    [string]$DataDir,
+    # Nothing on screen but what the caller shows: the Python installer runs without its window.
+    # The game's road, where a second window popping up over a full-screen game is the bug.
+    [switch]$Quiet,
     [switch]$WhatIf
 )
 
 $ErrorActionPreference = "Stop"
+
+# The chosen folder takes the big things, unless a path was given for one of them by name.
+if ($DataDir) {
+    if (-not $PSBoundParameters.ContainsKey("StudioDir")) { $StudioDir = Join-Path $DataDir "qwen-tts-studio" }
+    if (-not $PSBoundParameters.ContainsKey("ModelDir"))  { $ModelDir  = Join-Path $DataDir "models" }
+}
 
 # There is no script file when this is piped into Invoke-Expression, so
 # $PSScriptRoot is empty -- and that pipe is the documented way past an
@@ -224,7 +236,7 @@ if ($PythonExe) {
                  $exe "python $PythonVersion"
     }
     $p = Start-Process $exe -Wait -PassThru -ArgumentList @(
-        "/passive", "InstallAllUsers=0", "PrependPath=1", "Include_launcher=0", "Include_test=0")
+        $(if ($Quiet) { "/quiet" } else { "/passive" }), "InstallAllUsers=0", "PrependPath=1", "Include_launcher=0", "Include_test=0")
     if ($p.ExitCode -ne 0) { throw "the Python installer exited with $($p.ExitCode)" }
 
     # PATH changed in the registry, not in this process. Ask the filesystem.
@@ -407,7 +419,14 @@ $hf = "https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/main"
 if ($Engine -in "pocket", "breeze") {
     Say "model         : skipped -- the Qwen model is Studio's, and there is no Studio" "Green"
 } else {
-    foreach ($m in @("qwen-talker-1.7b-base-Q8_0.gguf", "qwen-tokenizer-12hz-Q8_0.gguf")) {
+    # Already in Studio's usual folder: used where they are, never fetched a second time.
+    $usualModels = Join-Path $env:USERPROFILE ".qwen-tts-studio\models"
+    $modelNames = @("qwen-talker-1.7b-base-Q8_0.gguf", "qwen-tokenizer-12hz-Q8_0.gguf")
+    if ($DataDir -and -not (Test-Path (Join-Path $ModelDir $modelNames[0])) -and
+        @($modelNames | Where-Object { Test-Path (Join-Path $usualModels $_) }).Count -eq $modelNames.Count) {
+        $ModelDir = $usualModels
+    }
+    foreach ($m in $modelNames) {
         $dest = Join-Path $ModelDir $m
         if (Test-Path $dest)  { Say "model         : have $m" "Green" }
         elseif ($WhatIf)      { Say "would fetch   : $m -> $ModelDir" "Yellow" }
@@ -417,7 +436,7 @@ if ($Engine -in "pocket", "breeze") {
 
 # --- wire it up -----------------------------------------------------------
 Say ""
-$opts = @{ PythonExe = $PythonExe; Engine = $Engine }
+$opts = @{ PythonExe = $PythonExe; Engine = $Engine; ModelDir = $ModelDir }
 # Pocket has no use for the path, and handing over the default for a Studio
 # that was never fetched would only give install.ps1 a wrong one to record.
 if ($Engine -eq "qwen") { $opts.StudioDir = $StudioDir }
@@ -449,7 +468,9 @@ if ($Engine -eq "breeze") {
         return $null
     }
     $hadBreeze = Get-BreezeHome
-    & $PythonExe (Join-Path $repo "voice_cli.py") install breeze --yes
+    $breezeArgs = @("install", "breeze", "--yes")
+    if ($DataDir -and -not $hadBreeze) { $breezeArgs += @("--to", (Join-Path $DataDir "breeze")) }
+    & $PythonExe (Join-Path $repo "voice_cli.py") @breezeArgs
     if ($LASTEXITCODE -ne 0) { throw "the Breeze install stopped (exit $LASTEXITCODE) -- run this again to carry on from where it got to" }
     & $PythonExe (Join-Path $repo "voice_cli.py") engine breeze | Out-Null
     $breezeHome = Get-BreezeHome
@@ -462,6 +483,7 @@ if ($Engine -eq "breeze") {
 # administrator and is what a per-user install is supposed to do. A git working copy is never
 # registered: that is somebody's own checkout, and an Uninstall button beside it would be a trap.
 Claim "claude" (-not $NoClaude)
+if ($DataDir) { Claim "data" $DataDir }
 if ($ProjectDir) { Claim "project" $ProjectDir }
 Save-Claims
 if (-not $WhatIf -and -not (Test-Path (Join-Path $repo ".git"))) {

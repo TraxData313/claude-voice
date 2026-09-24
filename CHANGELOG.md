@@ -6,6 +6,25 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.15.0 — 2026-09-25
+
+**A game can install it with no window of its own, show every step, and show — and take away —
+every gigabyte.**
+
+- **`ClaudeVoiceSetup.exe --quiet`**: installs with nothing on screen and writes
+  `setup-status.json` as it goes — four steps, what is downloading, how much, how fast, how long
+  is left. A `setup-cancel` file stops it; nothing downloaded is lost. The window writes the same
+  file.
+- **`--data <folder>`** / **`setup.ps1 -DataDir`**: Studio, the Qwen model and Breeze in one folder
+  of your choosing — a roomy second drive, say. A Qwen model already in its usual folder is used
+  where it is, never fetched twice.
+- **`POST /storage`**: each engine's folders and their size, for a settings page that answers
+  "where did those gigabytes go?".
+- **The setup installs its own release's code**, not whatever `main` holds that minute.
+- **Breeze's model download is measured** from its growing folder, so its 7.7 GB has a bar too.
+- **The Python installer stays out of sight** on the quiet road (`/quiet`, not `/passive`).
+- **Uninstall also clears the chosen voice-files folder** once it is empty, and the setup's status.
+
 ## 1.14.0 — 2026-09-24
 
 **A one-window setup for people who have never seen a terminal, and a voice a game can speak its

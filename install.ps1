@@ -29,6 +29,8 @@ param(
     [string]$Engine,
     [string]$ProjectDir,
     [string]$StudioDir,
+    # Where the Qwen model files are. Left out, Studio's own folder in the user's home.
+    [string]$ModelDir,
     [string]$PythonExe,
     [switch]$NoShortcut,
     [switch]$NoNote,
@@ -137,7 +139,7 @@ if ($hasStudio) {
         Say "                after 30 days. Move it and re-run, or run setup.ps1 to move it." "Yellow"
     }
 
-    $modelDir = Join-Path $env:USERPROFILE ".qwen-tts-studio\models"
+    $modelDir = if ($ModelDir) { $ModelDir } else { Join-Path $env:USERPROFILE ".qwen-tts-studio\models" }
     $talker = "qwen-talker-1.7b-base-Q8_0.gguf"
     if (Test-Path $modelDir) {
         $found = Get-ChildItem $modelDir -Filter "*talker*.gguf" -ErrorAction SilentlyContinue

@@ -9,7 +9,9 @@
 #>
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
-dotnet build (Join-Path $here "ClaudeVoiceSetup.csproj") -c Release --nologo -v quiet
+# The exe carries claude-voice's own version, and fetches the code of that release's tag.
+$version = (Get-Content (Join-Path $here "..\version.json") -Raw | ConvertFrom-Json).version
+dotnet build (Join-Path $here "ClaudeVoiceSetup.csproj") -c Release --nologo -v quiet -p:Version=$version
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
 $dist = Join-Path $here "dist"
 New-Item -ItemType Directory -Force -Path $dist | Out-Null

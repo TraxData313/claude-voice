@@ -154,6 +154,7 @@ performed than you expected — somebody may have switched engines.
 | `POST /health` | whether it is up, which version, and whether a mood or a sound would be performed |
 | `POST /voices` | every voice the engine speaking now can use, each with its `sex` and `culture` |
 | `POST /voice-roots` `{"add": "C:\\…"}` | also read the voices in that folder, where they lie. `remove` takes one away |
+| `POST /storage` | where each engine's files are on disk and how many bytes they take, and the app's own folder |
 | `POST /panel` | opens the panel window, or raises the one already open |
 | `POST /quit` | closes the engine and hands its memory back |
 
@@ -187,6 +188,17 @@ many characters can use them the same way.
 - **Installing it for somebody.** `setup-app\` builds `ClaudeVoiceSetup.exe`, a one-window
   installer for people who have never opened a terminal; a game can download it from the latest
   release and run it with `--for "<your game>"`. See [setup-app/README.md](../setup-app/README.md).
+- **Installing it without a window.** `--quiet --engine qwen --data D:\claude-voice` installs with
+  nothing on screen — right for a full-screen game, where a window popping up is the bug — and
+  writes `%LOCALAPPDATA%\claude-voice\setup-status.json` as it goes: `state` (running, done,
+  failed, cancelled), which of four `phase`s (app, engine, model, start), a `headline` and a
+  `detail` ("1.2 of 2.2 GB · 14 MB/s · about 2 min left"), `phaseFraction` and `fraction`, and
+  `error`. Draw your own progress from it. Leaving a file named `setup-cancel` beside it asks the
+  install to stop; nothing downloaded is lost. The install is its own process, so a game that
+  quits does not stop it, and the next one can pick the progress up from the same file.
+- **Show where the gigabytes went.** `POST /storage` answers each engine's folders and their size,
+  so a player can see what each is for, open the folder, and take it away again —
+  `<root>\uninstall.ps1 -Yes`, the same thing Settings → Apps runs.
 
 ## Things worth knowing
 

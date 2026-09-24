@@ -1944,6 +1944,54 @@ def _events_performed():
         return []
 
 
+_SIZES = {}
+
+
+def _folder_bytes(path):
+    """How much a folder holds, walked at most once in ten minutes."""
+    now = time.time()
+    hit = _SIZES.get(path)
+    if hit and now - hit[1] < 600:
+        return hit[0]
+    total = 0
+    for here, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(here, name))
+            except OSError:
+                pass
+    _SIZES[path] = (total, now)
+    return total
+
+
+def _storage(state):
+    """The folders behind each engine, with their sizes. See the /storage route."""
+    def entry(dirs):
+        dirs = [d for d in dirs if d and os.path.isdir(d)]
+        return {"dirs": dirs, "bytes": sum(_folder_bytes(d) for d in dirs)}
+
+    engines = {}
+    engines["qwen"] = entry([state.get("studioDir"), state.get("modelDir")])
+    breeze_code = state.get("breezeDir") or ""
+    engines["breeze"] = entry([os.path.dirname(breeze_code)] if breeze_code else [])
+    pocket = []
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("pocket_tts")
+        if spec and spec.origin:
+            pocket.append(os.path.dirname(spec.origin))
+    except (ImportError, ValueError):
+        pass
+    hub = os.path.join(os.environ.get("HF_HOME") or os.path.expanduser(r"~\.cache\huggingface"), "hub")
+    if os.path.isdir(hub):
+        pocket += [os.path.join(hub, d) for d in os.listdir(hub) if d.startswith("models--kyutai--pocket")]
+    engines["pocket"] = entry(pocket)
+    for name in engines:
+        engines[name]["installed"] = bool(voice_lib.engine_ready(name, state))
+    app = entry([voice_lib.ROOT])
+    return {"app": app, "engines": engines, "engine": voice_lib.engine_of(state)}
+
+
 def _capabilities(state, loaded):
     """Everything a program speaking through this engine needs to know first.
 
@@ -2081,6 +2129,12 @@ class Handler(BaseHTTPRequestHandler):
                 "voices": [{"id": v["id"], "name": v["name"], "sex": v["sex"],
                             "culture": v["culture"], "style": v.get("style") or "",
                             "tag": v.get("tag") or ""} for v in rows]})
+
+        if route == "/storage":
+            # Where each engine keeps its files on this machine, and how much room they take --
+            # asked by a game's settings page so a player who downloaded twenty gigabytes can see
+            # where they went and what each is for. Sizes are walked once and kept ten minutes.
+            return self._reply(200, _storage(voice_lib.load_state()))
 
         if route == "/voice-roots":
             # A folder of someone else's voices, heard here as they lie. The

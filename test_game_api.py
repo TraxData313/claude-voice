@@ -112,5 +112,40 @@ class VoiceRoots(unittest.TestCase):
             voice_lib.add_voice_root(os.path.join(self.dir, "nope"))
 
 
+class Storage(unittest.TestCase):
+    """What a game's settings page shows: where each engine's files are, and how much room they take."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_each_engine_says_its_folders_and_their_size(self):
+        import speak_server
+        studio = os.path.join(self.root, "studio")
+        models = os.path.join(self.root, "models")
+        breeze = os.path.join(self.root, "breeze", "breeze-tts")
+        for folder, size in ((studio, 1000), (models, 2500), (breeze, 400)):
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, "blob.bin"), "wb") as fh:
+                fh.write(b"x" * size)
+        speak_server._SIZES.clear()
+        out = speak_server._storage({"studioDir": studio, "modelDir": models, "breezeDir": breeze, "engine": "qwen"})
+        self.assertEqual(out["engines"]["qwen"]["dirs"], [studio, models])
+        self.assertEqual(out["engines"]["qwen"]["bytes"], 3500)
+        # Breeze is reported by the folder that holds all of it, not its code alone.
+        self.assertEqual(out["engines"]["breeze"]["dirs"], [os.path.dirname(breeze)])
+        self.assertEqual(out["engines"]["breeze"]["bytes"], 400)
+        self.assertIn("installed", out["engines"]["pocket"])
+        self.assertTrue(out["app"]["dirs"])
+
+    def test_a_folder_that_is_not_there_is_left_out(self):
+        import speak_server
+        out = speak_server._storage({"studioDir": os.path.join(self.root, "nowhere"), "modelDir": "", "breezeDir": ""})
+        self.assertEqual(out["engines"]["qwen"]["dirs"], [])
+        self.assertEqual(out["engines"]["breeze"]["dirs"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
