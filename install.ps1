@@ -199,10 +199,18 @@ $claudeDir = Join-Path $ProjectDir ".claude"
 $settingsPath = Join-Path $claudeDir "settings.json"
 $hookScript = Join-Path $repo "speak_hook.py"
 
-# Quote only when needed: a command that begins with a quote sends cmd.exe into
-# its own quirky parsing rules, and unquoted is fine when nothing has a space.
-$command = if ("$PythonExe$hookScript" -match '\s') { "`"$PythonExe`" `"$hookScript`"" }
-           else { "$PythonExe $hookScript" }
+# Forward slashes, because Claude Code runs a hook's command through bash on
+# Windows, and bash reads a backslash as an escape: C:\Users\x\python.exe
+# arrives as C:Usersxpython.exe, "command not found", on every call. It says so
+# only in the transcript, as a non-blocking error, while the watcher goes on
+# speaking -- so this was broken from the day it was written and sounded fine.
+# Windows takes forward slashes in a path as readily as its own, and so does
+# cmd.exe. Quoted only when a path has a space in it, and then the way bash
+# quotes, since bash is what reads it.
+$pyFwd = $PythonExe.Replace('\', '/')
+$hookFwd = $hookScript.Replace('\', '/')
+$command = if ("$pyFwd$hookFwd" -match '\s') { "`"$pyFwd`" `"$hookFwd`"" }
+           else { "$pyFwd $hookFwd" }
 
 # On an object with no properties at all, PSObject.Properties.Name is null in
 # PowerShell 5.1 and calling .Contains() on it throws -- which is precisely the
@@ -218,25 +226,33 @@ if (-not (Has-Prop $settings "hooks")) {
     $settings | Add-Member -NotePropertyName hooks -NotePropertyValue ([PSCustomObject]@{})
 }
 
-# Stop catches the finished answer; PreToolUse catches the short lines said
-# mid-work, which Stop never sees because the turn has not ended; Notification
-# catches the moments the session stops and waits for you, which reach no
-# transcript at all and so can be heard no other way.
-foreach ($event in @("Stop", "PreToolUse", "Notification")) {
+# SessionStart and UserPromptSubmit tell a session what the voice can do right
+# now -- whether it takes a mood, whether it can laugh -- which CLAUDE.md cannot,
+# being read once while the engine can change under a conversation.
+# Notification catches the moments the session stops and waits for you, which
+# reach no transcript at all and so can be heard no other way. Stop and
+# PreToolUse speak the answer and the lines said mid-work, but only when the
+# transcript watcher is off; with it on, it speaks them. See speak_hook.py.
+foreach ($event in @("Stop", "PreToolUse", "Notification", "SessionStart", "UserPromptSubmit")) {
+    # The two that tell hold up the prompt, and the start of a session, for as
+    # long as they run. They take a few hundredths of a second; the timeout is
+    # only what a hang could cost, so it is kept short.
+    $timeout = if ($event -in @("SessionStart", "UserPromptSubmit")) { 5 } else { 15 }
     # PreToolUse entries are matched against the tool name and want a "matcher";
-    # the other two take none -- and Notification wants none in particular,
-    # since its matcher is a regex over the notification kind and the "*" that
-    # means "everything" for a tool name is not a valid one. An entry missing
-    # the field its event expects can invalidate the whole hooks block,
+    # the others take none -- and Notification wants none in particular, since
+    # its matcher is a regex over the notification kind and the "*" that means
+    # "everything" for a tool name is not a valid one. SessionStart's would be
+    # a regex over why it started, and every reason wants telling. An entry
+    # missing the field its event expects can invalidate the whole hooks block,
     # silencing all of them.
     if ($event -eq "PreToolUse") {
         $entry = [PSCustomObject]@{
             matcher = "*"
-            hooks = @([PSCustomObject]@{ type = "command"; command = $command; timeout = 15 })
+            hooks = @([PSCustomObject]@{ type = "command"; command = $command; timeout = $timeout })
         }
     } else {
         $entry = [PSCustomObject]@{
-            hooks = @([PSCustomObject]@{ type = "command"; command = $command; timeout = 15 })
+            hooks = @([PSCustomObject]@{ type = "command"; command = $command; timeout = $timeout })
         }
     }
 
@@ -257,7 +273,7 @@ foreach ($event in @("Stop", "PreToolUse", "Notification")) {
 }
 
 Say "hook command  : $command" "Green"
-Say "hook events   : Stop (answers), PreToolUse (narration), Notification (prompts waiting on you)" "Green"
+Say "hook events   : SessionStart, UserPromptSubmit (what the voice can do), Notification (prompts waiting on you), Stop, PreToolUse (answers, when the watcher is off)" "Green"
 Say "settings      : $settingsPath"
 
 if (-not $WhatIf) {

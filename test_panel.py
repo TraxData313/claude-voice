@@ -12,8 +12,12 @@ before anything is drawn into it.
     python test_panel.py
 """
 
+import queue
+import time
 import tkinter as tk
 import unittest
+from tkinter import ttk
+from unittest.mock import patch
 
 import panel
 
@@ -99,11 +103,12 @@ class TheTypingBox(unittest.TestCase):
     def tearDownClass(cls):
         cls.root.destroy()
 
-    def typer(self, takes_mood=True):
+    def typer(self, takes_mood=True, takes_events=()):
         one = panel.Panel.__new__(panel.Panel)
         one.root = self.root
         one.typer = one.typed = one.typed_mood = None
         one.takes_mood = takes_mood
+        one.takes_events = takes_events
         one.dim = []
         one.on_top = tk.BooleanVar(value=True)
         one.dark = tk.BooleanVar(value=True)
@@ -142,6 +147,134 @@ class TheTypingBox(unittest.TestCase):
         # The grey label inside it must not be left in the list the theme
         # repaints: a dead widget there breaks the next switch.
         self.assertTrue(all(w.winfo_exists() for w in one.dim))
+
+    def test_a_mood_named_goes_as_a_mood_for_the_engine_to_expand(self):
+        # "sad" alone is the weak form as an instruction, and the engine knows
+        # the whole sentence it stands for -- so a name is sent as a name.
+        one = self.typer()
+        one.typed.insert("1.0", "I looked everywhere.")
+        one.typed_mood.insert(0, "Sad")
+        panel.Panel.speak_typed(one)
+        self.assertEqual(one.sent["mood"], "sad")
+        self.assertNotIn("instruction", one.sent)
+
+    def test_an_engine_that_makes_sounds_says_which_under_the_box(self):
+        one = self.typer(takes_events=("laugh", "sigh"))
+        shown = [w.cget("text") for w in one.dim if w.winfo_exists()]
+        self.assertTrue(any("(laugh) (sigh)" in text for text in shown), shown)
+        closed = self.typer()
+        self.assertFalse(any("(laugh)" in w.cget("text") for w in closed.dim))
+
+
+class TheBreezeWindow(unittest.TestCase):
+    """What stands between picking Breeze and eleven gigabytes arriving.
+
+    Opened for real and never shown: `over`, which would place it on screen,
+    withdraws it instead, and the two things that reach outside -- the machine
+    check and the status file -- are fed by hand.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tk.Tk()
+        cls.root.withdraw()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.root.destroy()
+
+    def bare(self):
+        one = panel.Panel.__new__(panel.Panel)
+        one.root = self.root
+        one.setup_win = None
+        one.setup_inbox = queue.Queue()
+        one.dim = []
+        one.on_top = tk.BooleanVar(value=False)
+        one.dark = tk.BooleanVar(value=False)
+        one.drawn = {}
+        one.engine = "pocket"
+        one.sent = {}
+        one.act = lambda path, body: one.sent.update(path=path, **body)
+        one.hold = lambda *a, **k: None
+        return one
+
+    def window(self):
+        one = self.bare()
+        with patch.object(panel, "over", lambda win, parent: win.withdraw()), \
+                patch.object(panel.Panel, "check_for_breeze", lambda self: None), \
+                patch.object(panel.Panel, "watch_breeze_install", lambda self: None):
+            panel.Panel.open_breeze_setup(one)
+        self.addCleanup(panel.Panel.close_breeze_setup, one)
+        return one
+
+    def answer(self, one, verdict):
+        report = {"verdict": verdict, "target": one.setup_target, "gpu": None,
+                  "rows": [{"need": "an NVIDIA card", "have": "a card", "ok": verdict != "no"}]}
+        with patch("breeze_setup.running", return_value=None):
+            one.setup_inbox.put(("checked", report))
+            panel.Panel.drain_setup(one)
+
+    def test_picking_it_uninstalled_opens_this_rather_than_switching(self):
+        one = self.bare()
+        one.engine_box = ttk.Combobox(self.root, values=list(panel.ENGINE_LABELS.values()))
+        one.engine_box.set(panel.ENGINE_LABELS["breeze"])
+        one.drawn["breezeReady"] = False
+        opened = []
+        with patch.object(panel.Panel, "open_breeze_setup", lambda self: opened.append(1)):
+            panel.Panel.pick_engine(one)
+        self.assertEqual(opened, [1])
+        self.assertEqual(one.sent, {}, "nothing is switched, and nothing downloaded")
+        self.assertEqual(one.engine_box.get(), panel.ENGINE_LABELS["pocket"])
+
+    def test_picking_it_installed_just_switches(self):
+        one = self.bare()
+        one.engine_box = ttk.Combobox(self.root, values=list(panel.ENGINE_LABELS.values()))
+        one.engine_box.set(panel.ENGINE_LABELS["breeze"])
+        one.drawn["breezeReady"] = True
+        panel.Panel.pick_engine(one)
+        self.assertEqual(one.sent, {"path": "/set-engine", "engine": "breeze"})
+
+    def test_nothing_can_be_downloaded_before_the_machine_has_answered(self):
+        self.assertTrue(self.window().setup_go.instate(["disabled"]))
+
+    def test_a_machine_that_can_run_it_lights_the_button(self):
+        one = self.window()
+        self.answer(one, "full")
+        self.assertFalse(one.setup_go.instate(["disabled"]))
+
+    def test_a_machine_that_cannot_never_does(self):
+        one = self.window()
+        self.answer(one, "no")
+        self.assertTrue(one.setup_go.instate(["disabled"]))
+        self.assertIn("cannot run it", one.setup_status.cget("text"))
+
+    def test_an_answer_about_a_folder_no_longer_chosen_is_ignored(self):
+        # The check runs on a thread, and the folder can be changed while it
+        # does; the answer that comes back late is about the old one.
+        one = self.window()
+        one.setup_inbox.put(("checked", {"verdict": "no", "target": "E:\\old-choice",
+                                         "gpu": None, "rows": []}))
+        panel.Panel.drain_setup(one)
+        self.assertEqual(one.setup_status.cget("text"), "")
+        self.assertIsNone(one.setup_verdict)
+
+    def test_finishing_switches_to_breeze_once(self):
+        one = self.window()
+        one.setup_started = time.time()
+        one.setup_inbox.put(("status", {"state": "done", "fast": True}, False))
+        panel.Panel.drain_setup(one)
+        self.assertEqual(one.sent, {"path": "/set-engine", "engine": "breeze"})
+        self.assertIsNone(one.setup_started)
+        self.assertTrue(one.drawn["breezeReady"])
+
+    def test_a_failure_offers_to_carry_on(self):
+        one = self.window()
+        one.setup_started = time.time()
+        one.setup_inbox.put(("status", {"state": "failed", "error": "no network"}, False))
+        panel.Panel.drain_setup(one)
+        self.assertIn("no network", one.setup_status.cget("text"))
+        self.assertFalse(one.setup_go.instate(["disabled"]))
+        self.assertEqual(one.setup_go.cget("text"), "try again")
 
 
 if __name__ == "__main__":

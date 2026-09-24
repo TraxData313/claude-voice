@@ -75,9 +75,14 @@ def cmd_status(state, _args):
     else:
         how = "off -- relying on Claude Code hooks instead"
     print(f"  watching     : {how}")
+    print(f"  hooks        : {_hooks_line()}")
+    print(f"  sessions told: {_told_line(state)}")
     if voice_lib.engine_of(state) == "pocket":
         print(f"  voices from  : {len(voice_lib.catalog(state))} built into "
               f"pocket-tts ({voice_lib.engine_language(state)})")
+    elif voice_lib.engine_of(state) == "breeze":
+        print(f"  voices from  : {len(voice_lib.catalog(state))} with a clip Breeze "
+              f"clones from")
     else:
         print(f"  voices from  : {len(voice_lib.catalog(state))} in "
               f"{len(voice_lib.voice_roots(state))} folder(s)")
@@ -90,6 +95,43 @@ def cmd_status(state, _args):
         print()
         for line in lines:
             print(line)
+
+
+def _hooks_line():
+    """Whether Claude Code's hooks can reach this tool at all, in one line.
+
+    Worth a line of its own because a broken hook says nothing: Claude Code
+    records the failure in the transcript and carries on, and the watcher goes
+    on speaking, so everything seems fine except the permission alerts, which
+    only a hook can hear.
+    """
+    found = voice_lib.hook_health()
+    if not found["events"]:
+        return "none installed -- the watcher still speaks; alerts need them"
+    if found["backslashed"]:
+        return ("written with backslashes, which bash reads as escapes, so every "
+                "one fails. Run setup.ps1 again")
+    if found["missing"]:
+        return (", ".join(found["events"]) + " -- run setup.ps1 again for "
+                + ", ".join(found["missing"]))
+    return ("all " + str(len(found["events"])) + " events, last ran "
+            + (found["last"] or "never"))
+
+
+def _told_line(state):
+    """What a new session is told the voice can do: the first line of it."""
+    if not state.get("enabled"):
+        return "that the voice is off"
+    engine = voice_lib.engine_of(state)
+    moods = voice_lib.engine_can(engine, "instruction")
+    sounds = voice_lib.engine_can(engine, "events")
+    if moods and sounds:
+        return "it may write a mood and sounds, like (whisper) and (laugh)"
+    if moods:
+        return "it may write a mood, like (whisper); no sounds on this engine"
+    if sounds:
+        return "it may write a sound, like (laugh); no moods on this engine"
+    return "plain words only; this engine takes no mood and makes no sound"
 
 
 def cmd_on(state, args):
@@ -195,15 +237,94 @@ def cmd_engine(state, args):
         # the other name means is a trip they should not have to make.
         for name in voice_lib.ENGINES:
             info = voice_lib.engine_info(name)
-            print(f"  {'*' if name == here else ' '} {name:8} {info['label']}")
+            missing = "" if voice_lib.engine_ready(name, state) else "  (not installed)"
+            print(f"  {'*' if name == here else ' '} {name:8} {info['label']}{missing}")
             _describe(info)
         raise SystemExit(0)
-    engine, voice = voice_lib.set_engine(args[0], state)
+    try:
+        engine, voice = voice_lib.set_engine(args[0], state)
+    except LookupError as exc:
+        raise SystemExit(str(exc))
     state["engine"] = engine
     print(f"Engine set to {engine}"
           + (f", speaking as {voice['name']}" if voice else ""))
     _describe(voice_lib.engine_info(engine))
     print("  It loads on the next thing spoken, so the first one is slower.")
+
+
+def cmd_install(state, args):
+    """Install Breeze TTS 2, the optional engine that laughs. Asks first.
+
+    Never run by anything but somebody typing it, or the panel's window after
+    somebody pressed its button: it is about eleven gigabytes and it needs a
+    particular graphics card, and both are said out loud before anything is
+    fetched. --check says whether this machine can run it and stops there.
+    """
+    import breeze_setup
+
+    usage = "usage: voice_cli.py install breeze [--check] [--to <folder>] [--yes]"
+    rest, target, flags = [], None, set()
+    it = iter(args)
+    for a in it:
+        if a == "--to":
+            target = next(it, None)
+            if not target:
+                raise SystemExit(usage)
+        elif a.startswith("--"):
+            flags.add(a.lstrip("-").lower())
+        else:
+            rest.append(a.lower())
+    if rest[:1] != ["breeze"]:
+        raise SystemExit(usage)
+
+    busy = breeze_setup.running()
+    if busy:
+        print(f"An install is already running: step {busy.get('step')} of "
+              f"{busy.get('steps')}, {busy.get('label')}.")
+        print(f"  Its log: {breeze_setup.LOG_PATH}")
+        return
+
+    report = breeze_setup.check_machine(target)
+    marks = {True: "ok", None: "!!", False: "no"}
+    print("Breeze TTS 2 -- what it needs, and what this machine has:\n")
+    for row in report["rows"]:
+        print(f"  [{marks[row['ok']]}] {row['need']}")
+        print(f"       {row['have']}")
+    print()
+    if "check" in flags:
+        return
+    if report["verdict"] == "no":
+        raise SystemExit("This machine cannot run it, so nothing was downloaded.")
+    if voice_lib.engine_ready("breeze", state) and "again" not in flags:
+        print(f"It is already installed: {state.get('breezeModel')}")
+        print("  Switch to it with:  python voice_cli.py engine breeze")
+        return
+
+    where = os.path.abspath(report["target"])
+    print(f"  Downloads about {breeze_setup.DOWNLOAD_GB} GB into {where}")
+    print("  and takes 15 to 30 minutes, most of it the download. Nothing else on")
+    print("  this machine is changed, and deleting that folder undoes all of it.")
+    print("  The model's weights are for research and non-commercial use only.")
+    if report["verdict"] == "slow":
+        print("  On this card it runs without its fast stages, slower than speech.")
+    if "yes" not in flags:
+        try:
+            answer = input("\nDownload and install it now? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Nothing was downloaded.")
+            return
+    print()
+    try:
+        breeze_setup.install(where, say=lambda line: print(line, flush=True))
+    except KeyboardInterrupt:
+        raise SystemExit("\nStopped. Run the same command again to carry on from "
+                         "where it got to.")
+    except Exception as exc:
+        raise SystemExit(f"\nThe install stopped: {exc}\nRun the same command again "
+                         "to carry on from where it got to.")
+    print("  Switch to it with:  python voice_cli.py engine breeze")
 
 
 def _describe(info):
@@ -725,7 +846,7 @@ HELP = [
     ("Choosing a voice", [
         ("list", "[filter]", "Every voice available. Filter by name or culture."),
         ("set", "<voice>", "Switch voice. Any unambiguous substring: 'set ab' finds Abby."),
-        ("engine", "[qwen|pocket]", "Which synthesiser speaks. No argument lists them."),
+        ("engine", "[qwen|pocket|breeze]", "Which synthesiser speaks. No argument lists them."),
         ("clone", "<file.wav> --name X", "Make a new voice from a 20-40s clip of one person."),
     ]),
     ("Hearing something again", [
@@ -753,6 +874,7 @@ HELP = [
     ("The engine itself", [
         ("start", "", "Load the model without turning the voice on."),
         ("kill", "", "Unload it and give the memory back."),
+        ("install", "breeze [--check]", "Check this machine for Breeze TTS 2, the voice that laughs, then offer to download it (about 11 GB). Asks first."),
     ]),
     ("Keeping it current", [
         ("version", "", "What this copy is. Contacts nobody -- worth quoting in a bug report."),
@@ -810,10 +932,11 @@ def _help_markdown():
         "- The voice is **one setting shared by every session**. Change it anywhere and it",
         "  changes everywhere at once, including sessions already open, and it survives a",
         "  reboot.",
-        "- The engine does **not** survive a reboot. After restarting the machine, say `on`",
-        "  once and it stays warm until you shut down or `kill` it.",
-        "- If it goes quiet unexpectedly, the engine has died — nothing revives it by",
-        "  itself. `status` will say so, and `on` brings it back.",
+        "- The engine does **not** survive a reboot. With the voice on, the next prompt you",
+        "  type into Claude Code starts it again, and `on` does the same by hand. Then it",
+        "  stays warm until you shut down or `kill` it.",
+        "- If it goes quiet unexpectedly, the engine may have died. `status` will say so,",
+        "  and the next prompt, or `on`, brings it back.",
         f"\nFull description of how it works: {REPO_URL}",
     ]
     path = os.path.join(voice_lib.ROOT, "docs", "commands.md")
@@ -932,6 +1055,7 @@ COMMANDS = {
     "play": cmd_resume, "resume": cmd_resume, "carry-on": cmd_resume,
     "mediakey": cmd_mediakey, "media": cmd_mediakey,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,
+    "install": cmd_install,
     "history": cmd_history, "playback": cmd_playback, "buffer": cmd_playback,
     "volume": cmd_volume, "vol": cmd_volume, "loud": cmd_volume,
     "clone": cmd_clone,

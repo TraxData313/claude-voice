@@ -12,11 +12,12 @@ python voice_cli.py status
 This answers most of it in one screen: whether the voice is on, whether the engine is
 loaded, and whether it is following your sessions.
 
-**The engine does not survive a reboot,** and nothing revives it on its own. After
-restarting the machine, `on` once and it stays warm until you shut down or `kill` it.
+**The engine does not survive a reboot.** With the voice on, the next prompt you type into
+Claude Code starts it again, by way of the `UserPromptSubmit` hook; without the hooks,
+`on` once and it stays warm until you shut down or `kill` it.
 
-If it died mid-session — it can, see below — everything goes quiet until something asks it
-to speak. `on` or `start` brings it back, and it will catch up on what it missed.
+If it died mid-session — it can, see below — the next prompt brings it back the same way,
+and so do `on` and `start`. It catches up on what it missed.
 
 ## 2. Read `logs\speak-server.log`
 
@@ -32,8 +33,17 @@ whole point:
   downstream, so go back to the engine log.
 - **No entries at all** — Claude Code never called it. The config is being ignored.
 
-Three things get a hooks config ignored, and none of them report anything:
+`python voice_cli.py status` reads the settings files and says on its *hooks* line which
+events are wired, when one last ran, and whether the command is written in a way that can
+run at all. Four things get a hooks config ignored or failing, and none of them report
+anything out loud:
 
+- **Backslashes in the command.** Claude Code runs a hook's command through bash on
+  Windows, and bash reads `C:\Users\...\python.exe` as `C:Users...python.exe`: *command not
+  found*, on every call. Claude Code notes it in the transcript as a non-blocking error and
+  carries on, so the only sign is a `hook.log` with nothing in it. `install.ps1` writes
+  forward slashes, which every shell here reads the same way; an install from before that
+  needs `setup.ps1` run once more.
 - **The interpreter cannot be found.** Hooks run without a shell profile, so anything
   conda-activated or installed as the Microsoft Store alias is invisible to them.
   `install.ps1` writes the absolute path to `python.exe` for exactly this reason.
@@ -48,11 +58,12 @@ Three things get a hooks config ignored, and none of them report anything:
 **None of this stops the voice working.** The watcher does not use hooks at all. If the
 hooks never fire on your setup, ignore them entirely — that is why the watcher exists.
 
-## 4. Hooks are read once, at session start
+## 4. Hooks are read when a session starts
 
-A session that was already open when you installed them will never fire them, however
-correct the config is. That needs a genuinely new session — relaunching the app and landing
-back in the same conversation is a *resumed* session and keeps its original config.
+On older Claude Code, a session that was already open when you installed them never fires
+them, however correct the config is; that needs a genuinely new session, since relaunching
+the app into the same conversation *resumes* it with its original config. Version 2.1.280
+picked a change up at the open session's next prompt.
 
 The watcher has no such problem, which is another reason to prefer it.
 

@@ -1,5 +1,6 @@
-Wrote C:\Users\Trax\Documents\claude-voice\docs\commands.md
-` inside Claude Code, or
+# Commands
+
+Everything below works two ways: `/voice status` inside Claude Code, or
 `python voice_cli.py status` in a terminal. Mind the space in the slash
 command — it is `/voice on`, never `/voice_on`.
 
@@ -21,7 +22,7 @@ command — it is `/voice on`, never `/voice_on`.
 |---|---|
 | `list [filter]` | Every voice available. Filter by name or culture. |
 | `set <voice>` | Switch voice. Any unambiguous substring: 'set ab' finds Abby. |
-| `engine [qwen\|pocket]` | Which synthesiser speaks. No argument lists them. |
+| `engine [qwen\|pocket\|breeze]` | Which synthesiser speaks. No argument lists them. |
 | `clone <file.wav> --name X` | Make a new voice from a 20-40s clip of one person. |
 
 ## Hearing something again
@@ -58,6 +59,7 @@ command — it is `/voice on`, never `/voice_on`.
 |---|---|
 | `start` | Load the model without turning the voice on. |
 | `kill` | Unload it and give the memory back. |
+| `install breeze [--check]` | Check this machine for Breeze TTS 2, the voice that laughs, then offer to download it (about 11 GB). Asks first. |
 
 ## Keeping it current
 
@@ -73,9 +75,10 @@ command — it is `/voice on`, never `/voice_on`.
 - The voice is **one setting shared by every session**. Change it anywhere and it
   changes everywhere at once, including sessions already open, and it survives a
   reboot.
-- The engine does **not** survive a reboot. After restarting the machine, say `on`
-  once and it stays warm until you shut down or `kill` it.
-- If it goes quiet unexpectedly, the engine has died — nothing revives it by
-  itself. `status` will say so, and `on` brings it back.
+- The engine does **not** survive a reboot. With the voice on, the next prompt you
+  type into Claude Code starts it again, and `on` does the same by hand. Then it
+  stays warm until you shut down or `kill` it.
+- If it goes quiet unexpectedly, the engine may have died. `status` will say so,
+  and the next prompt, or `on`, brings it back.
 
 Full description of how it works: https://github.com/TraxData313/claude-voice

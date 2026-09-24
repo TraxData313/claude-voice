@@ -1,15 +1,17 @@
 """
-Keeps one Qwen talker model warm and speaks whatever is POSTed to it.
+Keeps one speech model warm and speaks whatever is POSTed to it.
 
-Loading the model takes the better part of a minute, which is fine once and
+Loading a model takes the better part of a minute, which is fine once and
 unbearable per sentence -- so the engine lives here, in a long-running process,
-behind a tiny HTTP API on localhost:
+behind a tiny HTTP API on localhost. docs/api.md is the whole of it, written
+for a program that wants to talk through it:
 
-    POST /speak   {"text": "...", "voice": "abby", "source": "embedding"}
-    POST /stop    stop talking now, drop anything queued
-    POST /pause   hold it where it is, keeping the place; no argument toggles
-    POST /health  {"ready": true, "speaking": false, ...}
-    POST /quit    shut the process down
+    POST /speak         {"text": "(laugh) ...", "voice": "abby", "mood": "sad"}
+    POST /capabilities  what the next line can do: moods, sounds, engines
+    POST /stop          stop talking now, drop anything queued
+    POST /pause         hold it where it is, keeping the place; no argument toggles
+    POST /health        {"ready": true, "speaking": false, ...}
+    POST /quit          shut the process down
 
 The panel (panel.py) drives the rest, and owns no state of its own -- it draws
 whatever /state last said and turns every click into one of these:
@@ -24,9 +26,10 @@ whatever /state last said and turns every click into one of these:
     POST /set-voice     {"voice": "max"}
     POST /volume        {"level": 0.6} -- 0 to 1, and audible mid-sentence
 
-Two threads do the work. The engine thread owns the QwenEngine and never lets
-anyone else touch it -- a JNIEnv pointer belongs to the thread that made the
-JVM, so calling generate() from an HTTP worker would be undefined behaviour.
+Two threads do the work. The engine thread owns the engine and never lets
+anyone else touch it -- for Qwen a JNIEnv pointer belongs to the thread that
+made the JVM, so calling generate() from an HTTP worker would be undefined
+behaviour.
 It synthesises chunk by chunk and hands finished wavs to the player thread,
 which is plain winsound and knows nothing about JNI. That split is also what
 makes speech start on the first sentence instead of the last.
@@ -171,10 +174,12 @@ def rss_mb():
 def build_engine(state):
     """Whichever engine the config asks for, loaded and ready to speak.
 
-    Both are held to the same three calls -- load_models, synthesize_streaming,
-    synthesize -- so everything below this line is written once and does not
-    know which one it got. The difference lives in what voice_lib.resolve puts
-    in a job's kwargs, and that is handed through without being read.
+    All three are held to the same three calls -- load_models,
+    synthesize_streaming, synthesize -- so everything below this line is
+    written once and does not know which one it got. The difference lives in
+    what voice_lib.resolve puts in a job's kwargs, and that is handed through
+    without being read. What each can be asked for beyond the words is
+    voice_lib.ENGINE_CAN.
 
     The voice is warmed here rather than on the first answer. Pocket TTS pays
     about two seconds the first time it meets a voice, while it fetches that
@@ -209,6 +214,27 @@ def build_engine(state):
             log(f"could not warm the voice: {exc}")
         return which, eng
 
+    if which == "breeze":
+        import breeze_engine
+
+        # A process of its own, in an environment of its own -- see the top of
+        # breeze_engine.py for why. Its output goes to a log beside this one,
+        # because a model that fails to come up says why there and nowhere else.
+        eng = breeze_engine.Engine(
+            state.get("breezePython"), state.get("breezeDir"), state.get("breezeModel"),
+            fast=state.get("breezeFast", True), log=log,
+            log_path=voice_lib._rolled(os.path.join(voice_lib.LOG_DIR, "breeze-server.log")))
+        eng.load_models()
+        # One short line, thrown away. The first request after a start pays
+        # for whatever CUDA sets up lazily -- measured 0.52 s to the first
+        # sound cold against 0.20 s warm -- and paying it here is invisible.
+        try:
+            _, warm = voice_lib.resolve(state.get("voice"), state.get("source"), state)
+            eng.synthesize("Hi.", **warm)
+        except Exception as exc:
+            log(f"could not warm the voice: {exc}")
+        return which, eng
+
     from qwen_engine import Engine
 
     eng = Engine(state["studioDir"], verbose=True)
@@ -225,11 +251,11 @@ class Job:
     """
 
     __slots__ = ("id", "chunks", "voice", "kwargs", "text", "session", "project",
-                 "when", "cancelled", "stalled", "instruction")
+                 "when", "cancelled", "stalled", "instruction", "mood")
     _ids = itertools.count(1)
 
     def __init__(self, chunks, voice, kwargs, text=None, session=None, project=None,
-                 instruction=None):
+                 instruction=None, mood=None):
         self.id = next(Job._ids)
         self.chunks = list(chunks)
         self.voice = voice
@@ -238,6 +264,9 @@ class Job:
         # in kwargs, because kwargs identify a voice and are handed through
         # unread; this one only means anything to an engine that takes it.
         self.instruction = (instruction or "").strip() or None
+        # The name the instruction was expanded from, when it came by name --
+        # "whisper" -- which is what the panel's narrow column can show.
+        self.mood = mood or None
         # What was said, without the session name the watcher may have prefixed
         # -- the label is shown in its own column rather than read as the line.
         self.text = text if text is not None else " ".join(self.chunks)
@@ -258,6 +287,7 @@ class Job:
             "project": self.project,
             "voice": self.voice,
             "instruction": self.instruction,
+            "mood": self.mood,
             "when": time.strftime("%H:%M", time.localtime(self.when)),
         }
 
@@ -706,7 +736,7 @@ class Speaker:
     def _kwargs(self, job):
         """What the loaded engine is called with, mood included if it takes one.
 
-        Only Qwen does. Pocket's delivery is the voice and nothing else, and
+        Qwen and Breeze do. Pocket's delivery is the voice and nothing else, and
         handing it a keyword it never declared would raise on the sentence
         rather than ignore it -- so the decision is made here, once, against
         the engine that is actually loaded rather than the one the config
@@ -715,6 +745,21 @@ class Speaker:
         if job.instruction and self.engine_name in INSTRUCTED_ENGINES:
             return {**job.kwargs, "instruction": job.instruction}
         return job.kwargs
+
+    def _slack(self, job):
+        """How much longer than plain this job may run before it is called a
+        derail: more when it carries a mood the loaded engine performs, since a
+        mood is often *meant* to slow the reading down."""
+        if job.instruction and self.engine_name in INSTRUCTED_ENGINES:
+            return voice_lib.INSTRUCTED_SLACK
+        return 1.0
+
+    def _performed(self, text):
+        """The text as the loaded engine should get it: sounds it makes in its
+        own spelling, sounds it cannot make taken out rather than read aloud.
+        Against the engine loaded now, like the mood -- the job may have been
+        queued before a swap."""
+        return voice_lib.perform(text, self.engine_name)
 
     def _live(self):
         """The config as it is now, not as it was when this process started.
@@ -879,10 +924,11 @@ class Speaker:
         should fall back -- never True-ish half measures, or the fallback would
         say the first half of the answer twice.
         """
-        text = " ".join(job.chunks).strip()
+        text = self._performed(" ".join(job.chunks).strip())
         if not text:
             return True
         expect = voice_lib.expected_seconds(text)
+        slack = self._slack(job)
         lead = self.PLAY_LEAD.get(mode, self.FIRST_SECONDS)
         if lead == "auto":
             lead = self._auto_lead(text)
@@ -949,7 +995,7 @@ class Speaker:
         try:
             try:
                 eng.synthesize_streaming(text, on_piece,
-                                         max_seconds=voice_lib.ceiling_seconds(text),
+                                         max_seconds=voice_lib.ceiling_seconds(text, slack),
                                          **self._kwargs(job))
             except Exception as exc:
                 if spoken[0] > 0:
@@ -965,7 +1011,7 @@ class Speaker:
                 self._emit(job, buf)
                 spoken[0] += len(buf) / SAMPLE_RATE
 
-            verdict = voice_lib.audio_verdict(text, spoken[0])
+            verdict = voice_lib.audio_verdict(text, spoken[0], slack)
             if verdict != "ok":
                 log(f"  {verdict}: {spoken[0]:.1f}s of audio for {len(text)} "
                     f"characters, where {expect:.1f}s is honest")
@@ -986,6 +1032,9 @@ class Speaker:
         for i, chunk in enumerate(job.chunks):
             if job.cancelled:
                 return
+            chunk = self._performed(chunk)
+            if not chunk:
+                continue                  # nothing but a sound this engine cannot make
             try:
                 samples = self._say(eng, job, chunk)
             except Exception as exc:
@@ -1010,11 +1059,12 @@ class Speaker:
         speech, and the listener never learns it happened.
         """
         expect = voice_lib.expected_seconds(chunk)
+        slack = self._slack(job)
         best = None
         for attempt in (1, 2):
             samples = eng.synthesize(chunk, **self._kwargs(job))
             seconds = len(samples) / SAMPLE_RATE
-            verdict = voice_lib.audio_verdict(chunk, seconds)
+            verdict = voice_lib.audio_verdict(chunk, seconds, slack)
             if verdict == "ok":
                 if attempt == 2:
                     log(f"  retry was clean ({seconds:.1f}s)")
@@ -1028,7 +1078,7 @@ class Speaker:
         # Twice is not luck. Keep whichever attempt came nearest an honest
         # reading, and cut the tail off it: a derail drifts, so every word
         # before it is good and only what follows is noise.
-        ceiling = int(voice_lib.ceiling_seconds(chunk) * SAMPLE_RATE)
+        ceiling = int(voice_lib.ceiling_seconds(chunk, slack) * SAMPLE_RATE)
         if len(best) > ceiling:
             log(f"  keeping the first {ceiling / SAMPLE_RATE:.1f}s and dropping the rest")
             return best[:ceiling]
@@ -1287,8 +1337,9 @@ def _empty_dir(path):
 # session says 'cli' or 'claude-desktop', while a run started headless --
 # `claude -p`, or anything driving the SDK -- says 'sdk-cli'. Read off real
 # transcripts against Claude Code 2.1.229; if a future version spells it
-# differently the worst that happens is those runs speak again.
-HEADLESS_ENTRYPOINTS = ("sdk-cli",)
+# differently the worst that happens is those runs speak again. The list lives
+# in voice_lib, because the hook asks the same question of its environment.
+HEADLESS_ENTRYPOINTS = voice_lib.HEADLESS_ENTRYPOINTS
 
 
 class TranscriptWatcher(threading.Thread):
@@ -1723,6 +1774,14 @@ class TranscriptWatcher(threading.Thread):
         # the same message is not said twice just because it was announced.
         if voice_lib.already_spoken(speech):
             return
+        # A session has no field to put a mood in, so it writes one into the
+        # line: "(whisper) I found it." Taken out here whatever the engine, and
+        # sent beside the words as the whole instruction that name stands for --
+        # which the engine thread drops again if what is loaded takes none.
+        mood, speech = voice_lib.direction(speech)
+        if not speech:
+            return
+        mood, instruction = voice_lib.mood_instruction(mood)
         try:
             voice, kwargs = voice_lib.resolve(state.get("voice"), state.get("source"), state)
         except LookupError as exc:
@@ -1743,9 +1802,11 @@ class TranscriptWatcher(threading.Thread):
         pieces = voice_lib.chunks(announced + speech)
         if pieces:
             job = Job(pieces, voice["id"], kwargs, text=speech, session=label,
-                      project=self.projects.get(path))
+                      project=self.projects.get(path), instruction=instruction,
+                      mood=mood)
             self.speaker.submit(job)                                # queued, never barging
             log(f"watcher: {what} [{voice['id']}] {len(pieces)} chunk(s) "
+                f"{'(' + mood + ') ' if mood else ''}"
                 f"{'<' + announced.strip() + '> ' if announced else ''}{speech[:40]}...")
 
 
@@ -1769,9 +1830,11 @@ def _pocket_ready():
 _POCKET = {"known": None}
 
 # Engines that take a mood alongside the words. Qwen has a field for it in its
-# own parameter block; Pocket has nothing of the kind, and its delivery is
-# whatever the voice does.
-INSTRUCTED_ENGINES = ("qwen",)
+# own parameter block and Breeze an instruction beside the text; Pocket has
+# nothing of the kind, and its delivery is whatever the voice does. Read off
+# voice_lib.ENGINE_CAN, which the panel and the API read as well.
+INSTRUCTED_ENGINES = tuple(e for e in voice_lib.ENGINES
+                           if voice_lib.engine_can(e, "instruction"))
 MAX_INSTRUCTION = 200
 
 
@@ -1786,6 +1849,73 @@ def _takes_instruction():
     """
     try:
         return voice_lib.engine_of(voice_lib.load_state()) in INSTRUCTED_ENGINES
+    except Exception:
+        return False
+
+
+def _events_performed():
+    """The sounds the next line could make, if written into it -- the same
+    question as _takes_instruction, asked of the same configured engine."""
+    try:
+        return list(voice_lib.engine_can(voice_lib.engine_of(voice_lib.load_state()),
+                                         "events"))
+    except Exception:
+        return []
+
+
+def _capabilities(state, loaded):
+    """Everything a program speaking through this engine needs to know first.
+
+    One answer rather than several, because a caller like an assistant decides
+    once how it is going to write its lines -- whether to put a laugh in, which
+    moods to offer itself -- and should not have to piece that together from
+    three endpoints. See docs/api.md.
+    """
+    engine = voice_lib.engine_of(state)
+    return {
+        "engine": engine,
+        "engineLoaded": loaded,
+        "voice": state.get("voice"),
+        "instruction": engine in INSTRUCTED_ENGINES,
+        "maxInstruction": MAX_INSTRUCTION,
+        "events": list(voice_lib.engine_can(engine, "events")),
+        "eventSyntax": "(laugh)",
+        "moods": voice_lib.MOODS if engine in INSTRUCTED_ENGINES else {},
+        "moodsHeard": list(voice_lib.MOODS_HEARD),
+        "engines": {
+            name: {"label": voice_lib.engine_info(name)["label"],
+                   "installed": _engine_ready(name, state),
+                   "instruction": bool(voice_lib.engine_can(name, "instruction")),
+                   "events": list(voice_lib.engine_can(name, "events"))}
+            for name in voice_lib.ENGINES},
+    }
+
+
+def _delivery(payload, written=None):
+    """(instruction, mood, unknown) for a /speak request.
+
+    An instruction in the caller's own words wins, being the most specific.
+    Then a mood by name in its own field -- "sad" becomes the whole sentence
+    that was measured to work -- and last a mood written into the text, which
+    is all a caller with no field of its own can do. `unknown` is a name that
+    was asked for and is no mood, so the reply can say so rather than leave the
+    caller believing it was heard that way.
+    """
+    instruction = (payload.get("instruction") or "").strip()[:MAX_INSTRUCTION]
+    asked = (payload.get("mood") or "").strip()
+    named, preset = voice_lib.mood_instruction(asked)
+    unknown = asked if asked and not preset and not instruction else None
+    if not preset:
+        named, preset = voice_lib.mood_instruction(written)
+    if instruction:
+        return instruction, None, unknown
+    return preset, (named if preset else None), unknown
+
+
+def _engine_ready(name, state):
+    """voice_lib.engine_ready, never raising: a description is being drawn."""
+    try:
+        return bool(voice_lib.engine_ready(name, state))
     except Exception:
         return False
 
@@ -1845,7 +1975,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "/health":
             return self._reply(200, {**sp.status(), "watching": Handler.watching,
-                                     "instruction": _takes_instruction()})
+                                     "instruction": _takes_instruction(),
+                                     "events": _events_performed()})
+
+        if route == "/capabilities":
+            return self._reply(200, _capabilities(voice_lib.load_state(), sp.engine_name))
 
         if route == "/state":
             # Everything the panel draws, in one round trip. It owns no state
@@ -1861,11 +1995,15 @@ class Handler(BaseHTTPRequestHandler):
                 "engine": voice_lib.engine_of(state),
                 "engines": list(voice_lib.ENGINES),
                 "pocketReady": _pocket_ready(),
+                # Offered either way -- picking it is how the installer is
+                # found -- but the panel asks before it switches to it.
+                "breezeReady": _engine_ready("breeze", state),
                 # Whether a mood sent with a line would actually be used. The
                 # config's engine and the loaded engine differ for as long as
                 # a swap takes, and a caller deciding whether to offer moods
                 # wants the one that is really going to speak.
                 "instruction": _takes_instruction(),
+                "events": _events_performed(),
                 "volume": win_volume.clamp(state.get("volume", 1.0)),
                 "enabled": bool(state.get("enabled")),
             })
@@ -1969,6 +2107,13 @@ class Handler(BaseHTTPRequestHandler):
             text = (payload.get("text") or "").strip()
             if not text:
                 return self._reply(400, {"error": "no text"})
+            # A mood written into the words as a stage direction, the way a
+            # Claude session writes one, or somebody types one into the panel:
+            # "(whisper) hello". Taken out whether or not it is used, so that it
+            # is never read aloud; see _delivery for what wins.
+            written, text = voice_lib.direction(text)
+            if not text:
+                return self._reply(400, {"error": "nothing to say, only how to say it"})
             # Against the config as it is now, not as it was when this process
             # started. It always mattered a little -- a voice added since would
             # not be found -- and with two engines it matters completely: the
@@ -2013,18 +2158,33 @@ class Handler(BaseHTTPRequestHandler):
             # sent, and dropped by the engine thread if the loaded engine has
             # no use for it -- which is why the reply says what was actually
             # done with it rather than only that it arrived.
-            instruction = (payload.get("instruction") or "").strip()[:MAX_INSTRUCTION]
+            instruction, mood, unknown = _delivery(payload, written)
             sp.submit(Job(pieces, voice["id"], kwargs, text=text,
                           session=payload.get("session"),
                           project=payload.get("project"),
-                          instruction=instruction),
+                          instruction=instruction, mood=mood),
                       barge=not payload.get("queue"))
+            said_how = mood or instruction
             log(f"speak [{voice['id']}] {len(pieces)} chunk(s): "
-                f"{'(' + instruction + ') ' if instruction else ''}"
+                f"{'(' + said_how + ') ' if said_how else ''}"
                 f"{'<' + announced.strip() + '> ' if announced else ''}{text[:60]}...")
-            return self._reply(202, {"queued": len(pieces), "voice": voice["id"],
-                                     "instruction": instruction or None,
-                                     "instructed": bool(instruction) and _takes_instruction()})
+            # What will actually be done with what was asked for, judged against
+            # the engine the next line comes out of -- so a caller learns that a
+            # laugh was dropped from the reply rather than from the silence.
+            can = _events_performed()
+            events = voice_lib.events_in(text)
+            reply = {"queued": len(pieces), "voice": voice["id"],
+                     "instruction": instruction or None,
+                     "instructed": bool(instruction) and _takes_instruction(),
+                     "mood": mood,
+                     "events": [e for e in events if e in can],
+                     "eventsDropped": [e for e in events if e not in can]}
+            if unknown:
+                reply["warning"] = (f"no mood called '{unknown}'; spoken "
+                                    + (f"as '{mood}', from the text. " if mood
+                                       else "without one. ")
+                                    + "Known: " + ", ".join(voice_lib.MOODS))
+            return self._reply(202, reply)
 
         self._reply(404, {"error": f"no route {route}"})
 

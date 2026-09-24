@@ -157,12 +157,13 @@ Do not install git for them unasked, and do not edit their PATH unasked. Both ar
 
 - The voice is **one setting shared by every session**. Changing it anywhere changes it
   everywhere, and it survives a reboot.
-- The **engine does not** survive a reboot. After restarting the machine they say `on` once,
-  or press the button in the panel.
+- The **engine does not** survive a reboot. With the voice left on, the first prompt they
+  type afterwards starts it again; `on` or the button in the panel does it by hand.
 - The panel can be closed and reopened from the **Abby for Claude** icon on the Desktop.
 - The **version is in the panel's bottom right corner**, and `/voice update` is how a newer
   one arrives — it pulls and restarts the engine, which is the step that is easy to miss.
-- If it ever goes quiet, `status` says whether the engine died, and `on` revives it.
+- If it ever goes quiet, `status` says whether the engine died, and `on` revives it. So does
+  their next prompt, while the voice is on.
 
 ## If something is wrong
 

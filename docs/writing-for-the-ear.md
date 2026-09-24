@@ -148,3 +148,58 @@ The `Note` field in `voice.json` is free and unread if you want somewhere longer
 **One session never gets it: the one that installed it.** `CLAUDE.md` is read when a session
 begins, so the conversation that ran the installer carries on unaware. Tell it directly, or
 restart it.
+
+## A mood, and a laugh, when the engine has them
+
+Two of the engines do more than read the words. Qwen and Breeze take a **mood**, meaning
+how a whole line is said, and Breeze also makes **sounds** written into the text: a laugh,
+a sigh. A session has no field beside its words to ask for either, so it writes them into
+the words, the way a script writes stage directions:
+
+```
+## TL;DR
+(excited)
+- It works, all of it. (laugh) Even the part I was sure would not.
+```
+
+| | written as | where | what happens |
+|---|---|---|---|
+| **a mood** | `(whisper)`, `(sad)`, `(excited)`, one of eleven | first thing in the TL;DR, or at the front of a short line | sets how the whole message is said, and is never read out |
+| **a sound** | `(laugh)` `(sigh)` `(cough)` `(clears throat)` | exactly where it happens | Breeze makes it; the others leave it out |
+
+- **One mood per message, and the first one wins.** An engine follows one instruction for a
+  whole generation, so a second could only ever be ignored. Every mood in brackets comes out
+  of the speech either way, so an engine that takes none is never handed the word *whisper*
+  to read instead.
+- **Only a bracket with nothing but the mood in it counts.** `(sad, I know)` is an aside and
+  stays one. Asterisks never carry a mood, because `*serious*` is emphasis far more often
+  than it is a direction.
+- **Sounds are forgiving, moods are not.** `(laughs softly)`, `[giggles]` and `*sighs*` all
+  arrive as Breeze's own tags, because the model writing them has habits of its own. Between
+  asterisks, only a span that is nothing but the sound counts, standing where a stage
+  direction stands, so `*Laugh* tracks are gone` stays a sentence.
+- **On screen it stays**, as a stage direction. That is the price of having no second
+  channel, and it reads as what it is.
+
+### A session is told only what will happen
+
+None of this is any use until the session knows about it, and it is not `CLAUDE.md` that
+tells it: that file is read once, and the engine can change in the middle of a
+conversation. `speak_hook.py` answers two more events for this:
+
+- **`SessionStart`**, for a new session, a resumed one, or one just compacted, gets a short
+  paragraph saying whether the voice is on, whose voice it is, and what that engine will do
+  with a mood or a sound.
+- **`UserPromptSubmit`** runs on every prompt and says nothing, unless that has changed since
+  the session was last told. Swap Qwen for Breeze mid-conversation and the next prompt
+  carries the news.
+
+The paragraph is built from what the engine can do rather than from its name, and it offers
+nothing the engine will not perform. That rule came from the assistant app first. Its
+voice's mood field only appears while an engine that uses it is loaded, because a field that
+does nothing is worse than none: it gets written into, and believed. Telling a session it
+may laugh on an engine that cannot is the same mistake.
+
+`voice status` shows what sessions are told, and under *hooks* whether the hooks can run at
+all. For their first five weeks they could not, and nothing said so: see
+[the hooks](how-it-works.md#the-hooks).

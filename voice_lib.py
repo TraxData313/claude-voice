@@ -2,7 +2,7 @@
 Shared bits: config, the voice catalogue, turning a markdown answer into
 something worth hearing, and talking to the speech server.
 
-Imported by speak_server.py (the engine host), speak_hook.py (the Stop hook)
+Imported by speak_server.py (the engine host), speak_hook.py (the hooks)
 and voice_cli.py (the switch).
 """
 
@@ -160,6 +160,20 @@ DEFAULTS = {
     # Extra folders searched as well -- for voices you may keep but not publish.
     # Same <sex>\<culture>\<id> layout. Never written to, never committed.
     "extraVoicesDirs": [],
+    # Breeze TTS 2 lives in an environment of its own -- the CUDA torch it needs
+    # is nothing this tool's Python has or should have -- so these name that
+    # environment's python.exe, its breeze-tts code and its weights. Empty means
+    # not installed: the engine is then offered with an installer in front of
+    # it, never downloaded because an update arrived. 'voice_cli.py install
+    # breeze' and the panel's installer write them. See docs/engines.md.
+    "breezePython": "",
+    "breezeDir": "",
+    "breezeModel": "",
+    # The three decode stages that make it faster than speech. Off starts in
+    # twelve seconds instead of about thirty and needs 7.4 GB rather than a
+    # 13 GB peak -- and speaks at about half realtime, so only for a card that
+    # cannot hold them. See breeze_engine.FAST_FLAGS.
+    "breezeFast": True,
 
     # --- runtime state, written by voice_cli ------------------------------
     "enabled": False,
@@ -350,7 +364,7 @@ def patch_state(**changes):
 # even contains, which is why every caller of catalog() gets it from here
 # rather than assuming.
 DEFAULT_ENGINE = "qwen"
-ENGINES = ("qwen", "pocket")
+ENGINES = ("qwen", "pocket", "breeze")
 
 # What each engine is, in the few facts somebody choosing between them actually
 # needs, plus where to read the rest. It lives here rather than in the panel
@@ -360,12 +374,16 @@ ENGINES = ("qwen", "pocket")
 # 'blurb' is one paragraph written to be wrapped by whoever shows it, so it
 # carries no line breaks of its own.
 ENGINE_INFO = {
+    # The memory in a label is the most the card was seen holding for it on
+    # 2026-09-24 -- what has to be free, which is the question somebody picking
+    # from a dropdown is really asking. For Breeze that is its start, which
+    # peaks at 13.1 GB and settles at about 9; for Qwen it is 3.3 GB.
     "qwen": {
-        "label": "Qwen — GPU",
+        "label": "Qwen — GPU 3.3 GB",
         "blurb": (
             "The original, and the better voice. Needs Qwen-TTS Studio and a "
-            "graphics card. Reads Cyrillic, and every voice in the voices "
-            "folder was cloned here."
+            "graphics card with about 3.3 GB free. Reads Cyrillic, and every "
+            "voice in the voices folder was cloned here."
         ),
         "url": "https://github.com/Danmoreng/qwen-tts-studio",
     },
@@ -379,7 +397,60 @@ ENGINE_INFO = {
         ),
         "url": "https://kyutai.org/blog/2026-01-13-pocket-tts/",
     },
+    "breeze": {
+        "label": "Breeze 2 — GPU 13 GB",
+        "blurb": (
+            "The one that laughs. Performs (laugh) and (sigh) written into the "
+            "text, and follows a mood given beside the words -- a whisper "
+            "whispers. English and Chinese only. A separate download of about "
+            "eleven gigabytes; it needs 13 GB free on the graphics card to "
+            "start and holds about 9 after, so a 16 GB card. The weights are "
+            "for non-commercial use."
+        ),
+        "url": "https://github.com/breezeblue-ai/breeze-tts",
+    },
 }
+
+# What each engine can be asked for beyond the words, in one table: the server
+# decides from it what to pass through, the panel whether to draw a mood box,
+# and the API what a caller is told it may send. Three copies of this would
+# disagree the first time an engine learned something new.
+#
+#   instruction   takes a mood in words beside the text, and performs it
+#   events        sounds it makes when one is written into the text, "(laugh)"
+ENGINE_CAN = {
+    "qwen": {"instruction": True, "events": ()},
+    "pocket": {"instruction": False, "events": ()},
+    "breeze": {"instruction": True,
+               "events": ("laugh", "sigh", "cough", "clears throat")},
+}
+
+
+def engine_can(name, what):
+    """What an engine can do: engine_can("breeze", "events"). Never raises --
+    an unknown engine can do nothing, which is the safe answer."""
+    return ENGINE_CAN.get(name, {}).get(what, () if what == "events" else False)
+
+
+def engine_ready(name, state=None):
+    """Could this engine start right now, without installing anything?
+
+    Qwen answers yes and lets its own load say otherwise -- Studio has always
+    been this tool's first assumption. The other two are optional: Pocket is a
+    pip package and Breeze a separate download, and both are asked about in a
+    dropdown's worth of time, so neither answer imports anything.
+    """
+    if name == "pocket":
+        import pocket_engine
+
+        return pocket_engine.available()
+    if name == "breeze":
+        import breeze_engine
+
+        state = state if state is not None else load_state()
+        return breeze_engine.available(state.get("breezePython"), state.get("breezeDir"),
+                                       state.get("breezeModel"))
+    return name in ENGINES
 
 
 def engine_info(name):
@@ -387,6 +458,11 @@ def engine_info(name):
     a usable stub, because this is only ever used to describe something and a
     missing description should not stop a dropdown from being drawn."""
     return ENGINE_INFO.get(name, {"label": name, "blurb": "", "url": ""})
+
+
+def engine_name(name):
+    """What an engine is called in a sentence: its label without the memory."""
+    return engine_info(name)["label"].split(" — ")[0]
 
 
 def engine_of(state=None):
@@ -431,11 +507,42 @@ def voice_roots(state=None):
 # these once, and loading it afterwards is instant.
 POCKET_VOICE = "pocket.safetensors"
 
+# What Breeze TTS 2 clones from: a clean clip of the voice and, beside it under
+# the same name, a .txt of exactly what it says. Breeze takes no baked state --
+# it learns the voice from the clip on every request -- and a transcript that
+# drifts from the audio teaches it a wrong alignment, so the words live in a
+# file of their own rather than being retyped anywhere.
+#
+# breeze-reference.wav is the one that ships: for Breeze the clip *is* the
+# voice, so it is committed where Pocket's working render is not. The render
+# make_pocket_voice.py leaves behind is second on the list because it is
+# exactly such a clip, and the script now keeps its words beside it -- so a
+# voice carried across to Pocket speaks on Breeze too, on this machine, without
+# another step.
+BREEZE_REFERENCES = ("breeze-reference.wav", "pocket-reference.wav")
+
+
+def _breeze_reference(d):
+    """(clip, transcript) for a voice folder, or (None, "") if it has none."""
+    for name in BREEZE_REFERENCES:
+        wav = os.path.join(d, name)
+        txt = os.path.splitext(wav)[0] + ".txt"
+        if os.path.exists(wav) and os.path.exists(txt):
+            try:
+                with open(txt, encoding="utf-8-sig") as fh:
+                    words = fh.read().strip()
+            except OSError:
+                continue
+            if words:
+                return wav, words
+    return None, ""
+
 
 def _is_voice_dir(d):
     return (os.path.exists(os.path.join(d, "embedding.json"))
             or os.path.exists(os.path.join(d, "icl-prompt.json"))
-            or os.path.exists(os.path.join(d, POCKET_VOICE)))
+            or os.path.exists(os.path.join(d, POCKET_VOICE))
+            or _breeze_reference(d)[0] is not None)
 
 
 def _read_voice(d, vid, sex, culture, root):
@@ -461,6 +568,7 @@ def _read_voice(d, vid, sex, culture, root):
     emb = os.path.join(d, "embedding.json")
     icl = os.path.join(d, "icl-prompt.json")
     pkt = os.path.join(d, POCKET_VOICE)
+    clip, words = _breeze_reference(d)
     return {
         "id": vid, "name": name, "sex": sex, "culture": culture,
         "persona": persona, "style": style, "dir": d, "root": root,
@@ -469,6 +577,8 @@ def _read_voice(d, vid, sex, culture, root):
         "embedding": emb if os.path.exists(emb) else None,
         "icl": icl if os.path.exists(icl) else None,
         "pocket": pkt if os.path.exists(pkt) else None,
+        "breeze": clip,
+        "breezeText": words,
     }
 
 
@@ -489,7 +599,8 @@ def catalog(state=None, engine=None):
     Earlier roots win, so a bundled voice shadows a same-named local one.
     """
     state = state or load_state()
-    pocket = (engine or engine_of(state)) == "pocket"
+    which = engine or engine_of(state)
+    pocket = which == "pocket"
     out, seen = [], set()
     for root in voice_roots(state):
         for sex in sorted(os.listdir(root)):
@@ -525,6 +636,11 @@ def catalog(state=None, engine=None):
         have = {v["id"].lower() for v in cloned}
         return cloned + [v for v in pocket_engine.catalog(engine_language(state))
                          if v["id"].lower() not in have]
+    if which == "breeze":
+        # Only the voices with a clip Breeze can learn from and the words said
+        # in it. Breeze ships no voices of its own; every one of these is a
+        # voice already here, heard through a different model.
+        return [v for v in out if v["breeze"]]
     return out
 
 
@@ -541,10 +657,16 @@ def resolve(voice_id, source="embedding", state=None):
     engine = engine_of(state)
     voices = catalog(state, engine)
     if not voices:
-        raise LookupError(
-            "no voices found. Add one with: python voice_cli.py clone <sample.wav> --name <name>"
-            if engine == "qwen" else
-            "pocket-tts has no voices to offer. Is it installed? pip install pocket-tts")
+        raise LookupError({
+            "qwen": "no voices found. Add one with: python voice_cli.py clone "
+                    "<sample.wav> --name <name>",
+            "pocket": "pocket-tts has no voices to offer. Is it installed? "
+                      "pip install pocket-tts",
+            "breeze": "no voice has a clip Breeze can clone from. It needs "
+                      "breeze-reference.wav and a breeze-reference.txt of its exact "
+                      "words in the voice's folder; make_pocket_voice.py leaves a "
+                      "pair it can use too.",
+        }.get(engine, "no voices found"))
 
     needle = (voice_id or "").strip().lower()
     hit = next((v for v in voices if v["id"].lower() == needle), None)
@@ -567,6 +689,11 @@ def resolve(voice_id, source="embedding", state=None):
         return hit, {"pocket_voice": hit.get("pocket") or hit["id"],
                      "pocket_language": (hit.get("pocketLanguage")
                                          or engine_language(state))}
+
+    if engine == "breeze":
+        # The clip and its words, every time: Breeze keeps no state for a
+        # voice, so what identifies one to it is what it learns her from.
+        return hit, {"breeze_ref": hit["breeze"], "breeze_ref_text": hit["breezeText"]}
 
     path = hit.get("icl" if source == "icl" else "embedding") or hit["embedding"] or hit["icl"]
     if path is None:
@@ -726,6 +853,8 @@ def clean_text(md, max_chars=600):
     t = _QUOTE.sub("", t)
     t = _BULLET.sub("", t)
     t = _NUMBER.sub("", t)
+    # Before the emphasis goes, or "*laughs*" is left as the word laughs.
+    t = _STARRED.sub(lambda m: f"({_event_name(m)})", t)
     t = _EMPH.sub("", t)
     t = re.sub(r"[ \t]+", " ", t)
     t = re.sub(r"\s*\n\s*", "\n", t).strip()
@@ -793,6 +922,180 @@ def truncate(text, max_chars):
 
 
 # --------------------------------------------------------------------------
+# sounds written into the text, and moods given beside it
+# --------------------------------------------------------------------------
+#
+# Two ways to ask for more than the words, and they are different in kind. A
+# sound is *in* the line, at the place it happens: "So I told it to stop, and
+# (laugh) it just kept going." A mood is *about* the line -- how all of it is
+# said -- and rides beside it as an instruction. Breeze does both; Qwen takes a
+# mood and has never made a sound; Pocket does neither.
+#
+# The spelling a sound is written in is forgiving, because the one writing it is
+# usually a language model with habits of its own: "(laughs)", "[giggles]" and
+# "*chuckling*" all mean the same thing, and arrive as Breeze's own "(laugh)".
+# Written anywhere that cannot perform it, a sound is taken out rather than
+# read, since an engine asked to say "(laugh)" says the word laugh -- which is
+# the one outcome worse than silence.
+
+EVENT_NAMES = ("laugh", "sigh", "cough", "clears throat")
+
+_EVENT_ALIASES = {
+    "laugh": ("laugh", "laughs", "laughing", "laughter", "chuckle", "chuckles",
+              "chuckling", "giggle", "giggles", "giggling"),
+    "sigh": ("sigh", "sighs", "sighing"),
+    "cough": ("cough", "coughs", "coughing"),
+    "clears throat": ("clears throat", "clear throat", "clearing throat",
+                      "clears her throat", "clears his throat", "clears their throat",
+                      "clearing her throat", "clearing his throat", "clears my throat",
+                      "ahem"),
+}
+_EVENT_OF = {alias: name for name, aliases in _EVENT_ALIASES.items() for alias in aliases}
+_ALIAS = "|".join(sorted((re.escape(a).replace(r"\ ", r"\s+") for a in _EVENT_OF),
+                         key=len, reverse=True))
+# In a matching pair of (), [] or ** -- never bare, because "I laugh at that"
+# is a sentence and not a stage direction. A couple of words either side are
+# allowed, since "(laughs softly)" and "(a nervous laugh)" are how these get
+# written; the words themselves are dropped, because Breeze has one laugh and
+# no adverbs for it.
+_INNER = rf"(?:[a-z]+\s+){{0,2}}({_ALIAS})(?:\s+[a-z]+){{0,2}}"
+_EVENT = re.compile(rf"\(\s*{_INNER}\s*\)|\[\s*{_INNER}\s*\]|\*\s*{_INNER}\s*\*", re.I)
+
+# The same sounds between single asterisks, the way chat writes them, in text
+# on its way from markdown to speech -- where the emphasis is stripped next, and
+# "*laughs*" would otherwise reach the engine as the word laughs. Stricter than
+# the brackets, because in markdown an asterisk is mostly plain emphasis: only a
+# span holding nothing but the sound, with at most one -ly word after it, and
+# only where a stage direction stands -- before a capital, a bracket, a stop or
+# the end of the line. "*Laugh* tracks are gone" stays a sentence.
+_STARRED = re.compile(
+    rf"(?<![\w*])\*\s*((?i:{_ALIAS}))(?:\s+(?i:[a-z]+ly))?\s*\*(?![\w*])"
+    rf"(?=[ \t]*(?:$|[A-Z\"'(\[.,;:!?]))", re.M)
+
+
+def _event_name(match):
+    said = next(g for g in match.groups() if g)
+    return _EVENT_OF[re.sub(r"\s+", " ", said.lower())]
+
+
+def events_in(text):
+    """The sounds written into a line, in Breeze's names, in order."""
+    return [_event_name(m) for m in _EVENT.finditer(text or "")]
+
+
+def perform(text, engine):
+    """The line as this engine should be handed it.
+
+    Sounds it makes are rewritten in its own spelling; sounds it does not make
+    are taken out, with the spacing and punctuation around them tidied so that
+    nothing reads as a stumble. An engine that makes none gets none -- which
+    leaves text without any tags in it exactly as it came.
+    """
+    if not text or not _EVENT.search(text):
+        return text
+    can = engine_can(engine, "events")
+
+    def swap(match):
+        name = _event_name(match)
+        return f" ({name}) " if name in can else " "
+
+    out = _EVENT.sub(swap, text)
+    out = re.sub(r"\s+([,.;:!?])", r"\1", out)
+    out = re.sub(r"([,;:])(?=[,.;:!?])", "", out)     # "stop, , like" once the tag goes
+    return re.sub(r"\s{2,}", " ", out).strip(" ,;")
+
+
+# Moods by name, each expanded to a whole instruction. Named because a caller
+# should not have to know the lesson in docs/engines.md -- that one adjective
+# does not steer anything, and a verb with two or three things about the
+# delivery does. Written in that shape, all of them.
+#
+# Three were heard on Breeze in Abby's voice before they were written here --
+# sad, excited and whisper, on 2026-09-24, and sad is word for word the one
+# Qwen was measured with. The rest follow the same pattern and have not been
+# listened to yet; the reply to a line says which mood it went out with.
+MOODS = {
+    "happy": "Speak brightly and happily, warm and smiling, with a lift at the "
+             "end of each phrase.",
+    "excited": "Speak quickly and excitedly, bright and breathless, full of delight.",
+    "playful": "Speak playfully and teasingly, light and bouncy, as if holding back "
+               "a grin.",
+    "calm": "Speak calmly and gently, unhurried and soft, as if settling someone down.",
+    "tender": "Speak softly and tenderly, warm and close, full of affection.",
+    "sad": "Speak slowly and sadly, quiet and downcast, with long pauses.",
+    "tired": "Speak slowly and wearily, low and heavy, as if at the end of a long day.",
+    "serious": "Speak slowly with a restrained, serious tone.",
+    "whisper": "Whisper quietly and secretively, as if leaning in to share a secret.",
+    "surprised": "Speak with sudden surprise, quick and rising, as if caught off guard.",
+    "angry": "Speak sharply and angrily, clipped and forceful, barely holding it in.",
+}
+MOODS_HEARD = ("sad", "excited", "whisper")
+
+# A few spellings a caller is likely to reach for, so they land on a mood
+# rather than on "no mood called that". The adverbs are for stage directions,
+# which is how a session writes one: "(softly) Goodnight."
+_MOOD_ALIASES = {"whispering": "whisper", "whispered": "whisper", "whispers": "whisper",
+                 "sadly": "sad", "joyful": "happy", "cheerful": "happy",
+                 "happily": "happy", "excitedly": "excited", "gentle": "calm",
+                 "gently": "calm", "calmly": "calm", "soft": "tender",
+                 "softly": "tender", "tenderly": "tender", "weary": "tired",
+                 "wearily": "tired", "mad": "angry", "angrily": "angry",
+                 "shocked": "surprised", "teasing": "playful", "teasingly": "playful",
+                 "playfully": "playful"}
+
+
+def mood_instruction(mood):
+    """(name, instruction) for a mood, or (None, "") for one we do not know."""
+    key = (mood or "").strip().lower()
+    key = _MOOD_ALIASES.get(key, key)
+    return (key, MOODS[key]) if key in MOODS else (None, "")
+
+
+# A session has no field beside its words to put a mood in -- the text is all it
+# has -- so it writes the mood into the text as a stage direction, the way a
+# script does: "(whisper) I found it." Only a bracket holding nothing but a mood
+# counts, so a real aside in brackets is never taken for one, and only () or []:
+# "*sad*" is emphasis far more often than it is a direction. A link's text in
+# square brackets is not one either.
+_MOOD_WORD = "|".join(sorted((re.escape(w) for w in set(MOODS) | set(_MOOD_ALIASES)),
+                             key=len, reverse=True))
+_MOOD_MARK = re.compile(rf"\(\s*({_MOOD_WORD})\s*\)|\[\s*({_MOOD_WORD})\s*\](?!\()", re.I)
+
+
+def direction(text):
+    """(mood, text): the mood a line asks for, and the line without asking.
+
+    The mood is the first one named, as the name it expands from, or None.
+    Every direction comes out of the text whether it is used or not -- a mood
+    is how a line is said and never part of what is said, and an engine that
+    takes none should not be handed the word "whisper" to read instead.
+
+    One per message, and the first wins: an engine performs one instruction
+    across a whole generation, so a second one could only ever be ignored.
+    Sounds are left where they are. They belong to the words, and the engine
+    decides whether it can make them.
+    """
+    if not text:
+        return None, text or ""
+    asked = []
+
+    def take(match):
+        asked.append(next(g for g in match.groups() if g))
+        return " "
+
+    out = _MOOD_MARK.sub(take, text)
+    if not asked:
+        return None, text
+    mood, _ = mood_instruction(asked[0])
+    # A direction on a line of its own was given a full stop by clean_text, and
+    # that stop is left behind: "(sad). It failed" and "Done. (sad). Next".
+    out = re.sub(r"([.!?,;:])(?:\s*[.,;:])+", r"\1", out)
+    out = re.sub(r"\s+([.,;:!?])", r"\1", out)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    return mood, re.sub(r"^[.,;:]\s*", "", out)
+
+
+# --------------------------------------------------------------------------
 # is what came back really speech?
 # --------------------------------------------------------------------------
 #
@@ -828,19 +1131,42 @@ SWALLOW_FACTOR = 0.10
 SWALLOW_FLOOR = 0.6
 
 
+# A sound written into the line is time that no character accounts for. A laugh
+# or a sigh ran a second or two on Breeze; counting the tag's own letters instead
+# gave it half a second, which is how a laugh would end up cut off.
+EVENT_SECONDS = 1.5
+
+# How much longer a line may run when it was told how to sound. A mood slows a
+# reading down -- that is often the point of it -- and Breeze's slow sad line
+# ran 11.4 s where 5.7 s was honest, past the plain ceiling, so the guard would
+# have stopped her mid-sentence for doing exactly what she was asked. Qwen's
+# slowest measured 1.35 times its plain reading, well inside this.
+INSTRUCTED_SLACK = 2.0
+
+
 def expected_seconds(text):
     """How long an honest reading of this text should take."""
-    chars = len((text or "").strip())
-    return GRACE_SECONDS + chars / CHARS_PER_SECOND if chars else 0.0
+    text = text or ""
+    events = len(_EVENT.findall(text))
+    if events:
+        text = _EVENT.sub(" ", text)
+    chars = len(text.strip())
+    if not chars and not events:
+        return 0.0
+    return GRACE_SECONDS + chars / CHARS_PER_SECOND + events * EVENT_SECONDS
 
 
-def ceiling_seconds(text):
-    """The longest this text may honestly become before we stop believing it."""
+def ceiling_seconds(text, slack=1.0):
+    """The longest this text may honestly become before we stop believing it.
+
+    `slack` is INSTRUCTED_SLACK for a line that carries a mood, and 1.0 for
+    one that does not.
+    """
     expected = expected_seconds(text)
-    return max(expected * DERAIL_FACTOR, MIN_SECONDS) if expected else 0.0
+    return max(expected * DERAIL_FACTOR * slack, MIN_SECONDS) if expected else 0.0
 
 
-def audio_verdict(text, seconds):
+def audio_verdict(text, seconds, slack=1.0):
     """'ok', 'derail' (babbling on) or 'swallowed' (it barely said anything).
 
     Both failures return success from the engine -- that is the whole trap. A
@@ -851,7 +1177,7 @@ def audio_verdict(text, seconds):
     expected = expected_seconds(text)
     if not expected:
         return "ok"
-    if seconds > ceiling_seconds(text):
+    if seconds > ceiling_seconds(text, slack):
         return "derail"
     if seconds < min(SWALLOW_FLOOR, expected * SWALLOW_FACTOR):
         return "swallowed"
@@ -1088,8 +1414,12 @@ SKIPPED_SOME = ("There are {n} Cyrillic characters in this that I can't speak "
                 "out, so I'll skip them, just so you know.")
 SKIPPED_SOME_ONE = ("There's one Cyrillic character in this that I can't speak "
                     "out, so I'll skip it, just so you know.")
-SKIPPED_ALL = ("That line is all Cyrillic, and Pocket TTS can't read it at "
-               "all. Switch back to the other engine and I'll say it properly.")
+SKIPPED_ALL = ("That line is all Cyrillic, and {engine} can't read it at "
+               "all. Switch to Qwen and I'll say it properly.")
+
+# The engines that cannot read Cyrillic, as the warning names them out loud.
+# Breeze reads English and Chinese and nothing else, by its own model card.
+NO_CYRILLIC = {"pocket": "Pocket TTS", "breeze": "Breeze"}
 
 
 def speakable(text, engine=None, state=None):
@@ -1100,12 +1430,12 @@ def speakable(text, engine=None, state=None):
     preface, so that the warning and the answer are one generation and the
     voice does not change between them.
 
-    Only Pocket TTS is limited this way. The Qwen road reads Cyrillic -- with a
-    Russian accent on Bulgarian, see docs/languages.md -- so nothing here
-    applies to it and nothing here should grow to.
+    Only Pocket TTS and Breeze are limited this way. The Qwen road reads
+    Cyrillic -- with a Russian accent on Bulgarian, see docs/languages.md -- so
+    nothing here applies to it and nothing here should grow to.
     """
     engine = engine or engine_of(state)
-    if engine != "pocket" or not text or not CYRILLIC.search(text):
+    if engine not in NO_CYRILLIC or not text or not CYRILLIC.search(text):
         return text, None
 
     dropped = len(CYRILLIC.findall(text))
@@ -1118,7 +1448,8 @@ def speakable(text, engine=None, state=None):
     rest = re.sub(r"\s{2,}", " ", rest).strip(" -–—,;:")
 
     if not HAS_WORDS.search(rest):
-        return SKIPPED_ALL, f"all Cyrillic ({dropped} characters) -- nothing to say"
+        return (SKIPPED_ALL.format(engine=NO_CYRILLIC[engine]),
+                f"all Cyrillic ({dropped} characters) -- nothing to say")
     preface = SKIPPED_SOME_ONE if dropped == 1 else SKIPPED_SOME.format(n=dropped)
     return f"{preface} {rest}", f"skipped {dropped} Cyrillic characters"
 
@@ -1491,6 +1822,152 @@ def announce_voice(voice, path=None):
     return True
 
 
+# --------------------------------------------------------------------------
+# what a session is told, and when
+# --------------------------------------------------------------------------
+#
+# CLAUDE.md says a session is heard and in whose voice. It cannot say what the
+# voice will do with a mood or a laugh, because that is the engine's to answer
+# and the engine can change in the middle of a conversation -- while CLAUDE.md
+# is read once, at the start. So the hook says it instead: when a session
+# begins, and again at the next prompt if it has changed since.
+#
+# Only what will really happen. The assistant app next door settled this for
+# itself first: its voice's mood field appears only while an engine that
+# performs it is loaded, because a field that does nothing is worse than none
+# -- it gets written into, and believed. A session told it may laugh on an
+# engine that cannot is the same mistake.
+
+SESSION_NOTE_HEAD = "claude-voice, as of now:"
+
+# The entrypoints of runs nobody is sitting in front of: claude -p, an SDK
+# caller. The watcher reads one off each transcript; a hook finds it in its own
+# environment, where Claude Code puts it.
+HEADLESS_ENTRYPOINTS = ("sdk-cli",)
+
+
+def session_note(state=None):
+    """(key, text): what a session should know about the voice right now.
+
+    The key is the state the text describes plus a checksum of the text
+    itself, so it moves whenever the words would: an engine swapped, or the
+    wording changed by an update. The hook tells a session once and then only
+    when the key has moved. The text is built from ENGINE_CAN rather than from
+    engine names, so an engine added later is described by what it can do
+    without anyone writing it a paragraph.
+
+    It encourages rather than rations. Anton, hearing the first of these:
+    "dont shy playing with the mood". A session told that most lines want no
+    mood took it at its word and wrote almost none, which left the one engine
+    that can laugh reading like the ones that cannot.
+    """
+    import zlib
+
+    state = state if state is not None else load_state()
+    engine = engine_of(state)
+    on = bool(state.get("enabled"))
+    try:
+        who = resolve(state.get("voice"), state.get("source"), state)[0]["name"]
+    except Exception:
+        who = state.get("voice") or ""
+    speaker = (f"speaking as {who} through {engine_name(engine)}" if who
+               else f"speaking through {engine_name(engine)}")
+    moods = engine_can(engine, "instruction")
+    sounds = engine_can(engine, "events")
+
+    if not on:
+        text = (f"{SESSION_NOTE_HEAD} the voice is off, so nothing written is heard until "
+                "it is switched on again. You will be told when it is.")
+    elif not moods and not sounds:
+        text = (f"{SESSION_NOTE_HEAD} the voice is on, {speaker}, which reads the words "
+                "exactly as written, with no moods and no sounds. A direction in brackets "
+                "such as (sad) or (laugh) is taken out rather than performed, so leave "
+                "them out.")
+    else:
+        what = "acts as well as reads" if moods and sounds else (
+            "takes a mood but makes no sounds" if moods else "makes sounds but takes no mood")
+        lines = []
+        if moods:
+            lines.append("- A mood sets how a whole spoken message sounds. Put it in "
+                         "brackets as the first thing in the TL;DR, or at the front of a "
+                         "short line between tool calls: "
+                         + " ".join(f"({m})" for m in MOODS)
+                         + ". One per message; it is never read out.")
+        if sounds:
+            lines.append("- A sound goes in brackets exactly where it happens: "
+                         + " ".join(f"({s})" for s in sounds) + ".")
+        else:
+            lines.append("- Sounds such as (laugh) are taken out on this engine rather "
+                         "than performed, so leave them out.")
+        if moods and sounds:
+            play = ("- Don't be shy with them. A laugh at something funny, a sigh at a "
+                    "long failure, a whisper for a secret, delight when it finally works: "
+                    "that is what this voice is for.")
+        elif moods:
+            play = ("- Don't be shy with it: delight when something works, calm for bad "
+                    "news, a whisper for a secret.")
+        else:
+            play = ("- Don't be shy with them: a laugh at something funny, a sigh at a "
+                    "long failure.")
+        noun = "a mood or a sound" if moods and sounds else ("a mood" if moods else "a sound")
+        lines.append(f"{play} The one way to spoil it is {noun} on every single line.")
+        text = (f"{SESSION_NOTE_HEAD} the voice is on, {speaker}, which {what}.\n\n"
+                + "\n".join(lines))
+
+    key = f"{'on' if on else 'off'}|{engine}|{who}|{zlib.crc32(text.encode('utf-8')):08x}"
+    return key, text
+
+
+# The events install.ps1 registers speak_hook.py for. Its docstring says what
+# each one is for.
+HOOK_EVENTS = ("Stop", "PreToolUse", "Notification", "SessionStart", "UserPromptSubmit")
+
+
+def hook_health(paths=None, log_path=None):
+    """How this tool's Claude Code hooks are wired, for 'status' to say.
+
+    Returns {"events": [...], "files": [...], "backslashed": bool,
+    "missing": [...], "last": "YYYY-MM-DD HH:MM:SS" or None}. Read off the
+    settings files and the hook's own trace; nothing is run. `backslashed`
+    is the one that matters: Claude Code runs a hook's command through bash on
+    Windows, and bash takes the backslashes in C:\\Users\\... for escapes, so
+    such a hook fails on every single call without a word to anybody.
+    """
+    paths = paths or [os.path.expanduser(os.path.join("~", ".claude", "settings.json")),
+                      os.path.join(ROOT, ".claude", "settings.json")]
+    found = {"events": [], "files": [], "backslashed": False, "missing": [], "last": None}
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8-sig") as fh:
+                hooks = (json.load(fh) or {}).get("hooks") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        mine = False
+        for event, entries in hooks.items() if isinstance(hooks, dict) else ():
+            for entry in entries or []:
+                for hook in (entry or {}).get("hooks") or []:
+                    command = (hook or {}).get("command") or ""
+                    if "speak_hook.py" not in command:
+                        continue
+                    mine = True
+                    if event not in found["events"]:
+                        found["events"].append(event)
+                    if "\\" in command:
+                        found["backslashed"] = True
+        if mine:
+            found["files"].append(path)
+    if found["events"]:
+        found["missing"] = [e for e in HOOK_EVENTS if e not in found["events"]]
+    try:
+        with open(log_path or os.path.join(LOG_DIR, "hook.log"), encoding="utf-8",
+                  errors="replace") as fh:
+            fired = [ln for ln in fh.readlines()[-400:] if "] fired: " in ln]
+        found["last"] = fired[-1][1:20] if fired else None
+    except OSError:
+        pass
+    return found
+
+
 def set_voice(voice_id, state=None):
     """Switch voices: config, and the note every new session reads at startup.
 
@@ -1531,6 +2008,16 @@ def set_engine(name, state=None):
         if not pocket_engine.available():
             raise LookupError(
                 "pocket-tts is not installed. pip install pocket-tts")
+
+    if want == "breeze" and not engine_ready("breeze", state):
+        # Never fetched as a side effect. It is ten gigabytes and it needs a
+        # particular kind of graphics card, so it is installed only by somebody
+        # who has been told both and said yes -- the panel asks, and so does
+        # this command.
+        raise LookupError(
+            "Breeze TTS 2 is not installed. It is a separate download of about "
+            "eleven gigabytes and needs an NVIDIA card with 12 GB or more. Check "
+            "this machine and install it with: python voice_cli.py install breeze")
 
     after = dict(state)
     after["engine"] = want

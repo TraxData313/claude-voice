@@ -73,6 +73,13 @@ def render_reference(voice, text, out_path, state):
         if drop:
             samples = samples[drop:]
         seconds = write_wav(out_path, samples)
+        # The words beside the clip, under the same name. Breeze TTS 2 clones
+        # from exactly this pair and nothing less -- a transcript that drifts
+        # from the audio teaches it a wrong alignment -- so a voice carried
+        # across to Pocket is ready for Breeze too. See voice_lib.BREEZE_REFERENCES.
+        with open(os.path.splitext(out_path)[0] + ".txt", "w", encoding="utf-8",
+                  newline="\n") as fh:
+            fh.write(text + "\n")
         print(f"  rendered {seconds:.1f}s in {time.monotonic() - began:.1f}s "
               f"-> {out_path}")
         return out_path, seconds

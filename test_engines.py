@@ -152,8 +152,17 @@ class TheCyrillicGuard(unittest.TestCase):
     def test_a_whole_cyrillic_line_says_so_and_nothing_else(self):
         speech, note = voice_lib.speakable(
             "Сега ще проверя как звучи това на български.", state=POCKET)
-        self.assertEqual(speech, voice_lib.SKIPPED_ALL)
+        self.assertEqual(speech, voice_lib.SKIPPED_ALL.format(engine="Pocket TTS"))
         self.assertIn("all Cyrillic", note)
+
+    def test_breeze_is_guarded_too_and_named_in_the_warning(self):
+        # English and Chinese only, by its own model card.
+        speech, _ = voice_lib.speakable("Сега ще проверя.", state={"engine": "breeze"})
+        self.assertIn("Breeze can't read it", speech)
+        speech, note = voice_lib.speakable("Готово! The parser is fixed.",
+                                           state={"engine": "breeze"})
+        self.assertIn("The parser is fixed.", speech)
+        self.assertEqual(note, "skipped 6 Cyrillic characters")
 
     def test_one_character_is_not_called_characters(self):
         speech, _ = voice_lib.speakable("The д key is stuck on this keyboard.",

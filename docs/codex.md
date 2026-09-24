@@ -13,6 +13,11 @@ unless `watchHeadless` is enabled. Existing history is skipped on first discover
 Codex tasks appear in the existing panel and share its mute, pause, and volume
 controls. Set `watchCodex` to `false` to stop following them.
 
+A mood or a sound Codex writes is read the same way as a Claude session's:
+`(whisper)` in front of a line, `(laugh)` where it happens. Codex runs no Claude
+hooks, though, so nothing tells it which the engine can do; that has to go in
+`AGENTS.md` by hand. See [writing for the ear](writing-for-the-ear.md#a-mood-and-a-laugh-when-the-engine-has-them).
+
 Save the name Abby, the light warm and slightly nerdy manner, and the instruction
 to end long replies with a spoken summary in `~/.codex/AGENTS.md`. New Codex tasks
 load those preferences automatically. Keep summaries short and self-contained,

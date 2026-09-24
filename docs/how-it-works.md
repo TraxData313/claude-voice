@@ -106,8 +106,39 @@ or `agent_completed`. Three things worth knowing:
   them is worth hearing. `notification_due()` only swallows the double-fire you get when
   the same hook is registered in a project's settings and in your own.
 
-Hooks are read at session start, so this one needs Claude Code restarted after an install
-— unlike everything the watcher does.
+Hooks are read when a session starts. On Claude Code 2.1.280 a change to them reached a
+session that was already open at its next prompt; older versions needed Claude Code
+restarted after an install, unlike anything the watcher does.
+
+## The hooks
+
+`speak_hook.py` answers five of Claude Code's hook events. Since the watcher does the
+reading, most of what the hook does is not reading:
+
+| event | what it does |
+|---|---|
+| `SessionStart` | tells the session what the voice can do right now: on or off, whose voice, and whether this engine takes a mood or makes a sound. See [writing for the ear](writing-for-the-ear.md#a-mood-and-a-laugh-when-the-engine-has-them) |
+| `UserPromptSubmit` | tells it again only if that has changed, and starts the engine if the voice is on and nothing answers |
+| `Notification` | says the prompt that is waiting on you, which reaches no transcript |
+| `Stop` | with the watcher on, only brings a dead engine back; with it off, speaks the answer |
+| `PreToolUse` | with the watcher on, nothing; with it off, speaks the line before the tool |
+
+**The watcher reads, the hook does not.** Both used to speak the same lines, and whichever
+saw a message first said it. That made every difference between them a coin toss: the hook
+barged in where the watcher queued, knew nothing of muted sessions or headless runs, and
+named no project. It never showed, because in the desktop app the hook never ran (see
+below). Now a line has one reader. The hook reads only when `watch` is off, and then does
+it the way the watcher would: queued, labelled with its project, silent for a muted
+session, mood and all.
+
+**What each session was told is kept**, in `logs\told.json`: which paragraph each of the
+newest 64 sessions last heard. That is what lets `UserPromptSubmit` stay quiet on nearly
+every prompt, which matters, since whatever it prints goes to the model with the prompt.
+
+**The engine is started by a prompt, not by a line.** The watcher lives inside the engine,
+so an engine that dies takes the reader of every transcript with it. The next prompt typed
+into any session brings it back, if the voice is on. The panel's unload button switches the
+voice off first for exactly this reason.
 
 ## Choosing what to say
 
@@ -392,6 +423,18 @@ Kept because they will not be obvious to the next person either. The ones about 
 their own page now: **[engine-notes.md](engine-notes.md)**, with the measurements behind
 each and where the guards are still missing.
 
+**The hooks never ran in the desktop app.** Claude Code runs a hook's command through bash
+on Windows, and bash reads a backslash as an escape. The installer wrote
+`C:\Users\...\python.exe C:\...\speak_hook.py`, which arrived as `C:Users...python.exe`:
+*command not found*, exit 127, on every call from the day it was installed. Claude Code
+records that in the transcript as a non-blocking error and carries on, and the watcher
+went on speaking every line, so for five weeks nothing sounded wrong. The one thing that
+needed a hook, hearing a permission prompt, never worked in the desktop app, and nobody
+misses a sound they did not know to expect. The clue was `logs\hook.log`, which had
+nothing in it since August. The command is written with forward slashes now, which
+Windows, bash and cmd.exe all read the same way, and `voice status` checks the settings
+and says under *hooks* whether they can run.
+
 **A refused `JNI_CreateJavaVM` hides its own cause.** A process gets one JVM and there is
 no taking it down, so the second Qwen in a process — swapped away to Pocket and back —
 gets `-5`, `JNI_EEXIST`, and the obvious fix is to catch that and join the VM already
@@ -506,3 +549,20 @@ the cause of the other. Its repair button fetches a *headless* build — the DLL
 and not for us. So the destination is often already there and half full, and `Move-Item`
 onto an existing directory moves the source *inside* it. `Move-StudioInto` moves the
 contents instead, and leaves files it did not bring alone.
+
+**Hanging up does not free the seat.** Breeze's server takes one request at a time and
+answers `409` to a second. When a line is skipped the engine hangs up on it mid-sentence,
+and the server goes on refusing for about two seconds more — 17 to 21 busy answers in a
+row, measured after each hang-up — because the generator it was streaming from lets go of
+the lock only when it is collected, not when the socket closes. Reporting the first `409`
+as a failure would have made every skip cost the next line entirely. `breeze_engine` waits
+the busy out instead, for up to five seconds, so a line sent straight after a skip starts
+about two seconds late and is otherwise untouched.
+
+**A file being written can say it is empty.** While the Breeze weights came down, Windows
+reported every `.incomplete` file at 0 bytes for minutes on end. The size in a directory
+entry is brought up to date when the writer closes its handle, and a downloader keeps its
+handle open, so the folder looked stalled while the process had written 289 MB. The honest
+answer to "is it still downloading" came from the process's own write counter, never from
+the folder. It is also why the install window shows which step it is on and for how long,
+rather than a byte count it would have had to make up.

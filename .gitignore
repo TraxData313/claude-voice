@@ -15,9 +15,14 @@ __pycache__/
 # "extraVoicesDirs" in config.json. Nothing derived from someone else's
 # recording belongs in voices/ -- see VOICES.md.
 
-# Working files from make_pocket_voice.py: the render a voice was cloned from
-# and the same words read back in the clone. A megabyte each, regenerable, and
-# only wanted while somebody is comparing the two. The pocket.safetensors they
-# produce is the artefact and does belong in the repo.
+# Working files from make_pocket_voice.py: the render a voice was cloned from,
+# its words, and the same words read back in the clone. A megabyte each,
+# regenerable, and only wanted while somebody is comparing the two. The
+# pocket.safetensors they produce is the artefact and does belong in the repo.
+#
+# Breeze is the exception that proves it: it keeps no baked state and learns
+# the voice from a clip on every line, so for Breeze the clip *is* the artefact.
+# That one is breeze-reference.wav with its .txt, and it is committed.
 voices/**/pocket-reference.wav
+voices/**/pocket-reference.txt
 voices/**/pocket-after.wav

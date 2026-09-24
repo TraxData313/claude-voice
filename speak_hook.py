@@ -1,29 +1,45 @@
 """
-Claude Code hooks: say the answer out loud.
+Claude Code hooks: tell a session what its voice can do, and say what only a
+hook can hear.
 
-Wired to three events, because they catch different things:
+Wired to five events, because they do different jobs:
 
-  Stop        fires when a turn ends. Speaks the answer's TL;DR -- or the whole
-              answer when it has none, which is right, since an answer short
-              enough to skip the summary is short enough to hear in full.
-  PreToolUse  fires mid-turn, before each tool call. Speaks the line of
-              narration that precedes it ("Let me check whether that exists"),
-              which the Stop hook never sees because the turn has not ended.
-              That line is not always a text block: some models write it into
-              the thinking block instead, and it is read from there too.
+  SessionStart
+              fires when a session begins, is resumed, or has just been
+              compacted. Tells it what the voice will do right now -- on or
+              off, whose voice, and whether that engine takes a mood or makes a
+              sound -- because CLAUDE.md is read once and the engine can change
+              under a conversation. See voice_lib.session_note.
+  UserPromptSubmit
+              fires on every prompt. Tells the session again only if that has
+              changed since it was last told, so an engine swapped mid-way
+              reaches the conversation already under way, and an unchanged one
+              costs nothing at all. It also starts the engine if the voice is
+              on and nothing is answering, so the reply is heard.
   Notification
               fires when the session stops and waits for you -- a tool asking
               to be allowed, a question nobody has answered. There is nothing
               to read in the transcript for these, so the hook is the only way
               to hear them at all.
+  Stop        fires when a turn ends.
+  PreToolUse  fires mid-turn, before each tool call.
 
-The first two dedupe against recently spoken text, so a line said during the
-work is not said again in the summary, and a narration block is not repeated
-across the several tool calls that follow it. Notifications dedupe on time
-instead: the same words twice over is the ordinary case there, and only a
-double-fire within a few seconds is worth swallowing.
+The last two speak what the session wrote -- the answer's TL;DR, and the line
+of narration before a tool -- but only when the transcript watcher is switched
+off. The watcher reads the same lines out of the same transcript, queues them
+behind one another, knows which sessions are muted and which have nobody in
+front of them, and it is the one that has actually been speaking them: until
+the hook command was written with forward slashes these hooks failed on every
+call, and nobody could tell. Two readers racing for the same line was only ever
+going to make the outcome depend on which one won. So with the watcher on, Stop
+does no more than bring a dead engine back, and PreToolUse does nothing.
 
-Always exits 0. A voice toy must never be able to break the session it decorates.
+Notifications dedupe on time rather than on words: the same words twice over is
+the ordinary case there, and only a double-fire within a few seconds is worth
+swallowing.
+
+Always exits 0. A voice toy must never be able to break the session it
+decorates -- and a UserPromptSubmit hook that exits 2 throws the prompt away.
 """
 
 
@@ -36,12 +52,23 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import voice_lib
 
+HOOK_LOG = os.path.join(voice_lib.LOG_DIR, "hook.log")
+# One line per call, and PreToolUse is called before every tool a session
+# uses, so this is rolled rather than left to grow.
+HOOK_LOG_MAX = 1024 * 1024
+
+# Which session was told what, so each is told once and then only again when
+# it changed. Keyed by session id; the newest few dozen are kept.
+TOLD_PATH = os.path.join(voice_lib.LOG_DIR, "told.json")
+TOLD_KEEP = 64
+
+
 def trace(msg):
     """One line per invocation. The hook is silent by design, which makes
     'nothing happened' impossible to tell apart from 'never ran' without this."""
     try:
         os.makedirs(voice_lib.LOG_DIR, exist_ok=True)
-        with open(os.path.join(voice_lib.LOG_DIR, "hook.log"), "a", encoding="utf-8") as fh:
+        with open(voice_lib._rolled(HOOK_LOG, HOOK_LOG_MAX), "a", encoding="utf-8") as fh:
             fh.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
     except OSError:
         pass
@@ -158,14 +185,78 @@ def pending_tool(transcript_path):
     return ""
 
 
-def speak(state, speech, what):
+def session_title(transcript_path):
+    """What the panel should call this session: its title, as the watcher has it.
+
+    A title the user set wins over the one Claude generated. Only the lines
+    that could hold one are parsed, so a long transcript costs a scan and not
+    a thousand json.loads.
+    """
+    custom = ai = None
     try:
-        voice_lib.post(state["port"], "/speak", {
-            "text": speech,
-            "voice": state.get("voice"),
-            "source": state.get("source", "embedding"),
-        }, timeout=5)
-        trace(f"  spoke the {what} ({len(speech)} chars)")
+        with open(transcript_path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if '"custom-title"' not in line and '"ai-title"' not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                custom = entry.get("customTitle") or custom
+                ai = entry.get("aiTitle") or ai
+    except (OSError, TypeError):
+        return None
+    return custom or ai
+
+
+def headless(state):
+    """Nobody is sitting in front of this run: claude -p, an SDK caller, an
+    errand one of your own programs sent off. The watcher reads the same thing
+    off the transcript and stays quiet for it; a hook is told in its own
+    environment, where Claude Code puts its entrypoint."""
+    if state.get("watchHeadless", False):
+        return False
+    return os.environ.get("CLAUDE_CODE_ENTRYPOINT") in voice_lib.HEADLESS_ENTRYPOINTS
+
+
+def muted(state, payload):
+    """Whether the panel has silenced this session. The watcher keeps the list
+    in the config as transcript paths, which is also what a hook is given."""
+    path = payload.get("transcript_path")
+    if not path:
+        return False
+    want = os.path.normcase(os.path.normpath(path))
+    return any(os.path.normcase(os.path.normpath(p)) == want
+               for p in state.get("mutedSessions") or [] if isinstance(p, str))
+
+
+def speak(state, speech, what, payload):
+    """Hand one line to the engine, the way the watcher would have queued it.
+
+    Behind whatever is playing rather than over it. A hook used to take the
+    floor, which was right when all it ever spoke was one finished answer and
+    is wrong for commentary: cutting the line before off mid-word only loses
+    it. And under the same project name the watcher would give it, so the
+    announcement when the speaker changes does not depend on who got there
+    first.
+    """
+    mood, speech = voice_lib.direction(speech)
+    if not speech:
+        trace(f"  the {what} was only a direction")
+        return
+    body = {"text": speech, "voice": state.get("voice"),
+            "source": state.get("source", "embedding"), "queue": True}
+    cwd = payload.get("cwd")
+    if cwd:
+        body["project"] = os.path.basename(os.path.normpath(cwd))
+    title = session_title(payload.get("transcript_path"))
+    if title:
+        body["session"] = title
+    if mood:
+        body["mood"] = mood
+    try:
+        voice_lib.post(state["port"], "/speak", body, timeout=5)
+        trace(f"  spoke the {what} ({len(speech)} chars" + (f", {mood})" if mood else ")"))
     except Exception as exc:
         # Server down (or still loading). Bring it up for next time and stay quiet.
         trace(f"  engine unreachable ({exc}); autostart={state.get('autostart', True)}")
@@ -176,10 +267,96 @@ def speak(state, speech, what):
                 pass
 
 
+def wake(state):
+    """Start the engine if the voice is on and nothing is answering.
+
+    The watcher lives inside the engine, so an engine that has died takes the
+    reader of every transcript with it, and nothing notices until somebody asks
+    why it went quiet. It remembers where it was in each file, so bringing it
+    back also brings back whatever was said while it was gone.
+
+    Only with the voice on. The panel's unload button turns it off first for
+    exactly this reason: an engine unloaded to give the memory back must not be
+    started again by the next thing somebody types.
+    """
+    if not state.get("enabled") or not state.get("autostart", True):
+        return
+    if voice_lib.server_alive(state["port"], timeout=1.0) is not None:
+        return
+    trace("  engine not answering; starting it")
+    try:
+        voice_lib.start_server(state, wait=0)
+    except Exception as exc:
+        trace(f"  could not start it: {exc}")
+
+
+def _told():
+    try:
+        with open(TOLD_PATH, encoding="utf-8") as fh:
+            told = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return told if isinstance(told, dict) else {}
+
+
+def _remember(session, key):
+    """Note what this session was told, newest last.
+
+    Kept in the order they were told rather than sorted by the clock: two
+    sessions told in the same tick of Windows' fifteen-millisecond clock would
+    otherwise be a coin toss, and the one just told must never be the one let
+    go. Written whole and moved into place, because a second session's hook
+    can be reading it at the same moment.
+    """
+    told = _told()
+    told.pop(session, None)
+    told[session] = {"key": key, "at": time.time()}
+    temp = TOLD_PATH + ".new"
+    try:
+        os.makedirs(voice_lib.LOG_DIR, exist_ok=True)
+        with open(temp, "w", encoding="utf-8") as fh:
+            json.dump(dict(list(told.items())[-TOLD_KEEP:]), fh)
+        os.replace(temp, TOLD_PATH)
+    except OSError:
+        pass
+
+
+def tell(event, payload, state):
+    """Put what the voice can do right now in front of the session.
+
+    SessionStart always tells -- a new session, a resumed one, and one just
+    compacted, which may have lost what it was told along with everything
+    else. UserPromptSubmit tells only what changed since this session last
+    heard, and says nothing at all the rest of the time: the same paragraph
+    on every prompt would be a tax on every prompt.
+
+    Printed as additionalContext, which Claude Code adds to what the model
+    reads and does not show as a message of its own.
+    """
+    if headless(state):
+        trace("  headless run, telling it nothing")
+        return
+    if event == "UserPromptSubmit":
+        wake(state)
+    session = payload.get("session_id") or ""
+    key, note = voice_lib.session_note(state)
+    if event == "UserPromptSubmit" and session and \
+            (_told().get(session) or {}).get("key") == key:
+        trace("  nothing new to tell")
+        return
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": event,
+                                             "additionalContext": note}}))
+    if session:
+        _remember(session, key)
+    trace(f"  told the session: {key}")
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
     except (ValueError, OSError):
+        payload = {}
+    if not isinstance(payload, dict):
         payload = {}
 
     event = payload.get("hook_event_name") or "Stop"
@@ -190,30 +367,27 @@ def main():
     trace(f"fired: {event}")
 
     state = voice_lib.load_state()
+
+    # Above the on-off switch, because "the voice is off" is itself worth
+    # telling a session: it is the difference between writing for a listener
+    # and writing for a screen, and it changes without a new session.
+    if event in ("SessionStart", "UserPromptSubmit"):
+        tell(event, payload, state)
+        return
+
     if not state.get("enabled"):
         trace("  voice is off")
         return
-
-    # Deliberately above the narration switch rather than under it. Narration is
-    # chatter about work in progress and turning it off is a taste; a question
-    # halts the turn until it is answered, so somebody who wants the chatter off
-    # needs this one more than ever, not less. It is also the only speech here
-    # that must come from the tool's input -- the message carrying it has no
-    # text block at all. See voice_lib.question_speech.
-    if event == "PreToolUse" and payload.get("tool_name") == "AskUserQuestion":
-        speech = voice_lib.question_speech(payload.get("tool_input"),
-                                           state.get("maxChars", 4000))
-        if not speech:
-            trace("  question had nothing speakable")
-        elif voice_lib.already_spoken(speech):
-            trace("  question already spoken, skipping")
-        else:
-            speak(state, speech, "question")
+    if headless(state):
+        trace("  headless run, staying quiet")
+        return
+    if muted(state, payload):
+        trace("  this session is muted")
         return
 
-    # Beside the question above, and for the same reason: a notification is
-    # raised precisely when the session has stopped and is waiting, so it does
-    # not answer to the narration switch. Its own switch is 'alerts'.
+    # Deliberately above the narration switch rather than under it. Narration is
+    # chatter about work in progress and turning it off is a taste; a session
+    # stopped and waiting on you is not chatter. Its own switch is 'alerts'.
     if event == "Notification":
         trace(f"  {payload.get('notification_type')}: {(payload.get('message') or '')!r}")
         if not state.get("alerts", True):
@@ -228,7 +402,29 @@ def main():
         elif not voice_lib.notification_due(speech):
             trace("  just said that, skipping")
         else:
-            speak(state, speech, "notification")
+            speak(state, speech, "notification", payload)
+        return
+
+    # Everything below is a line the session wrote, and the watcher reads the
+    # same lines from the same transcript. When it is on, it speaks them.
+    if state.get("watch", True):
+        if event == "Stop":
+            wake(state)
+        return
+
+    # A question halts the turn until it is answered, so somebody who has the
+    # chatter off needs it more than ever, not less. It is also the only speech
+    # here that must come from the tool's input -- the message carrying it has
+    # no text block at all. See voice_lib.question_speech.
+    if event == "PreToolUse" and payload.get("tool_name") == "AskUserQuestion":
+        speech = voice_lib.question_speech(payload.get("tool_input"),
+                                           state.get("maxChars", 4000))
+        if not speech:
+            trace("  question had nothing speakable")
+        elif voice_lib.already_spoken(speech):
+            trace("  question already spoken, skipping")
+        else:
+            speak(state, speech, "question", payload)
         return
 
     if event != "Stop" and not state.get("narrate", True):
@@ -247,13 +443,11 @@ def main():
     if not speech:
         trace("  nothing speakable")
         return
-    # Shared with the transcript watcher: whichever sees a message first, it is
-    # only ever said once.
     if voice_lib.already_spoken(speech):
         trace(f"  {what} already spoken, skipping")
         return
 
-    speak(state, speech, what)
+    speak(state, speech, what, payload)
 
 
 if __name__ == "__main__":

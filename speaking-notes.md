@@ -46,6 +46,10 @@ screen to explain them. Give each one a verb: "Now I'm writing the fix", not "No
 itself" — a caption with no verb has no intonation a voice can give it, and lands as an
 unfinished thought.
 
+Some engines can do more than read: take a mood, or laugh. When the one speaking can, a
+note from claude-voice says so at the start of the session, with exactly what to write, and
+says so again if that changes. Until a note says so, write plain words.
+
 Write code blocks, tables and links freely. They are stripped before speaking, so they cost
 the listener nothing and the reader still gets the exact command.
 

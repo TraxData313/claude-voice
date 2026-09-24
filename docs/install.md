@@ -104,6 +104,14 @@ Running `setup.ps1` or `install.ps1` again without `-Engine` keeps whichever eng
 If you get a card later, `.\setup.ps1 -Engine qwen` fetches the rest, and the panel's
 engine dropdown switches between them.
 
+## The engine that laughs
+
+Breeze TTS 2 is not part of setup, and no update installs it: it is about 11 GB and
+wants a 16 GB graphics card, so it is fetched only when somebody asks for it. Pick
+**Breeze 2** in the panel's engine dropdown, or run `python voice_cli.py install breeze`,
+and it checks this machine first and says what it found before asking.
+**[What it needs and where it goes →](engines.md#breeze-tts-2-the-one-that-laughs)**
+
 ## Python
 
 `setup.ps1` looks for a real `python.exe` — on PATH, under `%LOCALAPPDATA%\Programs\Python`,

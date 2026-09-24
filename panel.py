@@ -677,6 +677,9 @@ class Panel:
         # Answers from the update thread, drained on the Tk timer like the
         # engine's. Nothing below touches a widget from another thread.
         self.update_inbox = queue.Queue()
+        # The Breeze window's answers -- the machine check, the install's
+        # progress -- handed to the Tk thread the same way.
+        self.setup_inbox = queue.Queue()
         self.update_busy = False
         # Something the user's last press said that the files cannot: how a
         # pull went. It outranks the idle 'up to date' until they act again.
@@ -694,11 +697,16 @@ class Panel:
         self.typer = None
         self.typed = None
         # The mood box inside it, and whether there is any point drawing one:
-        # only Qwen performs a mood, and a box that does nothing is worse than
-        # no box. Answered from the config before any poll, then from the
-        # engine's own answer.
+        # Qwen and Breeze perform a mood, Pocket does not, and a box that does
+        # nothing is worse than no box. Answered from the config before any
+        # poll, then from the engine's own answer.
         self.typed_mood = None
         self.takes_mood = False
+        # The sounds the engine makes when one is written into the text, which
+        # the typer names under the box -- only Breeze makes any.
+        self.takes_events = ()
+        # The window that installs Breeze, while it is open. One at a time.
+        self.setup_win = None
         self.native_theme = ttk.Style().theme_use()
         # Asked once, and only after there is a Tk to ask. Everything the
         # transport row draws hangs off this.
@@ -1367,6 +1375,7 @@ class Panel:
         # the box you type into.
         self._paint_typer()
         self._paint_settings()
+        self._paint_setup()
         self.drawn.pop("face", None)              # redraw it on the new background
         # The themed buttons are not the same size in both themes, so the two
         # coloured ones are measured against them here rather than once at
@@ -1635,6 +1644,7 @@ class Panel:
                 return                           # the window is going away
         try:
             self.drain_update()
+            self.drain_setup()
         except tk.TclError:
             return
         self.tick = self.root.after(DRAIN_MS, self._drain)
@@ -1656,7 +1666,7 @@ class Panel:
         # that turns this off now lives in one of them, and a dialog that stays
         # glued over everything right after you unticked "on top" reads as the
         # tick not having worked.
-        for win in (self.settings, self.typer):
+        for win in (self.settings, self.typer, self.setup_win):
             if win is not None and win.winfo_exists():
                 win.wm_attributes("-topmost", on)
         voice_lib.patch_state(panelTopmost=on)
@@ -1822,10 +1832,11 @@ class Panel:
         else:
             self.now.configure(text="— nothing playing")
             self.whose.configure(text="")
-        self.show_mood((cur or {}).get("instruction"))
+        self.show_mood((cur or {}).get("mood") or (cur or {}).get("instruction"))
         # The engine's own word on whether a mood would be used, which is what
         # decides whether the typer offers a box for one.
         self.takes_mood = bool(st.get("instruction"))
+        self.takes_events = tuple(st.get("events") or ())
         # Idle, the face is whoever would speak next, which is worth seeing.
         speaker = (cur or {}).get("voice") or st.get("voice")
         if self.held("voice"):
@@ -2175,7 +2186,9 @@ class Panel:
         rows = [(j["id"], j.get("voice"), j.get("when") or "",
                  one_line(j.get("project") or "", 22),
                  one_line(j.get("session") or "direct", 22), one_line(j["text"], 200),
-                 one_line((j.get("instruction") or "").strip(), 60))
+                 # The name when it came by name: "whisper" fits the column
+                 # where the sentence it expands to would be cut to nothing.
+                 one_line((j.get("mood") or j.get("instruction") or "").strip(), 60))
                 for j in jobs]
         self.show_mood_column(tree, any(r[6] for r in rows))
         if self.drawn.get(key) == rows:
@@ -2245,9 +2258,11 @@ class Panel:
             voices = []            # no voices folder; the dropdown stays empty
         import pocket_engine
 
-        self.takes_mood = engine in ("qwen",)
+        self.takes_mood = bool(voice_lib.engine_can(engine, "instruction"))
+        self.takes_events = tuple(voice_lib.engine_can(engine, "events"))
         self.render_engine({"engine": engine, "engines": list(voice_lib.ENGINES),
-                            "pocketReady": pocket_engine.available()})
+                            "pocketReady": pocket_engine.available(),
+                            "breezeReady": voice_lib.engine_ready("breeze", state)})
         self.render_voices({"voices": voices, "voice": state.get("voice")})
         self.draw_face(state.get("voice"))
 
@@ -2258,7 +2273,14 @@ class Panel:
         answers "pip install pocket-tts" when you pick it is a worse way to say
         that than not offering it, because the choice looks available right up
         until it fails.
+
+        Breeze is listed either way, because it is the opposite case: nobody
+        has it until they choose it, and choosing it is how its installer is
+        found -- picking it before it is installed opens a window that checks
+        this machine and asks, rather than switching.
         """
+        if "breezeReady" in st:
+            self.drawn["breezeReady"] = bool(st.get("breezeReady"))
         offer = [e for e in (st.get("engines") or list(ENGINE_LABELS))
                  if e != "pocket" or st.get("pocketReady", True)]
         if offer != self.drawn.get("tts-engines"):
@@ -2275,6 +2297,12 @@ class Panel:
         shown = self.engine_box.get()
         want = next((e for e, label in ENGINE_LABELS.items() if label == shown), None)
         if not want or want == self.engine:
+            return
+        if want == "breeze" and not self.drawn.get("breezeReady"):
+            # Asked, never fetched. The dropdown goes back to whatever is
+            # speaking until the install has finished and switched it itself.
+            self.engine_box.set(ENGINE_LABELS.get(self.engine, self.engine or ""))
+            self.open_breeze_setup()
             return
         # "tts-engine" rather than "engine": that key is already taken by the
         # load/unload switch, which holds it for twenty-five seconds while a
@@ -2364,9 +2392,11 @@ class Panel:
             # A whole instruction, not one adjective: "sad" on its own was
             # measured moving a line by three hundredths of a second, and a
             # sentence with some detail in it by a third. The hint says so,
-            # because the box otherwise invites exactly the weak form.
-            label = ttk.Label(frame, text="how it should sound — a whole "
-                              "instruction, not one word",
+            # because the box otherwise invites exactly the weak form -- and
+            # it names a few moods, which the engine expands into whole
+            # instructions itself, so one word is fine when it is one of those.
+            label = ttk.Label(frame, text="how it should sound — a mood (sad, "
+                              "whisper, excited…) or a whole instruction",
                               font=FONT_SMALL, foreground=GREY, anchor="w")
             label.pack(fill="x", pady=(8, 2))
             self.dim.append(label)
@@ -2375,6 +2405,15 @@ class Panel:
             self.typed_mood.pack(fill="x")
             self.typed_mood.bind("<Control-Return>", self.speak_typed)
             self.typed_mood.bind("<Return>", self.speak_typed)
+
+        if self.takes_events:
+            # Written where they happen, not beside the words, so the hint is
+            # an example of that rather than a list to pick from.
+            sounds = ttk.Label(frame, text="sounds go in the words: "
+                               + " ".join(f"({e})" for e in self.takes_events),
+                               font=FONT_SMALL, foreground=GREY, anchor="w")
+            sounds.pack(fill="x", pady=(6, 0))
+            self.dim.append(sounds)
 
         row = ttk.Frame(frame)
         row.pack(fill="x", pady=(8, 0))
@@ -2422,8 +2461,12 @@ class Panel:
         mood = (self.typed_mood.get().strip()
                 if self.typed_mood is not None and self.typed_mood.winfo_exists() else "")
         if words:
+            # A mood's name goes as a mood, so the engine expands it into the
+            # whole instruction; anything else is an instruction already.
+            named_mood, _ = voice_lib.mood_instruction(mood)
+            how = {"mood": named_mood} if named_mood else {"instruction": mood}
             self.act("/speak", {"text": words, "project": TYPED_PROJECT,
-                                "queue": True, "instruction": mood})
+                                "queue": True, **how})
             self.close_typer()
         # Or ctrl+enter sends the line and puts a line break in the box behind
         # it, which is only visible if it failed to send.
@@ -2620,6 +2663,267 @@ class Panel:
             # rest of the panel in the wrong colours. The typer learned this.
             self.dim = [w for w in self.dim if w.winfo_exists()]
         self.settings = None
+
+    # -- installing Breeze, when somebody picks it --------------------------
+    def open_breeze_setup(self):
+        """What stands between picking Breeze and eleven gigabytes arriving.
+
+        Nobody gets Breeze because an update came in: picking it before it is
+        installed opens this instead of switching. It sets what Breeze needs
+        beside what this machine actually has -- asked of the card, not
+        guessed -- says where it would go and what that costs, and only the
+        button downloads anything. A machine that cannot run it is told so,
+        and the button never lights.
+
+        The install is a process of its own rather than a thread in here. It
+        takes a quarter of an hour, and closing the panel should not throw that
+        away; this window only reads the status file the install keeps, so it
+        can be closed and opened again and finds the install where it had got.
+        """
+        import breeze_setup
+
+        if self.setup_win is not None and self.setup_win.winfo_exists():
+            self.setup_win.deiconify()           # already open; come back to it
+            self.setup_win.lift()
+            return
+
+        win = self.setup_win = tk.Toplevel(self.root)
+        win.title("Breeze TTS 2")
+        win.transient(self.root)
+        win.wm_attributes("-topmost", self.on_top.get())
+        win.protocol("WM_DELETE_WINDOW", self.close_breeze_setup)
+        win.bind("<Escape>", lambda _event: self.close_breeze_setup())
+        # Fixed, for the settings dialog's reason: the words wrap at a pixel
+        # width and a narrower window would cut them off rather than rewrap.
+        win.resizable(False, False)
+
+        frame = ttk.Frame(win)
+        frame.pack(fill="both", expand=True, padx=4, pady=(0, 12))
+        self._section(frame, "the voice that laughs")
+        self._note(frame, voice_lib.engine_info("breeze")["blurb"])
+
+        self._section(frame, "what it needs, and what this machine has")
+        self.setup_rows = ttk.Frame(frame)
+        self.setup_rows.pack(fill="x", padx=8)
+        self._note(self.setup_rows, "asking the graphics card…", pad=0)
+
+        self._section(frame, "where it goes")
+        self.setup_target = breeze_setup.default_target()
+        line = ttk.Frame(frame)
+        line.pack(fill="x", padx=8, pady=(2, 0))
+        self.setup_where = ttk.Label(line, text=self.setup_target, font=FONT_SMALL)
+        self.setup_where.pack(side="left")
+        ttk.Button(line, text="change…", width=9,
+                   command=self.pick_setup_target).pack(side="right")
+        self._note(frame, f"About {breeze_setup.DOWNLOAD_GB} GB to download, and 15 "
+                   "to 30 minutes. Nothing outside that folder is touched, and "
+                   "deleting it undoes all of it. The model's weights are for "
+                   "research and non-commercial use only.")
+
+        self.setup_status = ttk.Label(frame, text="", font=FONT_SMALL,
+                                      wraplength=320, justify="left")
+        self.setup_status.pack(fill="x", padx=8, pady=(10, 2))
+        self.setup_bar = ttk.Progressbar(frame, mode="indeterminate", length=320)
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", padx=8, pady=(8, 0))
+        self.setup_close = ttk.Button(buttons, text="not now", width=12,
+                                      command=self.close_breeze_setup)
+        self.setup_close.pack(side="right")
+        self.setup_go = ttk.Button(buttons, text="download and install",
+                                   command=self.start_breeze_install)
+        self.setup_go.pack(side="right", padx=(0, 6))
+        self.setup_go.state(["disabled"])        # until the check says it can run
+        self.setup_verdict = None
+        self.setup_started = None
+
+        self._paint_setup()
+        over(win, self.root)
+        self.check_for_breeze()
+        self.watch_breeze_install()
+
+    def _note(self, parent, text, pad=8):
+        """A grey sentence, wrapped to the dialog, repainted with the theme."""
+        note = ttk.Label(parent, text=text, font=FONT_SMALL, foreground=GREY,
+                         wraplength=320, justify="left")
+        note.pack(anchor="w", padx=pad, pady=(2, 4))
+        self.dim.append(note)
+        return note
+
+    def check_for_breeze(self):
+        """Ask the machine, off the Tk thread: nvidia-smi takes a second or so,
+        and a window that freezes while it opens looks broken."""
+        import breeze_setup
+
+        target = self.setup_target
+
+        def go():
+            self.setup_inbox.put(("checked", breeze_setup.check_machine(target)))
+
+        threading.Thread(target=go, name="breeze-check", daemon=True).start()
+
+    def pick_setup_target(self):
+        """Somewhere else to put it. A folder with things already in it gets a
+        folder of its own inside, so choosing D:\\ never scatters an
+        environment across the root of a drive."""
+        from tkinter import filedialog
+
+        chosen = filedialog.askdirectory(parent=self.setup_win, mustexist=True,
+                                         title="Where should Breeze TTS 2 go?")
+        if not chosen:
+            return
+        chosen = os.path.normpath(chosen)
+        busy = [f for f in os.listdir(chosen) if f != "installed.json"] \
+            if os.path.isdir(chosen) else []
+        if busy and not os.path.exists(os.path.join(chosen, "installed.json")):
+            chosen = os.path.join(chosen, "claude-voice-breeze")
+        self.setup_target = chosen
+        self.setup_where.configure(text=chosen)
+        self.setup_go.state(["disabled"])
+        self.check_for_breeze()                  # the disk is the drive's question
+
+    def start_breeze_install(self):
+        """Hand it to a process of its own, and watch that process's status."""
+        import breeze_setup
+
+        if breeze_setup.running() or self.setup_verdict in (None, "no"):
+            return
+        os.makedirs(voice_lib.LOG_DIR, exist_ok=True)
+        out = open(os.path.join(voice_lib.LOG_DIR, "breeze-install.out"), "a",
+                   encoding="utf-8")
+        DETACHED = 0x00000008 | 0x08000000       # DETACHED_PROCESS | CREATE_NO_WINDOW
+        # --yes because the button was the asking; the command still refuses a
+        # machine that cannot run it, whatever it is told.
+        subprocess.Popen([voice_lib._python(), os.path.join(voice_lib.ROOT, "voice_cli.py"),
+                          "install", "breeze", "--yes", "--to", self.setup_target],
+                         stdout=out, stderr=out, stdin=subprocess.DEVNULL,
+                         creationflags=DETACHED, close_fds=True, cwd=voice_lib.ROOT)
+        self.setup_started = time.time()
+        self.setup_go.state(["disabled"])
+        self.setup_status.configure(text="starting…")
+
+    def watch_breeze_install(self):
+        """Once a second while the window is open: where the install has got to.
+
+        Only an install that is running, or the one started from this window,
+        is shown. A status file left from some earlier attempt describes a
+        folder that may since have been deleted, and reading "installed" off it
+        would be the window lying.
+        """
+        import breeze_setup
+
+        if self.setup_win is None or not self.setup_win.winfo_exists():
+            return
+        status = breeze_setup.read_status()
+        live = breeze_setup.running()
+        mine = bool(self.setup_started and status.get("updated", 0) >= self.setup_started - 1)
+        if live or mine:
+            self.setup_inbox.put(("status", status, bool(live)))
+        elif self.setup_started and time.time() - self.setup_started > 45:
+            # Started, and never said a word. Something failed before the
+            # install could write its first line, and "starting..." for ever
+            # would be the window pretending otherwise.
+            self.setup_inbox.put(("status", {
+                "state": "failed",
+                "error": "the installer did not start -- logs\\breeze-install.out "
+                         "says why"}, False))
+        self.setup_win.after(1000, self.watch_breeze_install)
+
+    def drain_setup(self):
+        """Answers for the Breeze window, applied on the Tk thread."""
+        while True:
+            try:
+                item = self.setup_inbox.get_nowait()
+            except queue.Empty:
+                return
+            if self.setup_win is None or not self.setup_win.winfo_exists():
+                continue
+            if item[0] == "checked":
+                self._show_breeze_check(item[1])
+            else:
+                self._show_breeze_status(item[1], item[2])
+
+    def _show_breeze_check(self, report):
+        if report["target"] != self.setup_target:
+            return                               # an answer about the old folder
+        for child in self.setup_rows.winfo_children():
+            child.destroy()
+        self.dim = [w for w in self.dim if w.winfo_exists()]
+        marks = {True: "✓", None: "!", False: "✗"}
+        for row in report["rows"]:
+            ttk.Label(self.setup_rows, text=f"{marks[row['ok']]}  {row['need']}",
+                      font=FONT_SMALL, wraplength=320, justify="left").pack(anchor="w")
+            note = ttk.Label(self.setup_rows, text=row["have"], font=FONT_SMALL,
+                             foreground=GREY, wraplength=300, justify="left")
+            note.pack(anchor="w", padx=(18, 0), pady=(0, 3))
+            self.dim.append(note)
+        self.setup_verdict = report["verdict"]
+        says = {"full": "This machine can run it at full speed.",
+                "slow": "It runs here, but without its fast stages it speaks slower "
+                        "than realtime, so each line waits a little before it starts.",
+                "no": "This machine cannot run it, so there is nothing to download."}
+        if self.setup_started is None:
+            self.setup_status.configure(text=says[report["verdict"]])
+        import breeze_setup
+
+        if report["verdict"] != "no" and not breeze_setup.running() \
+                and self.setup_started is None:
+            self.setup_go.state(["!disabled"])
+
+    def _show_breeze_status(self, status, live):
+        state = status.get("state")
+        if live and state == "running":
+            began = status.get("started") or time.time()
+            spent = int(time.time() - began)
+            self.setup_status.configure(
+                text=f"step {status.get('step')} of {status.get('steps')}: "
+                     f"{status.get('label')} · {spent // 60}:{spent % 60:02d}")
+            if not self.setup_bar.winfo_manager():
+                self.setup_bar.pack(fill="x", padx=8, pady=(2, 0))
+                self.setup_bar.start(12)
+            self.setup_go.state(["disabled"])
+            self.setup_close.configure(text="hide")
+            return
+        self.setup_bar.stop()
+        self.setup_bar.pack_forget()
+        self.setup_close.configure(text="close")
+        if state == "done":
+            self.setup_status.configure(
+                text="Installed. Breeze is the engine now: the next thing said "
+                     "loads it, which takes about half a minute."
+                     + ("" if status.get("fast", True) else " It runs without its "
+                        "fast stages on this card, so expect a wait before each line."))
+            self.drawn["breezeReady"] = True
+            self.hold("tts-engine", 4.0)
+            self.hold("voice", 4.0)
+            self.engine = "breeze"
+            self.act("/set-engine", {"engine": "breeze"})
+            self.setup_started = None            # shown once; do not switch twice
+        elif state == "failed":
+            self.setup_status.configure(
+                text=f"It stopped: {status.get('error')}. Pressing the button again "
+                     "carries on from where it got to.")
+            self.setup_go.configure(text="try again")
+            self.setup_go.state(["!disabled"])
+            self.setup_started = None
+
+    def _paint_setup(self):
+        """The window's own background -- as _paint_settings, and for its reason."""
+        if self.setup_win is None or not self.setup_win.winfo_exists():
+            return
+        dark = bool(self.dark.get())
+        self.setup_win.configure(background=DARK["bg"] if dark else
+                                 ttk.Style().lookup("TFrame", "background"))
+
+    def close_breeze_setup(self):
+        """Closing it leaves a running install running. It was never in here."""
+        if self.setup_win is not None:
+            try:
+                self.setup_win.destroy()
+            except tk.TclError:
+                pass
+            self.dim = [w for w in self.dim if w.winfo_exists()]
+        self.setup_win = None
 
     def close(self):
         self.stopping.set()
