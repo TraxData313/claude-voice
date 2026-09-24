@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The one-click setup for people who have never opened a terminal.
+
+    .NET Framework 4.8 on purpose: it is part of every Windows 10 and 11, so the
+    exe runs as it is downloaded — no runtime to fetch first, no 70 MB
+    self-contained bundle. It is a window around setup.ps1, which stays the one
+    place that knows how to install anything; see README.md beside this file.
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>ClaudeVoiceSetup</AssemblyName>
+    <RootNamespace>ClaudeVoiceSetup</RootNamespace>
+    <ApplicationIcon>..\docs\icons\abby.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <Version>1.0.0</Version>
+    <Product>claude-voice setup</Product>
+    <Company>TraxData313</Company>
+    <Description>Sets up claude-voice: local, free text-to-speech.</Description>
+    <Copyright>Public domain (The Unlicense)</Copyright>
+    <DebugType>none</DebugType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\docs\art\abby.jpg" LogicalName="abby.jpg" />
+    <EmbeddedResource Include="..\docs\icons\abby.ico" LogicalName="abby.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

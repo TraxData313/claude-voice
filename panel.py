@@ -654,7 +654,7 @@ class Panel:
         # and the last thing to want gone when it is not -- so it is a fold,
         # not a setting, and the window opens the way it was left.
         self.art_open = bool(saved.get("panelArt", True))
-        self.on_top = tk.BooleanVar(value=bool(saved.get("panelTopmost", True)))
+        self.on_top = tk.BooleanVar(value=bool(saved.get("panelTopmost", False)))
         self.dark = tk.BooleanVar(value=bool(saved.get("panelDark", False)))
         # Load an engine and turn the voice on as the window opens, because
         # most of the times it is opened at all, it is opened to be spoken to.

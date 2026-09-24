@@ -286,7 +286,28 @@ class Engine:
             raise RuntimeError(
                 f"pocket-tts reports {rate} Hz, but this tool is built around "
                 f"{SAMPLE_RATE}. Resample in pocket_engine before going further.")
+        self._note_cloning()
         return self
+
+    def _note_cloning(self):
+        """Write down whether this machine can clone, the first time it is known.
+
+        Cloning lives in weights Kyutai gate behind a Hugging Face sign-in, and
+        the package quietly loads the ungated ones instead when it cannot have
+        them -- so the only reliable answer is the loaded model's own. The
+        catalogue reads it: a voice that is only a clip is offered on this
+        engine where it can be cloned, and not where asking for it would be
+        silence.
+        """
+        can = bool(getattr(self.model, "has_voice_cloning", False))
+        try:
+            import voice_lib
+
+            if voice_lib.load_state().get("pocketCloning") is not can:
+                voice_lib.patch_state(pocketCloning=can)
+                self._log(f"voice cloning {'available' if can else 'not available (gated weights)'}")
+        except Exception:
+            pass            # a note about a capability is not worth failing a load over
 
     def ensure_language(self, language):
         """Load the model this voice belongs to, if it is not the one loaded.

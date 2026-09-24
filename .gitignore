@@ -26,3 +26,12 @@ __pycache__/
 voices/**/pocket-reference.wav
 voices/**/pocket-reference.txt
 voices/**/pocket-after.wav
+
+# The setup window's build output. The exe is a release asset, never committed.
+setup-app/bin/
+setup-app/obj/
+setup-app/dist/
+
+# Voices kept on this machine and never published: the Calradia library carried over from the
+# Immersive AI mod lives here. Read through "extraVoicesDirs" in config.json.
+voices-local/

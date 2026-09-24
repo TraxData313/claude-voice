@@ -279,6 +279,12 @@ class Job:
         # work laptop" can be a measurement instead of an impression.
         self.stalled = 0
 
+    def again(self, chunks=None):
+        """This line as a new job, said again from its start: the same words,
+        voice and delivery, under an id of its own."""
+        return Job(chunks or self.chunks, self.voice, self.kwargs, self.text,
+                   self.session, self.project, self.instruction, self.mood)
+
     def as_dict(self):
         return {
             "id": self.id,
@@ -361,10 +367,23 @@ class Speaker:
         thing that still takes the floor is replay -- clicking a line in the
         history is asking to hear that line now, which is a different sentence
         from anything arriving by itself.
+
+        **Taking the floor never throws away anybody else's line.** It used to
+        call cancel(), which is stop: whatever was in the air and whatever was
+        waiting, all of it gone. With one hook speaking one answer, that was a
+        newer answer replacing an older one. With one voice speaking for every
+        session and for Abby's room it is something else. On 2026-09-24 her
+        reply arrived four seconds after a session's TL;DR had started being
+        made, and took it with it; not a word of that summary was heard. So a
+        line that takes the floor still cuts off what is in the air, and still
+        replaces whatever its own speaker had said or had waiting. But anyone
+        else's line it cuts off is said again straight after it, and anyone
+        else's that were waiting keep their places.
         """
         if barge and not self.paused:
-            self.cancel()
-        self.jobs.put(job)
+            self._take_floor(job)
+        else:
+            self.jobs.put(job)
 
     def cancel(self):
         with self.lock:
@@ -450,9 +469,10 @@ class Speaker:
         # Asking to hear something is asking to hear it, so it lifts a hold
         # rather than queueing up behind one.
         self.pause(False)
-        again = Job(job.chunks, job.voice, job.kwargs, job.text, job.session,
-                    job.project, job.instruction)
-        self.submit(again, barge=True)
+        again = job.again()
+        # In place of that one line and nothing else: whatever was waiting
+        # behind it is still worth hearing once it has been said again.
+        self._take_floor(again, replaces=lambda line: line is job)
         return again
 
     def replay(self, job_id):
@@ -469,8 +489,7 @@ class Speaker:
         src = rec["job"]
         self.cancel()            # asking for this one is asking for it now
         self.pause(False)        # and "now" is not "once you press play"
-        again = Job(src.chunks, src.voice, src.kwargs, src.text, src.session,
-                    src.project, src.instruction)
+        again = src.again()
         # The play queue is deliberately short, so feeding it blocks -- and an
         # HTTP handler must not. Hand it to a thread that only ever enqueues.
         threading.Thread(target=self._feed, args=(again, wavs),
@@ -523,6 +542,61 @@ class Speaker:
                 return
             if isinstance(item, tuple) and not item[2]:
                 _unlink(item[1])         # a history wav is not ours to delete
+
+    def _take_floor(self, job, replaces=None):
+        """Put `job` first, cutting off whatever is in the air to get it there.
+
+        The lines it replaces, in the air or waiting, are dropped -- by default
+        every line of its own speaker's, since a newer answer replaces an older
+        one. Anyone else's line that is cut off comes back straight after it,
+        from its start: winsound cannot carry on from where a clip stopped, and
+        a generation cut part way leaves nothing to carry on from.
+
+        Both locks are held together, so the engine thread cannot take the next
+        line out of the queue between the cut and the new order. Nothing else
+        takes them the other way round.
+        """
+        mine = _tidy_label(job.project)
+        if replaces is None:
+            def replaces(line):
+                return _tidy_label(line.project) == mine
+        named = self._live().get("sessionLabel", "project") != "off"
+        with self.lock:
+            cut = []
+            for other in (self.playing, self.current):
+                if other is not None and not other.cancelled and other not in cut:
+                    other.cancelled = True
+                    cut.append(other)
+            again = [self._said_again(other, mine, named) for other in cut
+                     if not replaces(other)]
+            with self.jobs.mutex:
+                waiting = [w for w in self.jobs.queue if not replaces(w)]
+                self.jobs.queue.clear()
+                self.jobs.queue.extend([job, *again, *waiting])
+                self.jobs.not_empty.notify()
+        self._drain(self.play_q)
+        winsound.PlaySound(None, winsound.SND_PURGE)
+        # Whoever is last in the queue now is who will have been heard last,
+        # and that is no longer the line that just arrived.
+        _last_speaker.follow(([job] + again + waiting)[-1].project)
+        for other in again:
+            log(f"cut off by {mine or 'a line of no project'}, and said again "
+                f"after it: {other.text[:40]}...")
+
+    @staticmethod
+    def _said_again(job, after, named):
+        """A line of someone else's that was cut off, to be said again.
+
+        Chunked afresh from its words so that it can say whose it is: the line
+        now in front of it belongs to somebody else, and without its name it
+        would be heard as theirs carrying on. Not after a line of no project,
+        whose name the room is never told either (see _LastSpeaker), and not
+        when names are turned off.
+        """
+        name = _tidy_label(job.project)
+        if named and name and after and name != after:
+            return job.again(voice_lib.chunks(f"{name}. {job.text}"))
+        return job.again()
 
     # A shade longer than the clip: PlaySound takes a moment to get going, and
     # clipping the tail off every chunk would be heard as a stutter.
@@ -1300,6 +1374,13 @@ class _LastSpeaker:
             self.name = project or self.name
             return announced
 
+    def follow(self, project):
+        """Take the record from the queue's new last line, after a line that
+        took the floor put itself first instead of joining the end."""
+        project = _tidy_label(project)
+        with self.lock:
+            self.name = project or self.name
+
 
 _last_speaker = _LastSpeaker()
 
@@ -1978,8 +2059,51 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "/health":
             return self._reply(200, {**sp.status(), "watching": Handler.watching,
+                                     "version": voice_lib.own_version(),
                                      "instruction": _takes_instruction(),
                                      "events": _events_performed()})
+
+        if route == "/voices":
+            # The whole catalogue for the engine that is speaking, read fresh.
+            # /state carries a short list for the panel's dropdown on a cache;
+            # a program casting a hundred characters wants the real thing, with
+            # each voice's sex and people, and asks rarely enough to afford it.
+            state = voice_lib.load_state()
+            engine = voice_lib.engine_of(state)
+            try:
+                rows = voice_lib.catalog(state, engine)
+            except (OSError, ImportError, LookupError) as exc:
+                return self._reply(200, {"engine": engine, "voices": [],
+                                         "error": str(exc)})
+            return self._reply(200, {
+                "engine": engine,
+                "roots": voice_lib.voice_roots(state),
+                "voices": [{"id": v["id"], "name": v["name"], "sex": v["sex"],
+                            "culture": v["culture"], "style": v.get("style") or "",
+                            "tag": v.get("tag") or ""} for v in rows]})
+
+        if route == "/voice-roots":
+            # A folder of someone else's voices, heard here as they lie. The
+            # Immersive AI mod sends its own on every start; see
+            # voice_lib.add_voice_root.
+            try:
+                if payload.get("add"):
+                    roots = voice_lib.add_voice_root(payload["add"])
+                elif payload.get("remove"):
+                    roots = voice_lib.remove_voice_root(payload["remove"])
+                else:
+                    roots = voice_lib.load_state().get("extraVoicesDirs") or []
+            except LookupError as exc:
+                return self._reply(404, {"error": str(exc)})
+            _VOICES["when"] = 0.0          # the dropdown should see them now
+            return self._reply(200, {"extraVoicesDirs": roots})
+
+        if route == "/panel":
+            # The window, opened for someone who is not at a command line --
+            # a game's "show me the voice app" button. Detached, and a second
+            # request raises the one already open rather than adding another.
+            voice_lib.start_panel(voice_lib.load_state())
+            return self._reply(200, {"panel": True})
 
         if route == "/capabilities":
             return self._reply(200, _capabilities(voice_lib.load_state(), sp.engine_name))
@@ -2009,6 +2133,7 @@ class Handler(BaseHTTPRequestHandler):
                 "events": _events_performed(),
                 "volume": win_volume.clamp(state.get("volume", 1.0)),
                 "enabled": bool(state.get("enabled")),
+                "version": voice_lib.own_version(),
             })
 
         if route == "/stop":
@@ -2130,6 +2255,15 @@ class Handler(BaseHTTPRequestHandler):
             except LookupError as exc:
                 return self._reply(404, {"error": str(exc)})
 
+            # A caller that would rather hear nothing than the spoken note --
+            # a game, where "I skipped forty characters" in the middle of a
+            # scene is worse than silence -- asks to be refused instead, and
+            # says something of its own on its own screen.
+            if payload.get("unreadable") == "refuse" and not voice_lib.can_read(text, sp._live()):
+                return self._reply(422, {
+                    "error": "the engine speaking now cannot read this alphabet",
+                    "unreadable": True, "engine": voice_lib.engine_of(sp._live())})
+
             # The same guard the watcher applies, and for the same reason: a
             # line typed into the panel in Cyrillic would otherwise be handed
             # to an engine that cannot read it.
@@ -2145,6 +2279,13 @@ class Handler(BaseHTTPRequestHandler):
             # reads it fresh every sweep, and one shared record cannot honour
             # two different answers to whether labelling is on.
             announced = _last_speaker.prefix(payload.get("project"), sp._live())
+            # "announce": false keeps the record and says nothing. A game has
+            # a screen that already shows who is talking, and every character
+            # in it would otherwise be introduced as the game's name first.
+            # The record is still followed, so the next line from anywhere
+            # else is named as the change it is.
+            if payload.get("announce") is False:
+                announced = ""
             if announced:
                 # Chunked with the name attached, exactly as the watcher does
                 # it, so the name rides the first piece and no other.
@@ -2152,7 +2293,8 @@ class Handler(BaseHTTPRequestHandler):
             # An explicit request through the API is the user asking for this
             # now, so it takes the floor -- unless it says otherwise. Text
             # typed into the panel asks to be queued instead: it is a line to
-            # add to what is waiting, not a reason to throw the rest away.
+            # add to what is waiting. Taking the floor throws away only the
+            # caller's own lines; anyone else's it cuts off are said after it.
             #
             # The project is passed through because the panel draws a column of
             # them, and something typed by hand belongs to no folder; saying so
@@ -2226,6 +2368,9 @@ def main():
     if voice_lib.sync_notes(state=state):
         log("speaking notes in CLAUDE.md were out of date; refreshed")
 
+    # Before anything slow, so a program looking for this copy finds it even
+    # while the model is still loading.
+    voice_lib.write_where(state)
     Handler.speaker = Speaker(state)
     # Started whatever the setting says: it reads it itself, every couple of
     # seconds, so turning it on does not need the engine restarting.

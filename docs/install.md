@@ -57,6 +57,10 @@ engine; neither interferes with the other.
 
 ## Or do it yourself
 
+**No terminal at all:** [ClaudeVoiceSetup.exe](https://github.com/TraxData313/claude-voice/releases/latest/download/ClaudeVoiceSetup.exe)
+is a window around the same script — it reads your graphics card, marks the engine that suits it,
+and runs `setup.ps1` for you. [setup-app/README.md](../setup-app/README.md) says what it does.
+
 One command does everything the paragraph above describes:
 
 ```powershell
@@ -71,6 +75,8 @@ says what it would do without writing anything.
 | | |
 |---|---|
 | `-Engine pocket` | no graphics card: [Pocket TTS on the CPU](#no-graphics-card), no Studio, no Qwen model |
+| `-Engine breeze` | the engine that laughs, and only it: about 11 GB, a 16 GB NVIDIA card. [Breeze →](engines.md#breeze-tts-2-the-one-that-laughs) |
+| `-NoClaude` | for a program that speaks through the [HTTP API](api.md) alone — a game, say. No hooks, no `/voice`, no note in `~\.claude\CLAUDE.md`, and on a fresh install the transcript watcher off. An existing install's Claude Code settings are left exactly as they were |
 | `-ProjectDir $env:USERPROFILE` | speak in **every** project, not just this one |
 | `-Build system` | the smaller Studio (268 MB), if you already have the CUDA runtime |
 | `-StudioDir` · `-ModelDir` | put the engine or the models somewhere else |

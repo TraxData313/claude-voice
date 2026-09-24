@@ -301,7 +301,10 @@ DEFAULTS = {
     # Where the panel last sat, written when it closes.
     "panelGeometry": "",
     # Whether it floats over everything else. Its own tick box writes this.
-    "panelTopmost": True,
+    # Off by default since 1.14: a window that sits on top of everything is a
+    # choice to make, not a thing to be handed -- and over a game running in
+    # full screen it is simply in the way.
+    "panelTopmost": False,
     # Dark colours in the panel. Its own tick box writes this too.
     "panelDark": False,
     # Load the engine and turn the voice on as the panel opens -- 'auto start
@@ -487,6 +490,74 @@ def engine_language(state=None):
     return want if want in pocket_engine.LANGUAGES else pocket_engine.DEFAULT_LANGUAGE
 
 
+def _same_path(a, b):
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def add_voice_root(path):
+    """Also look for voices in this folder, from now on. Returns the list.
+
+    For a program that carries voices of its own -- a game with a people's
+    worth of them -- and wants them spoken here without copying anything. The
+    folder is read where it lies and never written to. Asking twice is
+    harmless, and a folder that does not exist is refused rather than
+    remembered, because a path that is wrong today is almost always a typo.
+    """
+    path = os.path.abspath(os.path.expandvars(str(path or "").strip()))
+    if not path or not os.path.isdir(path):
+        raise LookupError(f"no such folder: {path}")
+    state = load_state()
+    have = list(state.get("extraVoicesDirs") or [])
+    if not any(_same_path(path, h) for h in have):
+        have.append(path)
+        patch_state(extraVoicesDirs=have)
+    return have
+
+
+def remove_voice_root(path):
+    """Stop looking in a folder added with add_voice_root. Returns the list."""
+    state = load_state()
+    have = [h for h in (state.get("extraVoicesDirs") or []) if not _same_path(path, h)]
+    patch_state(extraVoicesDirs=have)
+    return have
+
+
+def own_version():
+    """This copy's version, from version.json. Empty if it cannot be read."""
+    try:
+        with open(os.path.join(ROOT, "version.json"), encoding="utf-8-sig") as fh:
+            return json.load(fh).get("version") or ""
+    except (OSError, ValueError):
+        return ""
+
+
+# Where another program finds this one when it is not running. A game that
+# wants to start the voice cannot ask a server that is not up yet where it
+# lives, so each start leaves the answer somewhere fixed: beside nothing of
+# ours, in the user's own application data, where the setup program writes it
+# too. Only paths and a version -- nothing of what was said.
+WHERE_PATH = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+                          "claude-voice", "where.json")
+
+
+def write_where(state=None):
+    """Leave the note saying where this copy is and which Python runs it."""
+    import sys
+
+    state = state or load_state()
+    doc = {"root": ROOT, "python": sys.executable or "", "pythonw": _python(),
+           "port": state.get("port", 8765), "version": own_version()}
+    try:
+        os.makedirs(os.path.dirname(WHERE_PATH), exist_ok=True)
+        tmp = WHERE_PATH + ".new"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, indent=2)
+        os.replace(tmp, WHERE_PATH)
+    except OSError:
+        pass            # a note nobody may read is not worth failing a start over
+    return doc
+
+
 def voice_roots(state=None):
     state = state or load_state()
     roots = [state.get("voicesDir") or "voices"]
@@ -546,12 +617,26 @@ def _is_voice_dir(d):
             or _breeze_reference(d)[0] is not None)
 
 
+# What voice.json's own "Gender" number means. It is the Immersive AI mod's
+# field, where every one of these folders was first made: 0 said nothing, 1 a
+# woman, 2 a man.
+_GENDERS = {1: "female", 2: "male"}
+
+
 def _read_voice(d, vid, sex, culture, root):
     name, persona, style, pocket_lang = vid, "", "", ""
     try:
         with open(os.path.join(d, "voice.json"), encoding="utf-8-sig") as fh:
             doc = json.load(fh)
         name = doc.get("Name") or vid
+        # A flat folder -- a voice sitting directly in a root, the shape the
+        # mod's own shelf keeps -- has no rung to say either of these, so the
+        # file says them instead. A rung that did say them still wins: it is
+        # what the person filing the voice chose.
+        if sex is None:
+            sex = _GENDERS.get(doc.get("Gender"), "other")
+        if culture is None:
+            culture = (doc.get("Culture") or "other").strip().lower() or "other"
         # How this voice behaves, not just how it sounds. Being addressed by
         # name is natural once a voice has one, so the manner should match it.
         persona = doc.get("Persona") or ""
@@ -566,6 +651,8 @@ def _read_voice(d, vid, sex, culture, root):
         pocket_lang = doc.get("PocketLanguage") or ""
     except (OSError, ValueError):
         pass
+    sex = sex or "other"
+    culture = culture or "other"
     emb = os.path.join(d, "embedding.json")
     icl = os.path.join(d, "icl-prompt.json")
     pkt = os.path.join(d, POCKET_VOICE)
@@ -591,11 +678,17 @@ def catalog(state=None, engine=None):
     directory walk, and returns the same keys so that nothing downstream has to
     ask which engine it is looking at.
 
-    For Qwen, two layouts are accepted, because a handful of personal voices
+    For Qwen, three layouts are accepted, because a handful of personal voices
     and a whole generated library want different shapes:
 
-        <root>\\<sex>\\<id>              flat -- what this repo ships
+        <root>\\<sex>\\<id>              what this repo ships
         <root>\\<sex>\\<culture>\\<id>   grouped -- for larger collections
+        <root>\\<id>                    flat, sex and people read from voice.json
+
+    The third is the Immersive AI mod's own shelf, which the game registers
+    through POST /voice-roots so that a voice a player made for the game is
+    heard here too. A name starting with an underscore at the top of a root is
+    housekeeping (the mod keeps _cache and _seeded.json there) and is skipped.
 
     Earlier roots win, so a bundled voice shadows a same-named local one.
     """
@@ -606,7 +699,12 @@ def catalog(state=None, engine=None):
     for root in voice_roots(state):
         for sex in sorted(os.listdir(root)):
             sex_dir = os.path.join(root, sex)
-            if not os.path.isdir(sex_dir):
+            if not os.path.isdir(sex_dir) or sex.startswith("_"):
+                continue
+            if _is_voice_dir(sex_dir):                  # flat: the rung is the voice
+                if sex.lower() not in seen:
+                    seen.add(sex.lower())
+                    out.append(_read_voice(sex_dir, sex, None, None, root))
                 continue
             for entry in sorted(os.listdir(sex_dir)):
                 d = os.path.join(sex_dir, entry)
@@ -633,7 +731,16 @@ def catalog(state=None, engine=None):
         # favour of the one on disk.
         import pocket_engine
 
-        cloned = [v for v in out if v["pocket"]]
+        # A voice with a clip of itself is one too: Pocket clones from a wav
+        # as readily as it loads a baked state -- a few seconds the first time
+        # in a session, then held. That is what lets a library of a hundred
+        # voices speak here without a hundred 15 MB files beside them.
+        #
+        # Only where it CAN clone, though: that takes weights Kyutai gate behind
+        # a Hugging Face sign-in, and without them a clip-only voice is silence.
+        # pocket_engine writes down which it is the first time the model loads.
+        clips = bool(state.get("pocketCloning"))
+        cloned = [v for v in out if v["pocket"] or (clips and v["breeze"])]
         have = {v["id"].lower() for v in cloned}
         return cloned + [v for v in pocket_engine.catalog(engine_language(state))
                          if v["id"].lower() not in have]
@@ -687,7 +794,7 @@ def resolve(voice_id, source="embedding", state=None):
         # The language travels with the voice. Estelle needs the French model
         # and Abby needs the English one, and which is loaded is decided by
         # whoever was picked -- not by a config key set hours earlier.
-        return hit, {"pocket_voice": hit.get("pocket") or hit["id"],
+        return hit, {"pocket_voice": hit.get("pocket") or (state.get("pocketCloning") and hit.get("breeze")) or hit["id"],
                      "pocket_language": (hit.get("pocketLanguage")
                                          or engine_language(state))}
 
@@ -1469,6 +1576,12 @@ SKIPPED_ALL = ("That line is all Cyrillic, and {engine} can't read it at "
 # The engines that cannot read Cyrillic, as the warning names them out loud.
 # Breeze reads English and Chinese and nothing else, by its own model card.
 NO_CYRILLIC = {"pocket": "Pocket TTS", "breeze": "Breeze"}
+
+
+def can_read(text, state=None, engine=None):
+    """Whether the engine would read every word of this, dropping none."""
+    engine = engine or engine_of(state)
+    return engine not in NO_CYRILLIC or not text or not CYRILLIC.search(text)
 
 
 def speakable(text, engine=None, state=None):

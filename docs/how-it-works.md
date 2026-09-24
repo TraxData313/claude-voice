@@ -247,10 +247,11 @@ sitting next to the pause button, which is the honest place for it.
 **Nothing barges past a held line.** A finished answer normally takes the floor — the
 newest is the one worth hearing while an older one is still being read out. That reasoning
 runs out when she is held: nobody is hearing either, so the cut buys no time, and it costs
-the sentence you stopped half way through on purpose. It costs more than that, in fact —
-taking the floor calls `cancel()`, which empties the queue as well, so one answer arriving
-took the held line and everything waiting behind it. The one thing that still interrupts a
-hold is clicking a line in the **history**, which is you asking for that line, now.
+the sentence you stopped half way through on purpose. It cost more than that, in fact —
+taking the floor used to call `cancel()`, which empties the queue as well, so one answer
+arriving took the held line and everything waiting behind it. The one thing that still
+interrupts a hold is clicking a line in the **history**, which is you asking for that line,
+now.
 
 ### The play/pause key
 
@@ -403,6 +404,14 @@ Lines **queue** rather than interrupt. Barging in was right when one hook spoke 
 finished answer; it is wrong for a running commentary, where cutting off the previous line
 mid-word simply loses it. Only a deliberate `say`, `replay` or `stop` takes the floor.
 
+**And taking the floor throws away only your own lines.** It still cuts off what is in the
+air, so a reply is heard at once, and it still drops what its own speaker had said or had
+waiting, since a newer answer replaces an older one. But a line of anyone else's that it
+cuts off is said again straight after it, from the start and with its name in front, and
+anyone else's that were waiting keep their places. `stop` still empties everything, which
+is what it is for. So, for now, does a click in the history: that line plays from its kept
+audio, around the queue rather than through it, and nothing yet puts back what it cut off.
+
 Between two messages there is a real pause (`gapSeconds`). That seam is worth keeping — it
 is how you hear that a new line has started rather than the same one continuing.
 
@@ -434,6 +443,15 @@ misses a sound they did not know to expect. The clue was `logs\hook.log`, which 
 nothing in it since August. The command is written with forward slashes now, which
 Windows, bash and cmd.exe all read the same way, and `voice status` checks the settings
 and says under *hooks* whether they can run.
+
+**One reply cost a whole summary.** Abby's room sends her replies to take the floor, so that
+a reply is not stuck behind her own asides. Taking the floor meant `cancel()`, which is
+stop, and the room is not the only one talking. A session's TL;DR, 425 characters, had
+started being made when her reply arrived four seconds later; the playback trace shows
+5.92 of an expected 35 seconds made before it was cut, and none of it heard. The engine log
+told the story in two lines: `watcher: summary ... (happy)`, then a `speak` from the room.
+Nothing anywhere said a line had been thrown away, and it looked exactly like the watcher
+missing a TL;DR. Taking the floor now drops only the caller's own lines (see above).
 
 **A refused `JNI_CreateJavaVM` hides its own cause.** A process gets one JVM and there is
 no taking it down, so the second Qwen in a process — swapped away to Pocket and back —

@@ -7,6 +7,8 @@
 
         .\setup.ps1                              # the whole thing
         .\setup.ps1 -Engine pocket               # no GPU: Pocket TTS on the CPU, no Studio, no Qwen model
+        .\setup.ps1 -Engine breeze               # the one that laughs: a 16 GB NVIDIA card, ~11 GB download
+        .\setup.ps1 -NoClaude                    # for a game or a program only: touch nothing of Claude Code's
         .\setup.ps1 -ProjectDir $env:USERPROFILE # speak in every project, not just this one
         .\setup.ps1 -Build system                # smaller Studio, if you have CUDA already
         .\setup.ps1 -NoPanel                     # do not open the window at the end
@@ -29,7 +31,7 @@ param(
     # Which synthesiser. 'qwen' fetches Studio and the 2.4 GB model and needs an
     # NVIDIA card; 'pocket' fetches neither -- it is one pip install and runs on
     # the CPU. Left out, a re-run keeps whichever one config.json already names.
-    [ValidateSet("qwen", "pocket")]
+    [ValidateSet("qwen", "pocket", "breeze")]
     [string]$Engine,
     [string]$ProjectDir,
     [string]$StudioDir = (Join-Path $env:LOCALAPPDATA "Programs\qwen-tts-studio"),
@@ -44,6 +46,11 @@ param(
     [switch]$NoShortcut,
     [switch]$NoNote,
     [switch]$NoPanel,
+    # Installed for a program rather than for Claude Code -- the Immersive AI
+    # mod's setup runs it this way. No hooks, no slash command, no note in
+    # ~\.claude\CLAUDE.md: somebody who came here from a game may not have
+    # Claude Code at all, and should find nothing of it written on their machine.
+    [switch]$NoClaude,
     [switch]$UpdateChecks,
     [switch]$WhatIf
 )
@@ -68,7 +75,7 @@ if (-not $Engine) {
         try {
             $had = ([System.IO.File]::ReadAllText($configPath, [System.Text.Encoding]::UTF8) |
                     ConvertFrom-Json).engine
-            if ($had -in "qwen", "pocket") { $Engine = $had }
+            if ($had -in "qwen", "pocket", "breeze") { $Engine = $had }
         } catch { }
     }
 }
@@ -138,6 +145,9 @@ function Get-File($url, $dest, $label) {
             $done += $n
             if ($tick.Elapsed.TotalSeconds -ge 2) {
                 $tick.Restart()
+                # A line a setup window can read, where Write-Progress draws only
+                # on a console and says nothing to a program reading the output.
+                if ($env:CLAUDE_VOICE_PROGRESS) { Write-Host "@progress $label|$done|$total" }
                 Write-Progress -Activity $label `
                                -Status "$([math]::Round($done/1MB)) of $([math]::Round($total/1MB)) MB" `
                                -PercentComplete ([math]::Min(100, 100 * $done / $total))
@@ -268,6 +278,8 @@ if ($Engine -eq "pocket") {
 # --- Qwen-TTS Studio ------------------------------------------------------
 if ($Engine -eq "pocket") {
     Say "studio        : skipped -- Pocket TTS needs no Studio and no GPU" "Green"
+} elseif ($Engine -eq "breeze") {
+    Say "studio        : skipped -- Breeze brings its own, after this" "Green"
 } elseif (Test-Studio $StudioDir) {
     Say "studio        : already at $StudioDir" "Green"
 } else {
@@ -365,7 +377,7 @@ if ($Engine -eq "pocket") {
 # 1.7b, not 0.6b -- the size decides the shape of a speaker embedding, and the
 # voices in voices\ are 2048-dimension, which only the larger model produces.
 $hf = "https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/main"
-if ($Engine -eq "pocket") {
+if ($Engine -in "pocket", "breeze") {
     Say "model         : skipped -- the Qwen model is Studio's, and there is no Studio" "Green"
 } else {
     foreach ($m in @("qwen-talker-1.7b-base-Q8_0.gguf", "qwen-tokenizer-12hz-Q8_0.gguf")) {
@@ -385,11 +397,24 @@ if ($Engine -eq "qwen") { $opts.StudioDir = $StudioDir }
 if ($ProjectDir) { $opts.ProjectDir = $ProjectDir }
 if ($NoShortcut)   { $opts.NoShortcut = $true }
 if ($NoNote)       { $opts.NoNote = $true }
+if ($NoClaude)     { $opts.NoClaude = $true }
 if ($UpdateChecks) { $opts.UpdateChecks = $true }
 if ($WhatIf)       { $opts.WhatIf = $true }
 & (Join-Path $repo "install.ps1") @opts
 
 if ($WhatIf) { return }   # install.ps1 has already said so
+
+# --- Breeze ---------------------------------------------------------------
+# Its own environment, its own code and its own weights, all through the one
+# installer the panel and 'voice_cli.py install breeze' already share -- so the
+# machine check and the folder it lands in cannot differ between the roads.
+# Asked for by name here, so the question it would ask has been answered.
+if ($Engine -eq "breeze") {
+    Say ""
+    & $PythonExe (Join-Path $repo "voice_cli.py") install breeze --yes
+    if ($LASTEXITCODE -ne 0) { throw "the Breeze install stopped (exit $LASTEXITCODE) -- run this again to carry on from where it got to" }
+    & $PythonExe (Join-Path $repo "voice_cli.py") engine breeze | Out-Null
+}
 
 # --- open it --------------------------------------------------------------
 # The panel first, then the model: loading takes the better part of a minute,
@@ -405,7 +430,12 @@ if (-not $NoPanel) {
     if ($open) { Say "panel         : already open" "Green" }
     else       { & $PythonExe (Join-Path $repo "voice_cli.py") panel }
 }
-& $PythonExe (Join-Path $repo "voice_cli.py") on
+# 'on' is the master switch for Claude Code's narration as well as a start;
+# a program install only wants the engine up, and must not flip a switch
+# somebody who already uses this for Claude Code had set the other way.
+if ($NoClaude) { & $PythonExe (Join-Path $repo "voice_cli.py") start }
+else           { & $PythonExe (Join-Path $repo "voice_cli.py") on }
 
 Say ""
-Say "Restart Claude Code -- hooks are read at session start. Then: /voice on" "Green"
+if ($NoClaude) { Say "Ready -- the voice is running." "Green" }
+else           { Say "Restart Claude Code -- hooks are read at session start. Then: /voice on" "Green" }

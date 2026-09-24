@@ -6,6 +6,24 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 1.14.0 — unreleased
+
+**A one-window setup for people who have never seen a terminal, and a voice a game can speak its
+characters through.**
+
+- **`ClaudeVoiceSetup.exe`** (`setup-app\`): Abby on the left, three engines to choose from, one
+  button. It reads the graphics card, marks the engine that suits it, and runs `setup.ps1`
+  underneath — so there is still exactly one installer, now with a face.
+- **`setup.ps1 -Engine breeze`** installs Breeze from scratch, and **`-NoClaude`** installs for a
+  program alone: no hooks, no `/voice`, no note, no transcript watcher.
+- **For games** — the Immersive AI mod speaks every character through this now: `/voices`,
+  `/voice-roots`, `/panel`, `announce: false`, `unreadable: "refuse"`, a version on `/health`, and
+  `where.json` so it can be found asleep. See [api.md](docs/api.md#for-a-game).
+- **Flat voice folders** (`<root>\<id>`, sex and people from `voice.json`) are read too.
+- **Pocket speaks any voice with a clip**, where cloning is available — and records whether it is.
+  `make_reference_clips.py` gives a whole library its clips in one pass.
+- **The panel no longer floats on top by default.** Its own tick box still does it.
+
 ## 1.13.0 — 2026-09-22
 
 **On the graphics card she can be told how to say a line, not just what to say — slowly and

@@ -55,6 +55,8 @@ resumes where it stopped if the connection drops.
 **No administrator rights anywhere**, so it goes on a locked-down work laptop as easily as
 your own. **[By hand, other builds, every-project install →](docs/install.md)**
 
+Never opened a terminal? **[ClaudeVoiceSetup.exe](https://github.com/TraxData313/claude-voice/releases/latest/download/ClaudeVoiceSetup.exe)** does all of it in one window.
+
 ## Or let Claude Code install it
 
 ```
@@ -116,7 +118,7 @@ go stale.
 </p>
 
 **`/voice panel`**, or the **Abby for Claude** icon the installer leaves on your Desktop —
-no terminal needed. It floats on top, owns nothing, and asks the engine what is happening
+no terminal needed. It owns nothing, and asks the engine what is happening
 twice a second:
 
 - **who is speaking**, what they are saying, and which project it came from — click her
@@ -134,7 +136,7 @@ twice a second:
 - **a cog in the corner** — settings, each tick with a line saying what it does: **start
   with Windows** opens the panel when you log in, **auto start engine** loads it and
   turns the voice on as the panel opens, and both together mean you press nothing at all
-- voice, portrait size, **dark**, **on top**, and Abby herself along the bottom
+- voice, portrait size, **dark**, **on top** (off by default), and Abby herself along the bottom
 
 ## The voices
 
@@ -177,7 +179,7 @@ embedding is a clone of a real person, so that folder has rules.
 | **[How it works →](docs/how-it-works.md)** | the engine, the watcher, the JNI bridge — and the things that cost real time to find |
 | **[Engine notes →](docs/engine-notes.md)** | why she sometimes stops early, changes voice, or buzzes — three different causes |
 | **[Three engines →](docs/engines.md)** | Qwen, Pocket TTS or Breeze: what each costs, what each can read, how to switch — and telling them how to say it |
-| **[Talking to her from a program →](docs/api.md)** | the HTTP API: a line, a mood, a laugh written into the text, and asking first what the engine can do |
+| **[Talking to her from a program →](docs/api.md)** | the HTTP API: a line, a mood, a laugh written into the text, asking first what the engine can do — and [what a game needs](docs/api.md#for-a-game) |
 | **[Writing for the ear →](docs/writing-for-the-ear.md)** | the TL;DR contract, why captions sound wrong aloud, how much of a voice's character Claude is told to wear — and the moods and laughs it may write, when the engine has them |
 | **[Codex →](docs/codex.md)** | hearing Codex tasks through the same local voice, panel, and TL;DR contract |
 | **[Languages →](docs/languages.md)** | what is tested, and how it fails when it fails |

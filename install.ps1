@@ -25,13 +25,16 @@
 param(
     # 'qwen' needs Studio and refuses to go on without it; 'pocket' needs only
     # the pocket-tts package. Left out, whatever config.json already says.
-    [ValidateSet("qwen", "pocket")]
+    [ValidateSet("qwen", "pocket", "breeze")]
     [string]$Engine,
     [string]$ProjectDir,
     [string]$StudioDir,
     [string]$PythonExe,
     [switch]$NoShortcut,
     [switch]$NoNote,
+    # Nothing of Claude Code's: no hooks, no /voice command, no note. For a
+    # program that speaks through the HTTP API and nothing else -- see setup.ps1.
+    [switch]$NoClaude,
     [switch]$UpdateChecks,
     [switch]$WhatIf
 )
@@ -87,7 +90,7 @@ if (-not $Engine) {
     if (Test-Path $configPath) {
         try {
             $had = (Read-Utf8 $configPath | ConvertFrom-Json).engine
-            if ($had -in "qwen", "pocket") { $Engine = $had }
+            if ($had -in "qwen", "pocket", "breeze") { $Engine = $had }
         } catch { }
     }
 }
@@ -157,6 +160,7 @@ function Set-Prop($obj, $name, $value) {
     else { $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value }
 }
 
+$freshConfig = -not (Test-Path $configPath)
 if (Test-Path $configPath) {
     $cfg = Read-Utf8 $configPath | ConvertFrom-Json
     Say "config.json   : updating paths, keeping your settings"
@@ -178,6 +182,16 @@ if ($hasStudio) {
     foreach ($k in "studioDir", "modelDir", "talker") { $cfg.PSObject.Properties.Remove($k) }
 }
 Set-Prop $cfg "engine" $Engine
+# Installed for a program, not for Claude Code: nothing here should start
+# reading Claude Code's or Codex's transcripts aloud just because the switch
+# is on. The HTTP API speaks whatever the switch says; only the watcher is off.
+# On a FRESH install only: somebody who already hears Claude Code through this
+# and then adds an engine from a game has said nothing about their sessions,
+# and switching their narration off behind their back would be a theft.
+if ($NoClaude -and $freshConfig) {
+    Set-Prop $cfg "watch" $false
+    Set-Prop $cfg "watchCodex" $false
+}
 
 # Whether it may look for a newer version of itself. Off unless asked, because
 # everything else here runs on this machine and tells nobody about it, and that
@@ -195,6 +209,10 @@ if (-not $WhatIf) {
 }
 
 # --- the speech hooks ------------------------------------------------------
+if ($NoClaude) {
+    Say "claude code   : left alone -- no hooks, no /voice, no note (-NoClaude)" "Green"
+    $NoNote = $true
+} else {
 $claudeDir = Join-Path $ProjectDir ".claude"
 $settingsPath = Join-Path $claudeDir "settings.json"
 $hookScript = Join-Path $repo "speak_hook.py"
@@ -289,6 +307,7 @@ if (-not $WhatIf) {
     Write-Utf8 (Join-Path $cmdDir "voice.md") $template
     Say "slash command : $(Join-Path $cmdDir 'voice.md')" "Green"
 }
+}   # -NoClaude
 
 # --- the note every session reads -----------------------------------------
 # Without this the whole TL;DR contract is a secret: a session has no way to
@@ -338,6 +357,10 @@ Say ""
 if ($WhatIf) {
     Say "-WhatIf: nothing was written." "Yellow"
 } else {
-    Say "Done. Restart Claude Code -- hooks are read at session start." "Green"
-    Say "Then: /voice on" "Green"
+    if ($NoClaude) {
+        Say "Done." "Green"
+    } else {
+        Say "Done. Restart Claude Code -- hooks are read at session start." "Green"
+        Say "Then: /voice on" "Green"
+    }
 }

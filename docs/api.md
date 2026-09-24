@@ -23,6 +23,8 @@ POST /speak
 | `voice` | who says it, by id or any unambiguous part of one. Leave it out for whoever is set |
 | `queue` | `true` waits its turn behind whatever is playing. Left out, the line cuts in, because a request is usually somebody asking for this now |
 | `project` | a label for the panel's history, and the name said aloud when the speaker changes |
+| `announce` | `false` never says that name. For a program with a screen that already shows who is talking |
+| `unreadable` | `"refuse"` answers 422 instead of speaking, when the engine cannot read the alphabet — see [For a game](#for-a-game) |
 
 The reply comes at once, before a word is spoken, and says what will actually be done with
 what was asked for — judged against the engine the next line comes out of:
@@ -149,16 +151,50 @@ performed than you expected — somebody may have switched engines.
 | `POST /set-voice` `{"voice": "abby"}` | who speaks from now on, for every session |
 | `POST /set-engine` `{"engine": "breeze"}` | which engine speaks; it loads on the next line |
 | `POST /volume` `{"level": 0.6}` | 0 to 1, audible mid-sentence |
-| `POST /health` | whether it is up, and whether a mood or a sound would be performed |
+| `POST /health` | whether it is up, which version, and whether a mood or a sound would be performed |
+| `POST /voices` | every voice the engine speaking now can use, each with its `sex` and `culture` |
+| `POST /voice-roots` `{"add": "C:\\…"}` | also read the voices in that folder, where they lie. `remove` takes one away |
+| `POST /panel` | opens the panel window, or raises the one already open |
+| `POST /quit` | closes the engine and hands its memory back |
 
 `/set-engine` answers 404 for Breeze when it is not installed, with a sentence saying how.
 It is never downloaded by a request: that takes somebody at the panel or the command line
 saying yes to eleven gigabytes.
 
+## For a game
+
+The Immersive AI mod for Mount & Blade II: Bannerlord speaks every character through this, and
+these are the few things it needed that a Claude session did not. Anything that gives a voice to
+many characters can use them the same way.
+
+- **Find it asleep.** Every engine start writes `%LOCALAPPDATA%\claude-voice\where.json` —
+  `root`, `python`, `port`, `version`. Start it with `python <root>\voice_cli.py start` (no
+  window), then wait for `/health` to say `ready: true`; the first load takes up to a minute.
+- **Bring your own voices.** `POST /voice-roots {"add": "<folder>"}` and the voices in it join the
+  catalogue as they lie, never copied, never written to. The folder may be laid out as
+  `<sex>\<id>`, `<sex>\<culture>\<id>`, or flat `<id>` with `Gender` (1 woman, 2 man) and
+  `Culture` in each `voice.json`. It is remembered in `extraVoicesDirs`; asking again is harmless.
+- **Cast from `/voices`.** Each engine has its own voices — Pocket speaks a voice only if it has a
+  baked state, or a clip where cloning is available; Breeze only if it has a clip and its words —
+  so read the list again after `/set-engine`. A voice folder speaks on all three engines when it
+  holds `embedding.json` **and** `breeze-reference.wav` with its `.txt`;
+  `make_reference_clips.py <folder>` renders that pair for a whole library through Qwen.
+- **Keep your name out of it.** `announce: false` — the screen already says who is speaking.
+- **Silence over a note.** Breeze and Pocket cannot read Cyrillic, and would normally say so
+  aloud before reading the rest. `unreadable: "refuse"` answers
+  `422 {"unreadable": true, "engine": "pocket"}` instead, and says nothing; tell the player on
+  your own screen that Qwen reads every language.
+- **Installing it for somebody.** `setup-app\` builds `ClaudeVoiceSetup.exe`, a one-window
+  installer for people who have never opened a terminal; a game can download it from the latest
+  release and run it with `--for "<your game>"`. See [setup-app/README.md](../setup-app/README.md).
+
 ## Things worth knowing
 
-- **One line at a time, in order.** Send with `queue: true` to line lines up, as a
-  conversation does; without it each line cuts off the one before.
+- **One line at a time, in order.** Send with `queue: true` to line them up, as a
+  conversation does. Without it a line is heard at once. It cuts off what is playing and
+  replaces your own lines still waiting, where yours are the ones sent with the same
+  `project`. A line of anyone else's that it cuts off is said again straight after it, from
+  the start, and anyone else's that were waiting keep their places.
 - **Long text is fine.** Breeze is handed it in pieces of up to 500 characters, cut at
   sentence ends and sent one after another into the same stream. Each piece is a
   generation of its own, from the same clip of the voice.
