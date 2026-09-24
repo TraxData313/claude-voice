@@ -6,6 +6,7 @@
     already finds, it skips -- so running it twice is cheap and safe.
 
         .\setup.ps1                              # the whole thing
+        .\setup.ps1 -Engine pocket               # no GPU: Pocket TTS on the CPU, no Studio, no Qwen model
         .\setup.ps1 -ProjectDir $env:USERPROFILE # speak in every project, not just this one
         .\setup.ps1 -Build system                # smaller Studio, if you have CUDA already
         .\setup.ps1 -NoPanel                     # do not open the window at the end
@@ -25,6 +26,11 @@
 #>
 
 param(
+    # Which synthesiser. 'qwen' fetches Studio and the 2.4 GB model and needs an
+    # NVIDIA card; 'pocket' fetches neither -- it is one pip install and runs on
+    # the CPU. Left out, a re-run keeps whichever one config.json already names.
+    [ValidateSet("qwen", "pocket")]
+    [string]$Engine,
     [string]$ProjectDir,
     [string]$StudioDir = (Join-Path $env:LOCALAPPDATA "Programs\qwen-tts-studio"),
     [string]$ModelDir  = (Join-Path $env:USERPROFILE ".qwen-tts-studio\models"),
@@ -51,6 +57,22 @@ $ErrorActionPreference = "Stop"
 $repo = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 
 function Say($msg, $colour = "Gray") { Write-Host $msg -ForegroundColor $colour }
+
+# Running this again is meant to be cheap. On a machine set up for Pocket TTS
+# because it has no graphics card, a bare re-run falling back to Qwen would
+# start pulling three gigabytes of Studio and model it can never use.
+if (-not $Engine) {
+    $Engine = "qwen"
+    $configPath = Join-Path $repo "config.json"
+    if (Test-Path $configPath) {
+        try {
+            $had = ([System.IO.File]::ReadAllText($configPath, [System.Text.Encoding]::UTF8) |
+                    ConvertFrom-Json).engine
+            if ($had -in "qwen", "pocket") { $Engine = $had }
+        } catch { }
+    }
+}
+Say "engine        : $Engine" "Green"
 
 # Studio is the folder holding app\ and runtime\; this file is the proof it is
 # unpacked rather than half-copied.
@@ -220,8 +242,33 @@ if ($gitListed) {
     }
 }
 
+# --- Pocket TTS -----------------------------------------------------------
+# The whole of the other road: one pip install, which brings torch's CPU build
+# with it -- a few hundred megabytes rather than three gigabytes, and no card.
+# The model weights are not fetched here; the engine pulls them from Hugging
+# Face the first time it loads, and they are cached from then on.
+if ($Engine -eq "pocket") {
+    $havePocket = $false
+    if ($PythonExe -and (Test-Path $PythonExe)) {
+        & $PythonExe -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('pocket_tts') else 1)"
+        $havePocket = $LASTEXITCODE -eq 0
+    }
+    if ($havePocket) {
+        Say "pocket-tts    : installed" "Green"
+    } elseif ($WhatIf) {
+        Say "would install : pocket-tts, with pip -- it brings torch's CPU build" "Yellow"
+    } else {
+        Say "pocket-tts    : installing with pip -- it brings torch's CPU build, a few hundred MB"
+        & $PythonExe -m pip install pocket-tts
+        if ($LASTEXITCODE -ne 0) { throw "pip install pocket-tts exited with $LASTEXITCODE" }
+        Say "pocket-tts    : installed" "Green"
+    }
+}
+
 # --- Qwen-TTS Studio ------------------------------------------------------
-if (Test-Studio $StudioDir) {
+if ($Engine -eq "pocket") {
+    Say "studio        : skipped -- Pocket TTS needs no Studio and no GPU" "Green"
+} elseif (Test-Studio $StudioDir) {
     Say "studio        : already at $StudioDir" "Green"
 } else {
     # Somewhere else already? install.ps1 looks in these, so finding one here
@@ -318,16 +365,23 @@ if (Test-Studio $StudioDir) {
 # 1.7b, not 0.6b -- the size decides the shape of a speaker embedding, and the
 # voices in voices\ are 2048-dimension, which only the larger model produces.
 $hf = "https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/main"
-foreach ($m in @("qwen-talker-1.7b-base-Q8_0.gguf", "qwen-tokenizer-12hz-Q8_0.gguf")) {
-    $dest = Join-Path $ModelDir $m
-    if (Test-Path $dest)  { Say "model         : have $m" "Green" }
-    elseif ($WhatIf)      { Say "would fetch   : $m -> $ModelDir" "Yellow" }
-    else                  { Get-File "$hf/$m" $dest $m }
+if ($Engine -eq "pocket") {
+    Say "model         : skipped -- the Qwen model is Studio's, and there is no Studio" "Green"
+} else {
+    foreach ($m in @("qwen-talker-1.7b-base-Q8_0.gguf", "qwen-tokenizer-12hz-Q8_0.gguf")) {
+        $dest = Join-Path $ModelDir $m
+        if (Test-Path $dest)  { Say "model         : have $m" "Green" }
+        elseif ($WhatIf)      { Say "would fetch   : $m -> $ModelDir" "Yellow" }
+        else                  { Get-File "$hf/$m" $dest $m }
+    }
 }
 
 # --- wire it up -----------------------------------------------------------
 Say ""
-$opts = @{ PythonExe = $PythonExe; StudioDir = $StudioDir }
+$opts = @{ PythonExe = $PythonExe; Engine = $Engine }
+# Pocket has no use for the path, and handing over the default for a Studio
+# that was never fetched would only give install.ps1 a wrong one to record.
+if ($Engine -eq "qwen") { $opts.StudioDir = $StudioDir }
 if ($ProjectDir) { $opts.ProjectDir = $ProjectDir }
 if ($NoShortcut)   { $opts.NoShortcut = $true }
 if ($NoNote)       { $opts.NoNote = $true }

@@ -1,6 +1,6 @@
 ---
 description: Fetch the speech engine and model, so the installed plugin can actually talk
-argument-hint: "[--whatif] [-Build system] [-ProjectDir <path>]"
+argument-hint: "[--whatif] [-Engine pocket] [-Build system] [-ProjectDir <path>]"
 allowed-tools: Bash(powershell:*), Bash(pwsh:*)
 disable-model-invocation: true
 ---
@@ -26,6 +26,10 @@ point. It needs **Windows and an NVIDIA card**: both engine builds are CUDA buil
 there is no CPU one, so on other hardware this fails at model load rather than at the
 door. If the user is on AMD, Intel graphics or a Mac, say so before it downloads
 anything rather than after.
+
+**No NVIDIA card on Windows?** Pass `-Engine pocket`. That skips Studio and the model
+altogether and installs Pocket TTS with pip instead — a few hundred MB, running on the
+CPU. Abby still speaks; Cyrillic does not.
 
 ## Afterwards
 

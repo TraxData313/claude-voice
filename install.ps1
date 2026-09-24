@@ -13,6 +13,7 @@
         .\install.ps1                                  # this repo's own folder as the project
         .\install.ps1 -ProjectDir C:\code\my-project   # speak in that project
         .\install.ps1 -StudioDir "D:\qwen-tts-studio"  # if it is not auto-found
+        .\install.ps1 -Engine pocket                   # Pocket TTS on the CPU: no Studio needed
         .\install.ps1 -NoShortcut                      # skip the Desktop icon
         .\install.ps1 -NoNote                          # leave CLAUDE.md alone
         .\install.ps1 -UpdateChecks                    # allow one look a week for a new version
@@ -22,6 +23,10 @@
 #>
 
 param(
+    # 'qwen' needs Studio and refuses to go on without it; 'pocket' needs only
+    # the pocket-tts package. Left out, whatever config.json already says.
+    [ValidateSet("qwen", "pocket")]
+    [string]$Engine,
     [string]$ProjectDir,
     [string]$StudioDir,
     [string]$PythonExe,
@@ -73,6 +78,34 @@ if ($PythonExe -match 'WindowsApps') {
 }
 Say "python        : $PythonExe" "Green"
 
+# --- which engine ---------------------------------------------------------
+# A re-run with no -Engine keeps the one already chosen, so that installing
+# again on a machine with no graphics card does not quietly demand Studio.
+$configPath = Join-Path $repo "config.json"
+if (-not $Engine) {
+    $Engine = "qwen"
+    if (Test-Path $configPath) {
+        try {
+            $had = (Read-Utf8 $configPath | ConvertFrom-Json).engine
+            if ($had -in "qwen", "pocket") { $Engine = $had }
+        } catch { }
+    }
+}
+Say "engine        : $Engine" "Green"
+
+if ($Engine -eq "pocket") {
+    & $PythonExe -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('pocket_tts') else 1)"
+    if ($LASTEXITCODE -eq 0) {
+        Say "pocket-tts    : installed" "Green"
+    } elseif ($WhatIf) {
+        Say "pocket-tts    : not installed yet -- setup.ps1 -Engine pocket fetches it" "Yellow"
+    } else {
+        # Refused here rather than discovered at the first answer, where the
+        # only symptom would be silence.
+        throw "pocket-tts is not installed for $PythonExe. Run: & `"$PythonExe`" -m pip install pocket-tts"
+    }
+}
+
 # --- Qwen-TTS Studio ------------------------------------------------------
 if (-not $StudioDir) {
     # Downloads comes last on purpose. Storage Sense is on by default and
@@ -87,23 +120,31 @@ if (-not $StudioDir) {
     )
     $StudioDir = $guesses | Where-Object { Test-Path (Join-Path $_ "runtime\bin\server\jvm.dll") } | Select-Object -First 1
 }
-if (-not $StudioDir -or -not (Test-Path (Join-Path $StudioDir "runtime\bin\server\jvm.dll"))) {
-    throw "Qwen-TTS Studio not found. Pass -StudioDir pointing at the folder containing app\ and runtime\."
-}
-Say "studio        : $StudioDir" "Green"
-if ($StudioDir.StartsWith("$env:USERPROFILE\Downloads\", [StringComparison]::OrdinalIgnoreCase)) {
-    Say "              ^ that is inside Downloads, which Windows Storage Sense empties" "Yellow"
-    Say "                after 30 days. Move it and re-run, or run setup.ps1 to move it." "Yellow"
+$hasStudio = $StudioDir -and (Test-Path (Join-Path $StudioDir "runtime\bin\server\jvm.dll"))
+if (-not $hasStudio -and $Engine -eq "qwen") {
+    throw "Qwen-TTS Studio not found. Pass -StudioDir pointing at the folder containing app\ and runtime\, or -Engine pocket to use the CPU engine instead."
 }
 
-$modelDir = Join-Path $env:USERPROFILE ".qwen-tts-studio\models"
-$talker = "qwen-talker-1.7b-base-Q8_0.gguf"
-if (Test-Path $modelDir) {
-    $found = Get-ChildItem $modelDir -Filter "*talker*.gguf" -ErrorAction SilentlyContinue
-    if ($found -and -not ($found.Name -contains $talker)) { $talker = $found[0].Name }
-    Say "talker model  : $talker" "Green"
+# A Studio that happens to be here is still recorded on the Pocket road, so
+# switching engine later from the panel just works.
+if ($hasStudio) {
+    Say "studio        : $StudioDir" "Green"
+    if ($StudioDir.StartsWith("$env:USERPROFILE\Downloads\", [StringComparison]::OrdinalIgnoreCase)) {
+        Say "              ^ that is inside Downloads, which Windows Storage Sense empties" "Yellow"
+        Say "                after 30 days. Move it and re-run, or run setup.ps1 to move it." "Yellow"
+    }
+
+    $modelDir = Join-Path $env:USERPROFILE ".qwen-tts-studio\models"
+    $talker = "qwen-talker-1.7b-base-Q8_0.gguf"
+    if (Test-Path $modelDir) {
+        $found = Get-ChildItem $modelDir -Filter "*talker*.gguf" -ErrorAction SilentlyContinue
+        if ($found -and -not ($found.Name -contains $talker)) { $talker = $found[0].Name }
+        Say "talker model  : $talker" "Green"
+    } else {
+        Say "talker model  : $modelDir not found -- download a model in Studio first" "Yellow"
+    }
 } else {
-    Say "talker model  : $modelDir not found -- download a model in Studio first" "Yellow"
+    Say "studio        : none, and none needed -- Pocket TTS runs without it" "Green"
 }
 
 # --- config.json ----------------------------------------------------------
@@ -116,7 +157,6 @@ function Set-Prop($obj, $name, $value) {
     else { $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value }
 }
 
-$configPath = Join-Path $repo "config.json"
 if (Test-Path $configPath) {
     $cfg = Read-Utf8 $configPath | ConvertFrom-Json
     Say "config.json   : updating paths, keeping your settings"
@@ -126,9 +166,18 @@ if (Test-Path $configPath) {
     $cfg.PSObject.Properties.Remove("_extraVoicesDirs")
     Say "config.json   : creating"
 }
-Set-Prop $cfg "studioDir" $StudioDir
-Set-Prop $cfg "modelDir" $modelDir
-Set-Prop $cfg "talker" $talker
+if ($hasStudio) {
+    Set-Prop $cfg "studioDir" $StudioDir
+    Set-Prop $cfg "modelDir" $modelDir
+    Set-Prop $cfg "talker" $talker
+} elseif (-not ($cfg.studioDir -and (Test-Path (Join-Path $cfg.studioDir "runtime\bin\server\jvm.dll")))) {
+    # The example's C:\Users\you placeholders would otherwise be kept as real
+    # paths. Without them the tool falls back to where setup.ps1 would put
+    # Studio, which is the right place to look if one is ever fetched. A path
+    # that does point at a real Studio is kept, wherever it is.
+    foreach ($k in "studioDir", "modelDir", "talker") { $cfg.PSObject.Properties.Remove($k) }
+}
+Set-Prop $cfg "engine" $Engine
 
 # Whether it may look for a newer version of itself. Off unless asked, because
 # everything else here runs on this machine and tells nobody about it, and that

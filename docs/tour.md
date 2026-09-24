@@ -33,6 +33,11 @@ Two things about the wait, because they will be watching a quiet terminal:
   that, `Get-Content .\setup.ps1 -Raw | Invoke-Expression` works, because the rule is about
   running script *files*.
 
+**No NVIDIA card, or they say the laptop is weak?** Run `.\setup.ps1 -Engine pocket` instead.
+It skips Studio and the Qwen model entirely, installs Pocket TTS with pip — a few hundred
+MB, not 3 GB — and runs on the CPU. Abby still speaks; Cyrillic does not. Ask if you are
+unsure: Qwen on a machine with no card downloads everything and then fails at load.
+
 Useful flags, if the situation calls for one: `-ProjectDir $env:USERPROFILE` to speak in
 every project rather than this one, `-Build system` if they already have the CUDA runtime
 and want the 268 MB Studio instead of 663, `-PythonExe` or `-StudioDir` if your own checks

@@ -72,7 +72,7 @@ plugin download cannot carry. Then `/claude-voice:voice on` and she talks. After
 | | |
 |---|---|
 | **Windows** | the engine is a Windows build; there is no macOS or Linux one |
-| **An NVIDIA card** | both engine builds are CUDA builds, and there is no CPU build to fall back to |
+| **An NVIDIA card** | for Qwen. None? [`setup.ps1 -Engine pocket`](docs/install.md#no-graphics-card) runs on the CPU and skips the 3 GB |
 | **~4 GB of video memory** | **an estimate, not a measurement.** The models are 2.2 GB of weights and want room to work in. Only a 16 GB card has actually been run, so if you try it on a small one, say how it went |
 | **~3 GB of disk** | 0.8 GB of engine, 2.2 GB of models |
 | **Python** | fetched for you if you have none. Standard library only — no pip, no virtual environment |

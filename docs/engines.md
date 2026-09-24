@@ -13,7 +13,7 @@ Or the top dropdown in the panel, above the voice.
 
 | | **Qwen** | **Pocket TTS** |
 |---|---|---|
-| install | Studio, a GPU, and `qwen_engine.py` | `pip install pocket-tts` |
+| install | Studio, a GPU, and `qwen_engine.py` | `pip install pocket-tts`, or `setup.ps1 -Engine pocket` from scratch |
 | runs on | GPU | CPU, two cores |
 | first audio | 812 ms | **181 ms** |
 | throughput | 3.7–4.0× realtime | 4.0–4.5× realtime |

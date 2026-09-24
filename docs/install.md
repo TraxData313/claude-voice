@@ -24,7 +24,7 @@ locked-down laptop](#no-administrator-rights-needed).
 | | |
 |---|---|
 | **Windows** | the engine is a Windows build; there is no macOS or Linux one |
-| **An NVIDIA card** | both Studio builds below are CUDA builds. There is no CPU build to fall back to, and nothing here checks before it starts downloading — so on other hardware this fails at model load rather than at the door |
+| **An NVIDIA card** | for Qwen: both Studio builds below are CUDA builds, and nothing here checks before it starts downloading — so on other hardware this fails at model load rather than at the door. **No card? [Use Pocket TTS instead](#no-graphics-card)** |
 | **~4 GB of video memory** | **an estimate, not a measurement.** The talker is 1.94 GB and the tokenizer 0.27 GB, and both are loaded onto the card with room to work in. Only a 16 GB card has actually been run. If you try a smaller one, please [say how it went](https://github.com/TraxData313/claude-voice/issues) — it is the one number here nobody has established |
 | **~3 GB of disk** | 0.81 GB of unpacked engine, 2.2 GB of models |
 | **Python** | fetched for you if you have none. Standard library only |
@@ -70,6 +70,7 @@ says what it would do without writing anything.
 
 | | |
 |---|---|
+| `-Engine pocket` | no graphics card: [Pocket TTS on the CPU](#no-graphics-card), no Studio, no Qwen model |
 | `-ProjectDir $env:USERPROFILE` | speak in **every** project, not just this one |
 | `-Build system` | the smaller Studio (268 MB), if you already have the CUDA runtime |
 | `-StudioDir` · `-ModelDir` | put the engine or the models somewhere else |
@@ -81,6 +82,27 @@ that the engine stays warm and answers start speaking almost at once.
 
 Installing for one project and for every project both write a `/voice` command. Do one or
 the other, not both.
+
+## No graphics card
+
+```powershell
+.\setup.ps1 -Engine pocket
+```
+
+That skips Studio and the Qwen model altogether — none of the 3 GB above — and instead
+runs `pip install pocket-tts`, which brings torch's CPU build with it: a few hundred MB
+rather than three gigabytes. The speech model itself comes down from Hugging Face the
+first time the engine loads, and is cached from then on. `config.json` is written with
+`"engine": "pocket"`, so the Qwen model is never loaded.
+
+Abby comes along: her voice is baked for this engine in the repo, so she is the one
+speaking from the first word. What you give up is Cyrillic, and the rest of the voices in
+`voices\` — **[the two engines side by side →](engines.md)**
+
+Running `setup.ps1` or `install.ps1` again without `-Engine` keeps whichever engine
+`config.json` already names, so a re-run on this machine never starts fetching Studio.
+If you get a card later, `.\setup.ps1 -Engine qwen` fetches the rest, and the panel's
+engine dropdown switches between them.
 
 ## Python
 
@@ -95,8 +117,9 @@ with `PrependPath` writing to your own registry hive, and no elevation prompt. P
 it yourself? Tick **"Add python.exe to PATH"** in the installer, or use
 [Miniconda](https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe).
 
-Either way there is nothing to `pip install` — this uses the standard library only. No
-virtual environment, no requirements file.
+Either way there is nothing to `pip install` for Qwen — that road uses the standard library
+only. No virtual environment, no requirements file. Pocket TTS is the one exception, and
+`-Engine pocket` installs it for you.
 
 ## What gets fetched
 
