@@ -121,10 +121,20 @@ class TheTypingBox(unittest.TestCase):
     def test_a_mood_typed_beside_the_words_rides_with_them(self):
         one = self.typer()
         one.typed.insert("1.0", "hello there")
-        one.typed_mood.insert(0, "  sound tired ")
+        one.typed_mood.insert(0, "  sound tired but proud ")
         panel.Panel.speak_typed(one)
         self.assertEqual(one.sent["text"], "hello there")
-        self.assertEqual(one.sent["instruction"], "sound tired")
+        self.assertEqual(one.sent["instruction"], "sound tired but proud")
+
+    def test_a_box_that_only_names_a_mood_sends_the_mood(self):
+        # Typed by hand on 2026-09-24, and sent as three words she did not
+        # whisper. As the mood it gets the sentence that was heard working.
+        one = self.typer()
+        one.typed.insert("1.0", "I want to tell you a secret")
+        one.typed_mood.insert(0, "wisper this line")
+        panel.Panel.speak_typed(one)
+        self.assertEqual(one.sent["mood"], "whisper")
+        self.assertNotIn("instruction", one.sent)
 
     def test_no_mood_typed_is_no_mood_sent(self):
         one = self.typer()

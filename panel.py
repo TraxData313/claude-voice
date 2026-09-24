@@ -2461,8 +2461,10 @@ class Panel:
         mood = (self.typed_mood.get().strip()
                 if self.typed_mood is not None and self.typed_mood.winfo_exists() else "")
         if words:
-            # A mood's name goes as a mood, so the engine expands it into the
-            # whole instruction; anything else is an instruction already.
+            # A mood goes as a mood, so the engine expands it into the whole
+            # instruction -- spelt with a slip, or with "this line" around it,
+            # as a box typed into by hand gets it. Anything else is an
+            # instruction already.
             named_mood, _ = voice_lib.mood_instruction(mood)
             how = {"mood": named_mood} if named_mood else {"instruction": mood}
             self.act("/speak", {"text": words, "project": TYPED_PROJECT,

@@ -157,6 +157,38 @@ class Moods(unittest.TestCase):
         self.assertEqual(voice_lib.mood_instruction("grumpy-ish"), (None, ""))
         self.assertEqual(voice_lib.mood_instruction(None), (None, ""))
 
+    def test_one_slip_in_the_spelling_is_forgiven(self):
+        # "wisper" was typed into the panel on 2026-09-24, and went out as if
+        # no mood had been asked for.
+        for typed, mood in (("wisper", "whisper"), ("exited", "excited"),
+                            ("suprised", "surprised"), ("serius", "serious"),
+                            ("whipser", "whisper"), ("playfull", "playful"),
+                            ("cheerfull", "happy"), ("angery", "angry")):
+            self.assertEqual(voice_lib.mood_name(typed), mood, typed)
+
+    def test_a_short_word_one_letter_off_is_a_different_word(self):
+        for word in ("said", "made", "wary", "tire", "tried", "sappy", "series",
+                     "calmer", "whistle"):
+            self.assertIsNone(voice_lib.mood_name(word), word)
+
+    def test_no_spelling_of_a_sound_is_ever_taken_for_a_mood(self):
+        for aliases in voice_lib._EVENT_ALIASES.values():
+            for sound in aliases:
+                self.assertIsNone(voice_lib.mood_name(sound), sound)
+
+    def test_a_mood_with_nothing_else_said_about_the_sound(self):
+        for typed, mood in (("wisper this line", "whisper"), ("very sad, please", "sad"),
+                            ("in a whisper", "whisper"), ("say it sadly", "sad"),
+                            ("Excited!!", "excited")):
+            self.assertEqual(voice_lib.mood_name(typed), mood, typed)
+
+    def test_anything_more_is_somebody_s_own_instruction(self):
+        # Slowly is not in the whisper they would be given instead, "don't" is
+        # the opposite of asking, and two moods are a mix no preset is.
+        for typed in ("Whisper it slowly, like a secret", "don't whisper",
+                      "sad and slow", "whispering sadly", "please", ""):
+            self.assertIsNone(voice_lib.mood_name(typed), typed)
+
     def test_every_mood_is_a_whole_instruction_not_one_word(self):
         # The lesson of docs/engines.md: one adjective steers nothing.
         for name, words in voice_lib.MOODS.items():

@@ -174,10 +174,12 @@ the words, the way a script writes stage directions:
 - **Only a bracket with nothing but the mood in it counts.** `(sad, I know)` is an aside and
   stays one. Asterisks never carry a mood, because `*serious*` is emphasis far more often
   than it is a direction.
-- **Sounds are forgiving, moods are not.** `(laughs softly)`, `[giggles]` and `*sighs*` all
-  arrive as Breeze's own tags, because the model writing them has habits of its own. Between
-  asterisks, only a span that is nothing but the sound counts, standing where a stage
-  direction stands, so `*Laugh* tracks are gone` stays a sentence.
+- **Sounds are forgiving, moods only a little.** `(laughs softly)`, `[giggles]` and `*sighs*`
+  all arrive as Breeze's own tags, because the model writing them has habits of its own.
+  Between asterisks, only a span that is nothing but the sound counts, standing where a stage
+  direction stands, so `*Laugh* tracks are gone` stays a sentence. A mood forgives one slip
+  in a long name, `(wisper)`, for somebody typing into the panel, and never guesses at a
+  short one: `(said)` is not `(sad)`.
 - **On screen it stays**, as a stage direction. That is the price of having no second
   channel, and it reads as what it is.
 

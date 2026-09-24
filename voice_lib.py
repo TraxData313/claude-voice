@@ -6,6 +6,7 @@ Imported by speak_server.py (the engine host), speak_hook.py (the hooks)
 and voice_cli.py (the switch).
 """
 
+import difflib
 import json
 import math
 import os
@@ -1043,23 +1044,68 @@ _MOOD_ALIASES = {"whispering": "whisper", "whispered": "whisper", "whispers": "w
                  "shocked": "surprised", "teasing": "playful", "teasingly": "playful",
                  "playfully": "playful"}
 
+# And a slip of the keys. A mood typed into the panel by hand came out as
+# "wisper", which is no mood, and the line went out as though none had been
+# asked for, with nothing anywhere to say why. So one slip is forgiven, but only
+# in words of five letters or more: in a short one a letter makes a different
+# word, and "wary" is not "weary", nor "tire" "tired". Every spelling of every
+# sound was measured against these too, and none comes anywhere near a mood.
+_SPELT_OUT = sorted(w for w in set(MOODS) | set(_MOOD_ALIASES) if len(w) >= 5)
+
+# Words that point at the line, or say how much, and nothing about how it
+# sounds. "whisper this line" in the panel's box asks for the mood whisper, and
+# should get its whole instruction: sent as they were, its words are the weak
+# form docs/engines.md measured, where one word landed inside the sampler's own
+# spread and a verb with a few things about the delivery did not.
+_POINTING = {"a", "an", "the", "this", "that", "it", "line", "one", "text", "please",
+             "pls", "say", "read", "speak", "sound", "make", "be", "in", "with",
+             "voice", "tone", "very", "really", "so", "just"}
+
+
+def _mood_word(word):
+    """The mood one word names, forgiving one slip in a long word, or None."""
+    key = word.strip().lower()
+    key = _MOOD_ALIASES.get(key, key)
+    if key in MOODS:
+        return key
+    if len(key) < 5:
+        return None
+    near = difflib.get_close_matches(key, _SPELT_OUT, n=1, cutoff=0.85)
+    return _MOOD_ALIASES.get(near[0], near[0]) if near else None
+
+
+def mood_name(asked):
+    """The mood some words ask for, or None: "sad", "wisper", "whisper this line".
+
+    One mood and nothing else about the sound. "Whisper it slowly" asks for
+    slowly as well, which no mood here promises, so that is somebody's own
+    instruction and goes to the engine as they wrote it -- as does "don't
+    whisper", whose first word is no pointing word.
+    """
+    named = set()
+    for word in re.findall(r"[a-z]+", (asked or "").lower()):
+        if word in _POINTING:
+            continue
+        mood = _mood_word(word)
+        if not mood:
+            return None
+        named.add(mood)
+    return named.pop() if len(named) == 1 else None
+
 
 def mood_instruction(mood):
     """(name, instruction) for a mood, or (None, "") for one we do not know."""
-    key = (mood or "").strip().lower()
-    key = _MOOD_ALIASES.get(key, key)
-    return (key, MOODS[key]) if key in MOODS else (None, "")
+    name = mood_name(mood)
+    return (name, MOODS[name]) if name else (None, "")
 
 
 # A session has no field beside its words to put a mood in -- the text is all it
 # has -- so it writes the mood into the text as a stage direction, the way a
-# script does: "(whisper) I found it." Only a bracket holding nothing but a mood
-# counts, so a real aside in brackets is never taken for one, and only () or []:
-# "*sad*" is emphasis far more often than it is a direction. A link's text in
-# square brackets is not one either.
-_MOOD_WORD = "|".join(sorted((re.escape(w) for w in set(MOODS) | set(_MOOD_ALIASES)),
-                             key=len, reverse=True))
-_MOOD_MARK = re.compile(rf"\(\s*({_MOOD_WORD})\s*\)|\[\s*({_MOOD_WORD})\s*\](?!\()", re.I)
+# script does: "(whisper) I found it." Only a bracket holding one word, and that
+# word a mood, counts, so a real aside in brackets is never taken for one, and
+# only () or []: "*sad*" is emphasis far more often than it is a direction. A
+# link's text in square brackets is not one either.
+_MOOD_MARK = re.compile(r"\(\s*([a-z]+)\s*\)|\[\s*([a-z]+)\s*\](?!\()", re.I)
 
 
 def direction(text):
@@ -1080,13 +1126,16 @@ def direction(text):
     asked = []
 
     def take(match):
-        asked.append(next(g for g in match.groups() if g))
+        mood = _mood_word(next(g for g in match.groups() if g))
+        if not mood:
+            return match.group(0)            # an aside, left exactly as written
+        asked.append(mood)
         return " "
 
     out = _MOOD_MARK.sub(take, text)
     if not asked:
         return None, text
-    mood, _ = mood_instruction(asked[0])
+    mood = asked[0]
     # A direction on a line of its own was given a full stop by clean_text, and
     # that stop is left behind: "(sad). It failed" and "Done. (sad). Next".
     out = re.sub(r"([.!?,;:])(?:\s*[.,;:])+", r"\1", out)

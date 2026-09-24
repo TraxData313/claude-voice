@@ -1894,21 +1894,24 @@ def _capabilities(state, loaded):
 def _delivery(payload, written=None):
     """(instruction, mood, unknown) for a /speak request.
 
-    An instruction in the caller's own words wins, being the most specific.
-    Then a mood by name in its own field -- "sad" becomes the whole sentence
-    that was measured to work -- and last a mood written into the text, which
-    is all a caller with no field of its own can do. `unknown` is a name that
-    was asked for and is no mood, so the reply can say so rather than leave the
-    caller believing it was heard that way.
+    An instruction in the caller's own words wins, being the most specific --
+    unless all it says is a mood. "whisper this line" is the mood whisper, and
+    gets that mood's whole sentence rather than three words that would barely
+    move it. Then a mood by name in its own field -- "sad"
+    becomes the whole sentence that was measured to work -- and last a mood
+    written into the text, which is all a caller with no field of its own can
+    do. `unknown` is a name that was asked for and is no mood, so the reply can
+    say so rather than leave the caller believing it was heard that way.
     """
     instruction = (payload.get("instruction") or "").strip()[:MAX_INSTRUCTION]
     asked = (payload.get("mood") or "").strip()
     named, preset = voice_lib.mood_instruction(asked)
     unknown = asked if asked and not preset and not instruction else None
+    if instruction:
+        named, preset = voice_lib.mood_instruction(instruction)
+        return (preset, named, unknown) if preset else (instruction, None, unknown)
     if not preset:
         named, preset = voice_lib.mood_instruction(written)
-    if instruction:
-        return instruction, None, unknown
     return preset, (named if preset else None), unknown
 
 

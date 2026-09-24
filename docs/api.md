@@ -90,6 +90,14 @@ yet.
 delivery. One adjective steers nothing — [measured](engines.md#telling-qwen-how-to-say-it) —
 and that is why the names above expand to sentences rather than being sent as they are.
 
+**A near miss still lands.** An `instruction` that names one mood and says nothing else about
+the sound — `whisper this line`, `very sad, please` — is taken as that mood, and gets its
+whole sentence. `whisper it slowly` asks for more than the mood does, so it goes as written.
+And one slip in a name of five letters or more is forgiven, anywhere a mood is read:
+`wisper` is `whisper`. That was a line typed into the panel, which went out plain with
+nothing to say why. The short names are never guessed at, because one letter off `sad` is
+`said`.
+
 Breeze performs a mood strongly. Qwen performs it too, more gently — the same sad
 instruction there is "a little sad", in Toni's words. Pocket ignores it.
 
@@ -97,8 +105,9 @@ instruction there is "a little sad", in Toni's words. Pocket ignores it.
 found it.` That is how a Claude session asks, having no field of its own, and anything else
 may do the same, a line typed into the panel included. The direction comes out of the words
 whether or not it is used, so it is never read aloud, and a `mood` or an `instruction` sent
-in its own field wins over it. Only a bracket holding nothing but one of the names above, or
-a spelling like `whispering` or `softly`, counts.
+in its own field wins over it. Only a bracket holding one word counts, and only when that
+word is one of the names above, a spelling like `whispering` or `softly`, or one slip off
+either.
 **[What a session is told, and when →](writing-for-the-ear.md#a-mood-and-a-laugh-when-the-engine-has-them)**
 
 A mood can slow a line down a great deal — that is often the point — so a line with one is

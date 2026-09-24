@@ -69,9 +69,17 @@ class AMoodWrittenIntoTheLine(unittest.TestCase):
                               ("(playfully)", "playful"), ("(gently)", "calm")):
             self.assertEqual(voice_lib.direction(f"{written} Hello.")[0], mood, written)
 
+    def test_a_slip_in_the_spelling_still_lands_on_the_mood(self):
+        # Typed into the panel by hand, and read out as no mood at all.
+        self.assertEqual(voice_lib.direction("(wisper) I want to tell you a secret"),
+                         ("whisper", "I want to tell you a secret"))
+        self.assertEqual(voice_lib.direction("[exited] It works!"), ("excited", "It works!"))
+
     def test_an_aside_in_brackets_is_not_a_direction(self):
         for line in ("(sad, I know) the build is red.", "Option one (recommended).",
-                     "It returns (None) when empty."):
+                     "It returns (None) when empty.", "A flat (tire), again.",
+                     "Keep a (wary) eye on it.", "Delete the file(s) first.",
+                     "- [x] done"):
             self.assertEqual(voice_lib.direction(line), (None, line))
 
     def test_a_link_is_not_a_direction(self):
@@ -320,6 +328,17 @@ class WhatSpeakMakesOfIt(unittest.TestCase):
 
     def test_nothing_asked_is_nothing_sent(self):
         self.assertEqual(speak_server._delivery({}), ("", None, None))
+
+    def test_an_instruction_that_only_names_a_mood_is_that_mood(self):
+        # What the panel's box held on 2026-09-24. Sent as three words it did
+        # not whisper; the mood's whole sentence is the one heard working.
+        self.assertEqual(speak_server._delivery({"instruction": "wisper this line"}, None),
+                         (voice_lib.MOODS["whisper"], "whisper", None))
+
+    def test_an_instruction_that_says_more_is_kept_as_written(self):
+        for words in ("Whisper it slowly, like a secret", "don't whisper"):
+            self.assertEqual(speak_server._delivery({"instruction": words}, "sad"),
+                             (words, None, None), words)
 
 
 class Watcher(unittest.TestCase):
