@@ -6,10 +6,10 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
-## Unreleased
+## 1.16.0 — 2026-09-25
 
-**A menu that says where the gigabytes are, Abby on every engine, and a moved folder can no
-longer lock Claude Code out.**
+**A new voice, Neya; adding an engine keeps the old one talking; a menu that says where the
+gigabytes are; and a moved folder can no longer lock Claude Code out.**
 
 - **A new voice: Neya**, the author's own, right after Abby in the list — on Qwen, Breeze and
   Pocket alike.
