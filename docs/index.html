@@ -7,7 +7,7 @@
      "Abby for Claude" at any normal tab width. The tail is for search results,
      where a title carrying no words anybody types is a page nobody finds. -->
 <title>Abby for Claude — local text-to-speech for Claude Code</title>
-<meta name="description" content="Listen to Abby and Max, the two voices that ship with claude-voice: Claude Code reads its answers aloud on your own machine, with no cloud, no API key and no audio leaving the computer.">
+<meta name="description" content="Listen to Abby, Neya and Max, the three voices that ship with claude-voice: Claude Code reads its answers aloud on your own machine, with no cloud, no API key and no audio leaving the computer.">
 <link rel="canonical" href="https://traxdata313.github.io/claude-voice/">
 <link rel="icon" href="icons/abby-48.png">
 
@@ -20,7 +20,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="claude-voice">
 <meta property="og:title" content="claude-voice — Claude Code, out loud. Locally.">
-<meta property="og:description" content="Hear Abby and Max, the two voices that ship with claude-voice. Local text to speech for Claude Code: no cloud, no API key, no audio leaving the machine.">
+<meta property="og:description" content="Hear Abby, Neya and Max, the three voices that ship with claude-voice. Local text to speech for Claude Code: no cloud, no API key, no audio leaving the machine.">
 <meta property="og:url" content="https://traxdata313.github.io/claude-voice/">
 <meta property="og:image" content="https://traxdata313.github.io/claude-voice/og.png">
 <meta property="og:image:width" content="1200">
@@ -96,9 +96,11 @@
   .banner { width: 100%; height: auto; display: block; }
   h1 { font-size: 26px; margin: 40px 0 6px; }
   .lede { color: var(--dim); margin: 0 0 28px; font-size: 15px; }
-  .voices { display: flex; flex-wrap: wrap; gap: 22px; }
+  /* A grid rather than wrapping flex: with three voices, flex left the last one
+     alone on a row of its own, stretched to the whole width. */
+  .voices { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 22px; }
   .card {
-    flex: 1 1 360px; background: var(--paper); color: var(--ink);
+    background: var(--paper); color: var(--ink);
     border: 4px solid var(--ink); border-radius: 26px; overflow: hidden;
   }
   /* The illustrations are landscape and the faces sit high in them, so the
@@ -118,9 +120,9 @@
     border: 2px dashed rgba(87, 207, 192, .5); color: var(--dim); font-size: 14px;
   }
   a { color: var(--teal); }
-  .install { margin-top: 44px; }
-  .install h2 { font-size: 26px; margin: 0 0 6px; }
-  .install p { font-size: 15px; }
+  .install, .engines { margin-top: 44px; }
+  .install h2, .engines h2 { font-size: 26px; margin: 0 0 6px; }
+  .install p, .engines p { font-size: 15px; }
   /* The line is meant to be taken away, so the button sits inside the block it
      copies and the padding on the right keeps the text from running under it. */
   .paste {
@@ -171,7 +173,7 @@
 
   <h1>Hear the voices</h1>
   <p class="lede">
-    Both ship with the repo, and both are spoken entirely on your own machine —
+    All three ship with the repo, and all three are spoken entirely on your own machine —
     no cloud, no API key, nothing leaving the computer.
   </p>
 
@@ -184,6 +186,16 @@
            for careful work, tricky debugging, and being talked through
            something gently.</p>
         <audio controls preload="metadata" src="samples/abby.wav"></audio>
+      </div>
+    </div>
+    <div class="card">
+      <img src="art/neya.jpg" alt="Neya">
+      <div class="who">
+        <h2>Neya</h2>
+        <p>Soft-spoken, emotionally intuitive, young and calming. Grounded and
+           gently reassuring — for thoughtful deep dives, empathetic listening,
+           and navigating complex ideas at a comfortable pace.</p>
+        <audio controls preload="metadata" src="samples/neya.wav"></audio>
       </div>
     </div>
     <div class="card">
@@ -200,7 +212,7 @@
   <p class="lede after">
     <img src="flags/us.png" height="15" alt="US"> <strong>English</strong> and
     <img src="flags/ru.png" height="15" alt="RU"> <strong>Russian</strong> are tested, and both sound
-    right — Russian included, though both voices were cloned from English. 🌐 Most widely
+    right — Russian included, though the voices were cloned from English. 🌐 Most widely
     used languages should read normally too: the model underneath is multilingual, and
     nothing in between cares which alphabet it is handed. A less widely spoken one may be
     taken for its bigger neighbour, though — <img src="flags/bg.png" height="15" alt="BG">
@@ -230,14 +242,40 @@ in it: set it up, turn it on, and give me the spoken tour.</pre>
       <a href="https://github.com/TraxData313/claude-voice/blob/main/docs/install.md">By
       hand, other builds, every-project install →</a>
     </p>
+    <p>
+      Never opened a terminal?
+      <a href="https://github.com/TraxData313/claude-voice/releases/latest/download/ClaudeVoiceSetup.exe"><strong>ClaudeVoiceSetup.exe</strong></a>
+      does all of it in one window.
+    </p>
+  </section>
+
+  <section class="engines">
+    <h2>Three engines</h2>
+    <p>
+      <strong>Qwen</strong> is the original: it reads every alphabet and wants an NVIDIA
+      card. <strong>Pocket</strong> needs no graphics card at all and runs on any PC.
+      <strong>Breeze</strong> acts as well as reads — it laughs, sighs and whispers where the
+      text asks it to — and wants a 16 GB card. Switch between them from the panel whenever
+      you like.
+      <a href="https://github.com/TraxData313/claude-voice/blob/main/docs/engines.md">What
+      each costs and can do →</a>
+    </p>
+    <p>
+      <strong>Games can speak through it too.</strong>
+      <a href="https://github.com/TraxData313/ImmersiveAI">Immersive AI</a> for
+      <em>Mount &amp; Blade II: Bannerlord</em> gives every character in Calradia a voice of
+      their own through it, installed right from the game.
+      <a href="https://github.com/TraxData313/claude-voice/blob/main/docs/api.md#for-a-game">What
+      a game needs →</a>
+    </p>
   </section>
 
   <p class="note">
-    <strong>What it wants:</strong> Windows, an NVIDIA card, and about 3 GB of disk for the
-    engine and the model. No administrator rights at any point, and nothing to sign up for.
-    Roughly 4 GB of video memory should do it — that one is an estimate rather than a
-    measurement, and the <a href="https://github.com/TraxData313/claude-voice#what-it-needs">repository
-    says plainly why</a>.
+    <strong>What it wants:</strong> Windows, and about 3 GB of disk for the engine and the
+    model. No administrator rights at any point, and nothing to sign up for. Qwen wants an
+    NVIDIA card with roughly 4 GB of video memory — an estimate rather than a measurement,
+    and the <a href="https://github.com/TraxData313/claude-voice#what-it-needs">repository
+    says plainly why</a>. No such card? Pocket runs on the processor instead.
   </p>
 
   <p class="note">
@@ -268,7 +306,7 @@ in it: set it up, turn it on, and give me the spoken tour.</pre>
 
   <footer>
     <p>With thanks to <strong>Genndy Tartakovsky</strong>, whose <em>Samurai Jack</em> is why
-    Abby and Max look the way they do. The characters are ours; the debt is to the style.</p>
+    Abby, Neya and Max look the way they do. The characters are ours; the debt is to the style.</p>
     <p>created by <a href="https://github.com/TraxData313">TraxData313</a> ·
     <a href="https://github.com/TraxData313/claude-voice">GitHub repo</a></p>
     <p>This page counts visits with <a href="https://www.goatcounter.com/">GoatCounter</a>:

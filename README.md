@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://traxdata313.github.io/claude-voice/"><strong>▶&nbsp; Demo — hear the voices</strong></a>
   <br>
-  <sub>Abby and Max, 5 seconds each</sub>
+  <sub>Abby, Neya and Max, a few seconds each</sub>
 </p>
 
 <p align="center">
@@ -140,14 +140,15 @@ twice a second:
 
 ## The voices
 
-Two ship with it, both the author's own — original characters, borrowed from nobody:
+Three ship with it, all the author's own — original characters, borrowed from nobody:
 
 | | | |
 |---|---|---|
 | <img src="docs/art/abby.jpg" width="300" alt="Abby"> | **Abby** | Cute, slightly nerdy, young and warm. Calm, never in a hurry — for careful work, tricky debugging, and being talked through something gently. |
+| <img src="docs/art/neya.jpg" width="300" alt="Neya"> | **Neya** | Soft-spoken, emotionally intuitive, young and calming. Grounded and gently reassuring — for thoughtful deep dives, empathetic listening, and navigating complex ideas at a comfortable pace. |
 | <img src="docs/art/max.jpg" width="300" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — for grinding through a long list. |
 
-▶ **[Hear them both](https://traxdata313.github.io/claude-voice/)** — GitHub will not play
+▶ **[Hear all three](https://traxdata313.github.io/claude-voice/)** — GitHub will not play
 audio inside a README, so the samples live on a page of their own.
 
 > *With thanks to **Genndy Tartakovsky**, whose* Samurai Jack *is why they look the way they
@@ -160,7 +161,7 @@ embedding is a clone of a real person, so that folder has rules.
 
 | | |
 |---|---|
-| <img src="docs/flags/us.png" height="20" alt="US"> **English** | tested — both voices were cloned from it |
+| <img src="docs/flags/us.png" height="20" alt="US"> **English** | tested — the voices were cloned from it |
 | <img src="docs/flags/ru.png" height="20" alt="RU"> **Russian** | tested — Abby reads it genuinely well |
 | <img src="docs/flags/bg.png" height="20" alt="BG"> **Bulgarian** | reads, but in a **Russian accent** |
 | 🌐 **most others** | should read normally — untested, so try one |
