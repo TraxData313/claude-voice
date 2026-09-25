@@ -1,0 +1,15 @@
+{
+    "Id":  "neya-j",
+    "Name":  "Neya J",
+    "Backend":  0,
+    "RemoteVoiceId":  "",
+    "Dimension":  2048,
+    "ReferenceText":  "",
+    "Gender":  1,
+    "Note":  "Cloned in Qwen-TTS Studio (Studio id voice-1790340987175); the source recording was not kept.",
+    "Source":  "Qwen-TTS Studio",
+    "CreatedUtc":  "2026-09-25T12:56:28Z",
+    "Persona":  "",
+    "Style":  "the original",
+    "PocketLanguage":  "english"
+}

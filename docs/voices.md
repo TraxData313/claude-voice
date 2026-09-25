@@ -9,9 +9,11 @@ they never said. Treat the `voices/` folder accordingly.
 | voice | | |
 |---|---|---|
 | `abby` | female | the author's own |
+| `neya-s` | female | the author's own |
+| `neya-j` | female | the author's own |
 | `max` | male | the author's own |
 
-Both were made from recordings their owner is entitled to clone. That is the whole test
+All four were made from recordings their owner is entitled to clone. That is the whole test
 for anything added to this folder.
 
 ## What may go in `voices/`
