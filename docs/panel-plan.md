@@ -673,3 +673,25 @@ The one thing the old design got right and had to keep saying out loud is that *
 and *I never want to hear that* are two different wishes. They are two buttons now, side by
 side: pause holds, ⏭ skip all empties. Turning the voice off altogether stayed a setting,
 where a setting belongs.
+
+## The cog became three bars (2026-09-25)
+
+"Replace this cog wheel with a more modern menu button, like three lines above each other, and
+maybe place it on the top left, and there in the menu show some info where the models reside."
+So the strip's one button moved left, and every folder an engine keeps, each with its size, each
+opened in Explorer by a click, went where it can be found.
+
+- **A menu for one morning, then Settings again.** It first dropped a menu -- Settings, then the
+  folders -- and the same day's playtest asked for the button to open Settings straight away,
+  with the folders at the top of that window, "the first thing to see". One click to the window
+  that is wanted, and the question a many-gigabyte download leaves behind -- *where did it go* --
+  answered first. The sizes come from `POST /storage`, which gained a `sizes` list for this --
+  Qwen's model and its engine are two folders and two answers.
+- **Measured before it is asked for.** The engine walks its folders at most once in ten minutes;
+  the panel asks soon after it opens and again each time Settings opens, shows the last answer
+  at once and redraws the rows when the fresh one arrives. A click never waits on a disk.
+- **Windows' own bars** (Segoe MDL2's GlobalNavigationButton, U+E700), the ones its own apps
+  draw; U+2630, a trigram that happens to look like a menu, behind it; the word *menu* behind
+  that. The same three ways down the cog had.
+- **The biggest folder first**, because it is the one the question is about, and it carries the
+  "(speaking)" when its engine is the one talking.

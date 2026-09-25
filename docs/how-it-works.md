@@ -444,6 +444,16 @@ nothing in it since August. The command is written with forward slashes now, whi
 Windows, bash and cmd.exe all read the same way, and `voice status` checks the settings
 and says under *hooks* whether they can run.
 
+**A moved folder locked Claude Code out.** The folder was set aside on 2026-09-25 to try a
+game's fresh install, and every prompt and every tool call of the open session came back
+*A hook blocked your prompt*. The hook line was `python speak_hook.py`, python exits with
+2 when the script is not there, and 2 is the one exit code Claude Code reads as *block* —
+for a Stop hook it even means "do not let the answer end". A speech hook had become a lock,
+and the session could not so much as read a file to find out why. The installer now writes
+a line that runs the hook through a sliver of Python — `runpy`, the same argv, the hook's
+own folder first on the path and never the project's — and exits 0 when the file is gone.
+`voice status` calls the old line *the old kind*, and `test_hooks.py` holds both halves.
+
 **One reply cost a whole summary.** Abby's room sends her replies to take the floor, so that
 a reply is not stuck behind her own asides. Taking the floor meant `cancel()`, which is
 stop, and the room is not the only one talking. A session's TL;DR, 425 characters, had

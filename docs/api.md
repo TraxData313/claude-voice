@@ -154,7 +154,7 @@ performed than you expected — somebody may have switched engines.
 | `POST /health` | whether it is up, which version, and whether a mood or a sound would be performed |
 | `POST /voices` | every voice the engine speaking now can use, each with its `sex` and `culture` |
 | `POST /voice-roots` `{"add": "C:\\…"}` | also read the voices in that folder, where they lie. `remove` takes one away |
-| `POST /storage` | where each engine's files are on disk and how many bytes they take, and the app's own folder |
+| `POST /storage` | where each engine's files are on disk and how many bytes they take (`bytes` in all, `sizes` folder by folder), and the app's own folder |
 | `POST /panel` | opens the panel window, or raises the one already open |
 | `POST /quit` | closes the engine and hands its memory back |
 

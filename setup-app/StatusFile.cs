@@ -87,14 +87,19 @@ namespace ClaudeVoiceSetup
             catch { return null; }
         }
 
+        /// <summary>Why the last append failed, empty when it did not. The status file carries it: a log
+        /// that cannot be written is no place to say so.</summary>
+        public static string LogError { get; private set; } = "";
+
         public static void AppendLog(string text)
         {
             try
             {
                 Directory.CreateDirectory(Folder);
                 File.AppendAllText(LogPath, text);
+                LogError = "";
             }
-            catch { }
+            catch (Exception ex) { LogError = ex.GetType().Name + ": " + ex.Message; }
         }
     }
 }

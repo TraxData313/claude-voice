@@ -183,7 +183,10 @@ if ($hasStudio) {
     # that does point at a real Studio is kept, wherever it is.
     foreach ($k in "studioDir", "modelDir", "talker") { $cfg.PSObject.Properties.Remove($k) }
 }
-Set-Prop $cfg "engine" $Engine
+# Not Breeze, though: setup.ps1 fetches it after this script and names it the engine only once it
+# is really there. Named here, a Breeze install stopped halfway left the app pointing at an engine
+# that did not exist, and the next line anything spoke tried to load it (2026-09-25).
+if ($Engine -ne "breeze") { Set-Prop $cfg "engine" $Engine }
 # Installed for a program, not for Claude Code: nothing here should start
 # reading Claude Code's or Codex's transcripts aloud just because the switch
 # is on. The HTTP API speaks whatever the switch says; only the watcher is off.
@@ -225,12 +228,30 @@ $hookScript = Join-Path $repo "speak_hook.py"
 # only in the transcript, as a non-blocking error, while the watcher goes on
 # speaking -- so this was broken from the day it was written and sounded fine.
 # Windows takes forward slashes in a path as readily as its own, and so does
-# cmd.exe. Quoted only when a path has a space in it, and then the way bash
-# quotes, since bash is what reads it.
+# cmd.exe. Quoted when a path holds anything bash would read as syntax -- a
+# space, a bracket, an apostrophe -- and then the way bash quotes, since bash is
+# what reads it.
+#
+# And never a bare "python speak_hook.py". Python exits with 2 when the script
+# it is handed is not there, and 2 is the one exit code Claude Code reads as
+# "block": every prompt refused, every tool call refused, and a Stop hook that
+# will not let an answer end -- all because this folder was moved, renamed or
+# deleted by hand, which is exactly when nobody is thinking about hooks. It
+# locked a whole session out on 2026-09-25, when the folder was set aside to
+# try a fresh install. So the hook is a line of Python that runs speak_hook.py
+# the way "python speak_hook.py" would -- the same argv, its own folder first
+# on the path and never the project's -- and exits 0 without a word when the
+# file is gone. python.exe itself gone is bash's 127, which Claude Code shrugs at.
+function Bash-Word([string]$path) {
+    if ($path -notmatch '[^A-Za-z0-9_./:+,=@-]') { return $path }
+    return '"' + $path.Replace('$', '\$').Replace('`', '\`') + '"'
+}
+$guard = 'import os,runpy,sys;h=sys.argv[1];os.path.isfile(h) or sys.exit(0);' +
+         'sys.argv=[h];sys.path[:]=[os.path.dirname(h)]+[p for p in sys.path if p];' +
+         'runpy.run_path(h,run_name=''__main__'')'
 $pyFwd = $PythonExe.Replace('\', '/')
 $hookFwd = $hookScript.Replace('\', '/')
-$command = if ("$pyFwd$hookFwd" -match '\s') { "`"$pyFwd`" `"$hookFwd`"" }
-           else { "$pyFwd $hookFwd" }
+$command = "$(Bash-Word $pyFwd) -c `"$guard`" $(Bash-Word $hookFwd)"
 
 # On an object with no properties at all, PSObject.Properties.Name is null in
 # PowerShell 5.1 and calling .Contains() on it throws -- which is precisely the

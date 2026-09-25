@@ -310,6 +310,9 @@ class Speaker:
         self.hist_lock = threading.Lock()
         self.ready = threading.Event()
         self.error = None
+        # Set when an engine is picked while none is running, so the engine
+        # thread loads it at once instead of waiting for something to be said.
+        self.nudge = threading.Event()
         self.speaking = False
         # Which engine is actually loaded, as against which one the config asks
         # for. They differ for as long as it takes the next message to arrive,
@@ -732,28 +735,47 @@ class Speaker:
             rec["wavs"].append(dest)
 
     def _engine_loop(self):
+        eng = None
         try:
             self.engine_name, eng = build_engine(self.state)
             log(f"engine ready ({self.engine_name})")
         except Exception as exc:
+            # The thread carries on without an engine rather than ending here.
+            # It used to return, and then nothing short of a restart brought
+            # the voice back -- not even picking an engine that works, which is
+            # what anybody does next (an app left naming a Breeze whose install
+            # was stopped halfway, 2026-09-25). With no engine in hand, the
+            # next message, or the next pick, tries whatever the config names.
             self.error = exc
+            self.engine_name = voice_lib.engine_of(self.state)
             log(f"engine failed to start: {exc}")
-            self.ready.set()
-            return
         self.ready.set()
 
         while True:
-            job = self.jobs.get()
-            with self.lock:
-                self.current = job
+            try:
+                job = self.jobs.get(timeout=1.0)
+            except queue.Empty:
+                # Idle. Nothing to do unless an engine was picked while none
+                # was running (see /set-engine): then it loads now, and the
+                # voice is back before anything has to be said to find out.
+                if not self.nudge.is_set():
+                    continue
+                self.nudge.clear()
+                job = None
+            if job is not None:
+                with self.lock:
+                    self.current = job
             # Changing engine is a config edit like any other, and it takes
             # effect here -- on the next thing said, not on a restart. Loading
             # the other model costs seconds, so doing it when a message arrives
             # rather than when the dropdown moves means the wait lands where
             # somebody is already waiting for speech.
             want = voice_lib.engine_of(self._live())
-            if want != self.engine_name:
-                log(f"switching engine: {self.engine_name} -> {want}")
+            if want != self.engine_name or eng is None:
+                if eng is None:
+                    log(f"starting engine: {want}")
+                else:
+                    log(f"switching engine: {self.engine_name} -> {want}")
                 # Closed before the new one is built, never after. Only one
                 # model is ever resident: whichever engine is not speaking is
                 # not loaded, and the two numbers in this log say so rather
@@ -764,14 +786,15 @@ class Speaker:
                 # life -- the model weights go, the runtime around them does
                 # not -- so a run that has used Qwen keeps a floor under it.
                 before = rss_mb()
+                had = eng is not None
                 try:
-                    if eng is not None:
+                    if had:
                         eng.close()
                 except Exception as exc:
                     log(f"the old engine did not close cleanly: {exc}")
                 eng = None
                 freed = rss_mb()
-                if before and freed:
+                if had and before and freed:
                     log(f"  unloaded {self.engine_name}: "
                         f"{before:.0f} MB -> {freed:.0f} MB")
                 try:
@@ -790,6 +813,8 @@ class Speaker:
                     with self.lock:
                         self.current = None
                     continue
+            if job is None:
+                continue
             # Read the config again here rather than trusting the snapshot this
             # process started with. Playback mode is the one setting somebody
             # changes *because* the voice is breaking up, and "restart the
@@ -1968,7 +1993,10 @@ def _storage(state):
     """The folders behind each engine, with their sizes. See the /storage route."""
     def entry(dirs):
         dirs = [d for d in dirs if d and os.path.isdir(d)]
-        return {"dirs": dirs, "bytes": sum(_folder_bytes(d) for d in dirs)}
+        # Each folder's own size beside the total, so the panel's menu can say
+        # that Qwen's model is 2.2 GB of the 3 without walking the disk again.
+        sizes = [_folder_bytes(d) for d in dirs]
+        return {"dirs": dirs, "bytes": sum(sizes), "sizes": sizes}
 
     engines = {}
     engines["qwen"] = entry([state.get("studioDir"), state.get("modelDir")])
@@ -2070,7 +2098,8 @@ def _voice_list(state, ttl=15.0):
             _VOICES["rows"] = [{"id": v["id"], "name": v["name"],
                                 "culture": v["culture"], "sex": v["sex"],
                                 "style": v.get("style") or "",
-                                "tag": v.get("tag") or ""}
+                                "tag": v.get("tag") or "",
+                                "added": voice_lib.is_added_voice(v, state)}
                                for v in voice_lib.catalog(state, engine)]
         except (OSError, ImportError, LookupError):
             _VOICES["rows"] = []
@@ -2265,9 +2294,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._reply(404, {"error": str(exc)})
             # The model is not loaded here. The engine thread picks the change
             # up when the next message arrives, so that this returns at once
-            # and the dropdown does not sit frozen for the length of a load.
+            # and the dropdown does not sit frozen for the length of a load --
+            # unless no engine is running at all, when waiting for a message
+            # would only leave the window saying "not running" after somebody
+            # picked one that works. Then the thread is woken to load it now.
             log(f"engine set to {engine}"
                 + (f", voice {voice['id']}" if voice else ""))
+            if sp.error is not None:
+                sp.nudge.set()
             return self._reply(200, {
                 "engine": engine,
                 "voice": voice["id"] if voice else None,

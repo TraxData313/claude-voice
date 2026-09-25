@@ -6,6 +6,44 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## Unreleased
+
+**A menu that says where the gigabytes are, Abby on every engine, and a moved folder can no
+longer lock Claude Code out.**
+
+- **A new voice: Neya**, the author's own, right after Abby in the list — on Qwen, Breeze and
+  Pocket alike.
+- **Switching engines keeps the voice you are using**, wherever the new engine has her too.
+  It used to bring back whoever last spoke on that engine — Neya on Qwen became Abby on Pocket.
+- **Three bars at the top left instead of the cog at the top right**, opening Settings — which
+  now starts with where every engine keeps its files: each folder with its size, opened in
+  Explorer by a click.
+- **"Hide game voices" in Settings** leaves the voices a game added — Calradia's ninety-odd people
+  from Immersive AI — out of the voice list, so your own stay at the top. The game still speaks
+  with all of them, and the voice in use is never hidden.
+- **Adding an engine no longer silences the one you have.** Adding Breeze from a game used to stop
+  the voices for the whole twenty-minute download, and stopping that install left nothing
+  running at all. The old engine now talks until the new one is ready, and a stopped install
+  leaves everything as it was.
+- **Picking a working engine brings the voice back** after one failed to load. It used to stay
+  silent until the app was restarted.
+- **PyTorch's 2.9 GB download has a real counter** during a Breeze install, instead of "no
+  counter" for long enough to look stuck — and the packages after it say which one is coming.
+- **Abby first on every engine that has her.** A first switch to Pocket used to land on its own
+  default, a man's voice drawn with Max's face; where Pocket cannot clone, a woman's voice of
+  its own.
+- **A game's quiet install puts the icon on the Desktop**, as the setup window already did, so a
+  player can see a program now lives on the computer. Uninstalling takes it away.
+- **Uninstalling takes the setup's log too**, so no `claude-voice` folder is left behind in
+  AppData holding nothing but it.
+- **`POST /storage` gives each folder's size** (`sizes`) beside the engine's total.
+- **The hook line steps aside when its file is gone.** It used to be a bare
+  `python speak_hook.py`, and python's exit code for a missing script is the one Claude Code
+  reads as "block", so a moved folder refused every prompt and every tool call. It exits 0
+  now, and never lets a `json.py` in your project stand in for Python's own.
+- **`voice status` says so** when your hooks are the old kind. Running `setup.ps1` again
+  writes the new line.
+
 ## 1.15.0 — 2026-09-25
 
 **A game can install it with no window of its own, show every step, and show — and take away —

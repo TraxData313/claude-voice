@@ -489,8 +489,11 @@ def install(target, say=print):
                     shutil.rmtree(p["env"], ignore_errors=True)
                     _run([_console_python(), "-m", "venv", p["env"]], log, env=env)
                 elif step == "torch":
+                    # "raw" has pip write "Progress <bytes> of <total>" lines into the log,
+                    # which is what lets a setup draw a real bar for these 2.9 GB. Without it
+                    # the step sat on "no counter" long enough to look stuck (2026-09-25).
                     _run([p["python"], "-m", "pip", "install", *TORCH,
-                          "--index-url", TORCH_INDEX], log, env=env)
+                          "--index-url", TORCH_INDEX, "--progress-bar", "raw"], log, env=env)
                 elif step == "cuda":
                     found = _check_cuda(p, log, env)
                     say(f"      torch {found['torch']} sees the card")
@@ -501,8 +504,8 @@ def install(target, say=print):
                     with open(pins, "w", encoding="utf-8") as fh:
                         fh.write(CONSTRAINTS)
                     _run([p["python"], "-m", "pip", "install", "-r",
-                          os.path.join(p["code"], "requirements.txt"), "-c", pins, TRITON],
-                         log, env=env)
+                          os.path.join(p["code"], "requirements.txt"), "-c", pins, TRITON,
+                          "--progress-bar", "raw"], log, env=env)
                 elif step == "weights":
                     fetch = ("from huggingface_hub import snapshot_download; "
                              f"snapshot_download(repo_id={WEIGHTS_REPO!r}, "

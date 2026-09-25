@@ -488,21 +488,29 @@ if ($ProjectDir) { Claim "project" $ProjectDir }
 Save-Claims
 if (-not $WhatIf -and -not (Test-Path (Join-Path $repo ".git"))) {
     $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\claude-voice"
-    $ver = try { ([System.IO.File]::ReadAllText((Join-Path $repo "version.json")) | ConvertFrom-Json).version } catch { "" }
-    $size = [int]((Get-ChildItem $repo -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1KB)
-    New-Item -Path $key -Force | Out-Null
-    $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $repo 'uninstall.ps1')`""
-    $values = @{
-        DisplayName = "claude-voice"; DisplayVersion = $ver; Publisher = "TraxData313"
-        InstallLocation = $repo; DisplayIcon = (Join-Path $repo "docs\icons\abby.ico")
-        UninstallString = $uninstall; QuietUninstallString = "$uninstall -Yes"
-        URLInfoAbout = "https://github.com/TraxData313/claude-voice"
+    # Said either way, and checked rather than assumed: installs a game started have come out of
+    # here with no entry and no error to show for it (2026-09-25), while every run from a shell
+    # left one.
+    try {
+        $ver = try { ([System.IO.File]::ReadAllText((Join-Path $repo "version.json")) | ConvertFrom-Json).version } catch { "" }
+        $size = [int]((Get-ChildItem $repo -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1KB)
+        New-Item -Path $key -Force -ErrorAction Stop | Out-Null
+        $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $repo 'uninstall.ps1')`""
+        $values = @{
+            DisplayName = "claude-voice"; DisplayVersion = $ver; Publisher = "TraxData313"
+            InstallLocation = $repo; DisplayIcon = (Join-Path $repo "docs\icons\abby.ico")
+            UninstallString = $uninstall; QuietUninstallString = "$uninstall -Yes"
+            URLInfoAbout = "https://github.com/TraxData313/claude-voice"
+        }
+        foreach ($k in $values.Keys) { Set-ItemProperty -Path $key -Name $k -Value $values[$k] -ErrorAction Stop }
+        Set-ItemProperty -Path $key -Name NoModify -Value 1 -Type DWord -ErrorAction Stop
+        Set-ItemProperty -Path $key -Name NoRepair -Value 1 -Type DWord -ErrorAction Stop
+        Set-ItemProperty -Path $key -Name EstimatedSize -Value $size -Type DWord -ErrorAction Stop
+        if (Test-Path $key) { Say "uninstall     : listed in Settings > Apps as claude-voice" "Green" }
+        else { Say "uninstall     : written, but Windows does not show it in Settings > Apps" "Yellow" }
+    } catch {
+        Say "uninstall     : could not be listed in Settings > Apps -- $($_.Exception.Message)" "Yellow"
     }
-    foreach ($k in $values.Keys) { Set-ItemProperty -Path $key -Name $k -Value $values[$k] }
-    Set-ItemProperty -Path $key -Name NoModify -Value 1 -Type DWord
-    Set-ItemProperty -Path $key -Name NoRepair -Value 1 -Type DWord
-    Set-ItemProperty -Path $key -Name EstimatedSize -Value $size -Type DWord
-    Say "uninstall     : listed in Settings > Apps as claude-voice" "Green"
 }
 
 # --- open it --------------------------------------------------------------
@@ -519,6 +527,31 @@ if (-not $NoPanel) {
     if ($open) { Say "panel         : already open" "Green" }
     else       { & $PythonExe (Join-Path $repo "voice_cli.py") panel }
 }
+# An app that went on talking through the install -- adding an engine no longer
+# silences the one already running -- still holds the engine it had, and 'start'
+# would find it up and leave it so. Restarted here, after the long part, the
+# engine just installed is the one that answers. So is one that could not load
+# an engine at all, or runs other code than this.
+$port = 8765
+try {
+    $p = ([System.IO.File]::ReadAllText((Join-Path $repo "config.json"), [System.Text.Encoding]::UTF8) | ConvertFrom-Json).port
+    if ($p) { $port = [int]$p }
+} catch { }
+$ours = try { ([System.IO.File]::ReadAllText((Join-Path $repo "version.json")) | ConvertFrom-Json).version } catch { "" }
+try {
+    $h = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 3
+    if ((-not $h.ready) -or ($h.engineLoaded -and $h.engineLoaded -ne $Engine) -or
+        ($ours -and $h.version -and $h.version -ne $ours)) {
+        $was = if ($h.engineLoaded) { $h.engineLoaded } else { "nothing" }
+        Say "engine        : restarting, so $Engine takes over from $was"
+        & $PythonExe (Join-Path $repo "voice_cli.py") kill | Out-Null
+        # 'kill' asks it to go and returns at once; 'start' would still find it answering.
+        foreach ($i in 1..20) {
+            try { Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 1 | Out-Null } catch { break }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+} catch { }   # nothing running: 'start' below starts it
 # 'on' is the master switch for Claude Code's narration as well as a start;
 # a program install only wants the engine up, and must not flip a switch
 # somebody who already uses this for Claude Code had set the other way.

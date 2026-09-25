@@ -69,6 +69,13 @@ The watcher has no such problem, which is another reason to prefer it.
 
 ## Other things that have actually happened
 
+**Claude Code refused every prompt: "A hook blocked your prompt … can't open file …
+speak_hook.py".** The folder was moved, renamed or deleted while its hooks were still in
+Claude Code's settings, and an install older than 1.15.1 wrote a hook that blocks when its
+file is gone. Put the folder back, or open `%USERPROFILE%\.claude\settings.json` in Notepad
+and delete the entries that mention `speak_hook.py`. Running `setup.ps1` again from where
+the folder now lives writes the newer line, which steps aside instead.
+
 **She said "there are 162 Cyrillic characters I can't speak out".** She cannot,
 on Pocket TTS — six Latin-script languages and nothing else. It is said out loud
 rather than dropped quietly because the alternative is worse: that model answers
@@ -102,7 +109,7 @@ time and the next one was not finished in time — a buffer underrun, not the vo
 `logs\speak-server.log` says `playback ran dry mid-message` every time it happens. Give it
 a lead to spend. `playback auto` is the default and works the wait out per message;
 `playback whole` makes the entire line before saying any of it, which never breaks up but
-makes you wait far longer than you need to. Also in the panel, under the cog. No
+makes you wait far longer than you need to. Also in the panel: the three bars, top left, open Settings. No
 restart. `playback report` says what lead this machine has actually needed, from the trace
 each message leaves behind. **[The measurements →](how-it-works.md#when-the-first-word-is-played)**
 

@@ -87,7 +87,11 @@ namespace ClaudeVoiceSetup
                 Engine = engine,
                 Folder = folder,
                 DataDir = o.Data ?? "",
-                DesktopIcon = false,
+                // An icon, as the window's road has by default: somebody who installed voices
+                // from inside a game has no other sign that a program now lives on their
+                // computer ("I don't see the app opened anywhere, so how does it work?",
+                // 2026-09-25). The uninstall takes it away with the rest.
+                DesktopIcon = true,
                 ForClaudeCode = false,
                 Quiet = true,
                 Source = o.Source ?? Installer.DefaultSource,

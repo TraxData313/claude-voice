@@ -71,20 +71,20 @@ FONT = ("Segoe UI", 9)
 # and the substitute here is the boxed emoji. Without it the buttons go back to
 # saying what they do in words.
 ICON_FAMILY = "Segoe UI Symbol"
-# And two glyphs that font does not do at all well. U+2699, the cog, comes out
-# of Segoe UI Symbol as a small ring with a dot in it -- at button size that
-# reads as a record button rather than a cog -- and it has nothing resembling a
-# chip. Windows 10 and 11 ship a whole icon set with proper ones, so these two
-# buttons borrow from it and nothing else does. Private use codepoints are
-# font-specific by definition, hence the fallback behind each.
+# And two glyphs that font does not do at all well: it has nothing resembling a
+# chip, and its three bars (U+2630, a trigram) are a symbol that happens to look
+# like a menu rather than the menu every app draws. Windows 10 and 11 ship a
+# whole icon set with proper ones, so these two buttons borrow from it and
+# nothing else does. Private use codepoints are font-specific by definition,
+# hence the fallback behind each.
 #
-# The cog is settings, where a cog means what everybody already thinks it
-# means, and the chip is the engine: what that button loads and hands back is
-# three and a half gigabytes of model, and a cog on it only ever said
-# "something machinery". Both were drawn and looked at; the chip won by eye
-# over a power symbol, a bolt and a robot.
+# The three bars are the window's menu, top left where every app keeps one
+# (they replaced a cog at the top right on 2026-09-25), and the chip is the
+# engine: what that button loads and hands back is three and a half gigabytes
+# of model, and a cog on it only ever said "something machinery". The chip was
+# drawn and looked at, and won by eye over a power symbol, a bolt and a robot.
 MDL2_FAMILY = "Segoe MDL2 Assets"
-MDL2_GEAR = "\ue713"
+MDL2_MENU = "\ue700"
 MDL2_CHIP = "\ue950"
 FONT_SMALL = ("Segoe UI", 8)
 FONT_BOLD = ("Segoe UI", 9, "bold")
@@ -240,7 +240,7 @@ POWER_DEAD = ("#6b6e76", "#6b6e76")
 # where there is nothing left.
 GLYPH = {
     "engine": ("\u2638", "engine"),        # see MDL2_CHIP, preferred over this
-    "settings": ("\u2699", "settings"),    # and MDL2_GEAR over this one
+    "menu": ("\u2630", "menu"),            # and MDL2_MENU over this one
     "play": ("\u25b6", "play"),            # held; this picks it up again
     "pause": ("\u23f8", "pause"),          # speaking; this holds it. A real
                                            # pause: the piece is cut at the
@@ -344,6 +344,15 @@ def colour_for(voice_id):
 def initial(voice_id):
     letter = (voice_id or "?").lstrip("_-")
     return (letter[:1] or "?").upper()
+
+
+def human_size(size):
+    """'2.2 GB', '35 MB', or nothing when the engine did not say."""
+    if not isinstance(size, (int, float)) or size < 0:
+        return ""
+    if size >= 1_000_000_000:
+        return f"{size / 1_000_000_000:.1f} GB"
+    return f"{max(1, round(size / 1_000_000))} MB"
 
 
 class Icons:
@@ -656,6 +665,7 @@ class Panel:
         self.art_open = bool(saved.get("panelArt", True))
         self.on_top = tk.BooleanVar(value=bool(saved.get("panelTopmost", False)))
         self.dark = tk.BooleanVar(value=bool(saved.get("panelDark", False)))
+        self.hide_game = tk.BooleanVar(value=bool(saved.get("hideGameVoices", False)))
         # Load an engine and turn the voice on as the window opens, because
         # most of the times it is opened at all, it is opened to be spoken to.
         # Off unless asked for: three and a half gigabytes is not something to
@@ -692,6 +702,11 @@ class Panel:
         self.update_btn = None
         # The settings dialog, while it is open. One at a time, like the typer.
         self.settings = None
+        # Where each engine's files are, as the engine last said (POST
+        # /storage), for the menu; and whether it is being asked right now.
+        self.storage = None
+        self.storage_box = None          # the folders' rows, while settings is open
+        self.storage_busy = False
         # The typing box and the box inside it, while it is open. One at a
         # time: a second copy would be two boxes with one queue behind them.
         self.typer = None
@@ -721,6 +736,9 @@ class Panel:
         self.show_saved_voice()
         threading.Thread(target=self._poll_loop, name="poll", daemon=True).start()
         self.tick = self.root.after(DRAIN_MS, self._drain)
+        # Measured once soon after opening, so the menu has an answer the first
+        # time it is dropped rather than "measuring...".
+        self.root.after(1500, self.refresh_storage)
 
     # -- laying it out -----------------------------------------------------
     def _build(self):
@@ -748,18 +766,22 @@ class Panel:
         # both ways round and stacked; a row of its own is the only arrangement
         # where neither has to give. It costs about twenty pixels of height.
         #
-        # Top right, where a window keeps this sort of button. The left is now
-        # genuinely empty, and stays empty: a File menu is the only thing that
-        # would ever go there and this window has no files.
+        # Three bars at the top LEFT since 2026-09-25, where it was a cog at the
+        # top right: "a more modern menu button... on the top left" (Anton).
+        # For one morning it dropped a menu -- Settings, then the folders -- and
+        # the same day it went straight to Settings again, with the folders as
+        # that window's first section: one click to what is wanted, and the
+        # question a many-gigabyte download leaves behind it answered first.
         self.strip = ttk.Frame(head)
         self.strip.pack(fill="x")
         # A plain themed button, not one of the coloured pair: those two say a
         # state as well as an action, and this one only ever opens a window.
-        cog, cog_style, cog_width = self._cog()
-        self.settings_btn = ttk.Button(self.strip, text=cog, style=cog_style,
-                                       width=cog_width, command=self.open_settings)
-        self.settings_btn.pack(side="right")
-        self.tips["settings"] = Tip(self.settings_btn, "settings", self.dark.get)
+        bars, bars_style, bars_width = self._menu_glyph()
+        self.menu_btn = ttk.Button(self.strip, text=bars, style=bars_style,
+                                   width=bars_width, command=self.open_settings)
+        self.menu_btn.pack(side="left")
+        self.tips["menu"] = Tip(self.menu_btn, "settings, and where the voice files are",
+                                self.dark.get)
 
         top = ttk.Frame(head)
         top.pack(fill="x", pady=(2, 0))
@@ -1158,19 +1180,21 @@ class Panel:
             return MDL2_CHIP, (MDL2_FAMILY, 12)
         return self._glyph("engine"), self._icon_font(1)
 
-    def _cog(self):
-        """The settings cog: its text, its style and how wide to ask for.
+    def _menu_glyph(self):
+        """The menu's three bars: their text, their style and how wide to ask for.
 
         Three ways down rather than two, because this one is a themed button
         and its font comes from a style rather than from the widget. The style
         is set in apply_theme, since ttk keeps styles per theme and a switch
-        would otherwise drop the font and leave a boxed emoji behind.
+        would otherwise drop the font and leave a boxed emoji behind. Windows'
+        own icon set draws the bars the way Windows' own apps do; the trigram
+        behind it is the nearest thing any other font has.
         """
         if self.mdl2_ok:
-            return MDL2_GEAR, "Gear.TButton", 3
+            return MDL2_MENU, "Menu.TButton", 3
         if self.icons_ok:
-            return self._glyph("settings"), "Icon.TButton", 3
-        return GLYPH["settings"][1], "Small.TButton", 10
+            return self._glyph("menu"), "Icon.TButton", 3
+        return GLYPH["menu"][1], "Small.TButton", 10
 
     def _face_says(self):
         who = self.voice_names.get(self.drawn.get("voice")) or "this voice"
@@ -1331,10 +1355,10 @@ class Panel:
         if self.icons_ok:
             style.configure("Icon.TButton", font=(ICON_FAMILY, 12), padding=(2, 1))
             style.configure("Add.TButton", font=(ICON_FAMILY, 11), padding=(2, 0))
-        # The settings cog, which is drawn out of the other font and so cannot
-        # share a style with them.
+        # The menu's three bars, which are drawn out of the other font and so
+        # cannot share a style with them.
         if self.mdl2_ok:
-            style.configure("Gear.TButton", font=(MDL2_FAMILY, 12), padding=(2, 1))
+            style.configure("Menu.TButton", font=(MDL2_FAMILY, 12), padding=(2, 1))
 
         # The list a combobox drops is a plain Tk listbox, coloured the old way.
         popup = ((DARK["field"], DARK["fg"], DARK["sel"], DARK["fg"]) if dark else
@@ -1658,6 +1682,10 @@ class Panel:
                 pass
 
         threading.Thread(target=go, name="act", daemon=True).start()
+
+    def toggle_hide_game(self):
+        voice_lib.patch_state(hideGameVoices=bool(self.hide_game.get()))
+        self.drawn.pop("voices", None)       # redraw the list on the next poll
 
     def toggle_top(self):
         on = bool(self.on_top.get())
@@ -2252,7 +2280,8 @@ class Panel:
         try:
             voices = [{"id": v["id"], "name": v["name"], "culture": v["culture"],
                        "sex": v["sex"], "style": v.get("style") or "",
-                       "tag": v.get("tag") or ""}
+                       "tag": v.get("tag") or "",
+                       "added": voice_lib.is_added_voice(v, state)}
                       for v in voice_lib.catalog(state, engine)]
         except (OSError, ImportError, LookupError):
             voices = []            # no voices folder; the dropdown stays empty
@@ -2318,6 +2347,13 @@ class Panel:
 
     def render_voices(self, st):
         voices = st.get("voices") or []
+        current = st.get("voice")
+        # A game's people, hidden from the list when asked (2026-09-25, Anton: a new voice
+        # of his own should sit at the top beside Abby's original, not under ninety
+        # Calradians). Only the list: the voice speaking now always stays in it, and the
+        # game goes on speaking with every one of them.
+        if self.hide_game.get():
+            voices = [v for v in voices if not v.get("added") or v["id"] == current]
         ids = [v["id"] for v in voices]
         if ids != self.drawn.get("voices"):
             self.drawn["voices"] = ids
@@ -2326,7 +2362,6 @@ class Panel:
             self.voice_sexes = {v["id"]: (v.get("sex") or "") for v in voices}
             self.voice_box.configure(values=list(self.voice_ids))
             self.drawn.pop("face", None)          # the name under it may have changed
-        current = st.get("voice")
         if current != self.drawn.get("voice") and not self.held("voice"):
             self.drawn["voice"] = current
             shown = next((k for k, vid in self.voice_ids.items() if vid == current), current)
@@ -2487,6 +2522,126 @@ class Panel:
         self.typer = self.typed = self.typed_mood = None
 
     # -- the window's own settings -----------------------------------------
+    # -- where the voice files are -------------------------------------------
+    def _storage_section(self, frame):
+        """Where every engine keeps its files: the first thing in settings.
+
+        The folders are the ones the engine reports (POST /storage), each with
+        its size, and each opens in Explorer when clicked -- "I downloaded
+        gigabytes, where are they?" answered where it is asked, and first,
+        because it is what somebody looking to uninstall came for. The engine
+        walks its folders at most once in ten minutes, so the last answer shows
+        at once and the fresh one replaces it when it comes.
+        """
+        self._section(frame, "where the voice files are")
+        self.storage_box = ttk.Frame(frame)
+        self.storage_box.pack(fill="x", padx=8, pady=(0, 4))
+        self.refresh_storage()
+        self._fill_storage()
+        self._await_storage()
+
+    def _await_storage(self):
+        """Polled from the Tk thread, which is the only one allowed to draw."""
+        box = getattr(self, "storage_box", None)
+        if box is None or not box.winfo_exists():
+            return
+        if self.storage_busy:
+            self.root.after(400, self._await_storage)
+        else:
+            self._fill_storage()
+
+    def _fill_storage(self):
+        box = getattr(self, "storage_box", None)
+        if box is None or not box.winfo_exists():
+            return
+        for child in box.winfo_children():
+            child.destroy()
+        # Both lists outlive what is drawn here, and a dead label left in
+        # either breaks the next dark switch half way through.
+        self.dim = [w for w in self.dim if w.winfo_exists()]
+        self.links = [w for w in self.links if w.winfo_exists()]
+        dark = bool(self.dark.get())
+        rows = self.storage_rows(self.storage) if self.storage else []
+        if not rows:
+            note = ttk.Label(box, text="measuring…" if self.storage_busy
+                             else "start the engine to see them", font=FONT_SMALL,
+                             foreground=DARK["dim"] if dark else GREY)
+            note.pack(anchor="w", padx=(20, 0))
+            self.dim.append(note)
+        for what, size, folder in rows:
+            line = ttk.Frame(box)
+            line.pack(fill="x", pady=(4, 0))
+            ttk.Label(line, text=what, font=FONT_SMALL).pack(side="left")
+            ttk.Label(line, text=size, font=FONT_SMALL).pack(side="right")
+            path = ttk.Label(box, text=folder, font=FONT_LINK, cursor="hand2",
+                             wraplength=300, justify="left",
+                             foreground=LINK_DARK if dark else LINK)
+            path.bind("<Button-1>", lambda _event, f=folder: self.open_folder(f))
+            path.pack(anchor="w", padx=(20, 0))
+            self.links.append(path)
+
+    def refresh_storage(self):
+        """Asks the engine where its files are, off the Tk thread. Kept when
+        the engine is down: a folder does not move because the engine stopped."""
+        if self.storage_busy:
+            return
+        self.storage_busy = True
+
+        def go():
+            try:
+                self.storage = voice_lib.post(self.port, "/storage", timeout=30)
+            except Exception:
+                pass
+            finally:
+                self.storage_busy = False
+
+        threading.Thread(target=go, name="storage", daemon=True).start()
+
+    def storage_rows(self, st):
+        """(what, how big, where) for every folder an engine keeps -- the
+        speaking engine first, then the rest, then the app itself."""
+        state = voice_lib.load_state()
+        named = {}
+        for path, what in ((state.get("studioDir"), "Qwen — its engine"),
+                           (state.get("modelDir"), "Qwen — the model")):
+            if path:
+                named[os.path.normcase(os.path.abspath(path))] = what
+        titles = {"qwen": "Qwen", "breeze": "Breeze", "pocket": "Pocket"}
+        engines = st.get("engines") or {}
+        speaking = st.get("engine")
+        order = sorted(engines, key=lambda k: (k != speaking, list(titles).index(k) if k in titles else 9))
+        rows = []
+        for key in order:
+            e = engines.get(key) or {}
+            folders, sizes = e.get("dirs") or [], list(e.get("sizes") or [])
+            if len(sizes) != len(folders):      # an engine older than the per-folder sizes
+                sizes = [e.get("bytes") if len(folders) == 1 else None] * len(folders)
+            # The biggest first: it is the one the question is about, and the
+            # one that carries the "(speaking)".
+            pairs = sorted(zip(folders, sizes), key=lambda p: -(p[1] or 0))
+            for i, (folder, size) in enumerate(pairs):
+                what = named.get(os.path.normcase(os.path.abspath(folder)))
+                if not what:
+                    low = folder.lower()
+                    what = titles.get(key, key.title())
+                    if key == "pocket":
+                        what += (" — its code" if "huggingface" not in low
+                                 else " — the model without cloning" if "without-voice-cloning" in low
+                                 else " — the model")
+                if key == speaking and i == 0:
+                    what += "  (speaking)"
+                rows.append((what, human_size(size), folder))
+        app = st.get("app") or {}
+        for folder in app.get("dirs") or []:
+            rows.append(("The app itself", human_size(app.get("bytes")), folder))
+        return rows
+
+    def open_folder(self, folder):
+        try:
+            os.startfile(folder)
+        except OSError:
+            pass
+
     def open_settings(self):
         """Everything that is about the window rather than about the voice.
 
@@ -2522,6 +2677,8 @@ class Panel:
         frame = ttk.Frame(win)
         frame.pack(fill="both", expand=True, padx=4, pady=(0, 12))
 
+        self._storage_section(frame)
+
         self._section(frame, "when it opens")
         # Read again, here, rather than trusted from startup: the folder is the
         # setting, and anything may have happened to it since -- an installer,
@@ -2543,6 +2700,10 @@ class Panel:
         self._setting(frame, "on top", self.on_top, self.toggle_top,
                       "Keeps the window above the others, so what is being said "
                       "does not go behind what you are reading.")
+        self._setting(frame, "hide game voices", self.hide_game, self.toggle_hide_game,
+                      "Leaves the voices a game has added — Calradia's people from "
+                      "Immersive AI — out of the voice list here, so your own stay "
+                      "at the top. The game still speaks with every one of them.")
 
         self._section(frame, "how it speaks")
         # Read again here rather than trusted from startup: the CLI writes
@@ -2663,8 +2824,11 @@ class Panel:
             # and that list outlives this window. A dead widget left in it
             # breaks the next dark switch half way through, which leaves the
             # rest of the panel in the wrong colours. The typer learned this.
+            # The folder links are in the other such list.
             self.dim = [w for w in self.dim if w.winfo_exists()]
+            self.links = [w for w in self.links if w.winfo_exists()]
         self.settings = None
+        self.storage_box = None
 
     # -- installing Breeze, when somebody picks it --------------------------
     def open_breeze_setup(self):

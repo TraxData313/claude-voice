@@ -111,6 +111,9 @@ def _hooks_line():
     if found["backslashed"]:
         return ("written with backslashes, which bash reads as escapes, so every "
                 "one fails. Run setup.ps1 again")
+    if found["unguarded"]:
+        return ("the old kind, which would lock Claude Code out if this folder were "
+                "ever moved or deleted. Run setup.ps1 again")
     if found["missing"]:
         return (", ".join(found["events"]) + " -- run setup.ps1 again for "
                 + ", ".join(found["missing"]))

@@ -175,7 +175,7 @@ namespace ClaudeVoiceSetup
                    plan.Engine.Id == "pocket"
                        ? "Pocket fetches its small model now and wakes up — a minute or two."
                        : "Loading the model into your graphics card — up to a minute.");
-            if (!await WaitForEngineAsync(TimeSpan.FromMinutes(plan.Engine.Id == "pocket" ? 8 : 5), cancel))
+            if (!await WaitForEngineAsync(plan.Engine.Id, TimeSpan.FromMinutes(plan.Engine.Id == "pocket" ? 8 : 5), cancel))
                 throw new InstallException("Everything is installed, but the voices did not start. Try starting them again — " +
                                            "if it keeps happening, the details are in " + StatusFile.LogPath);
             if (!plan.Quiet) await SayHelloAsync();
@@ -223,7 +223,17 @@ namespace ClaudeVoiceSetup
                 if (!File.Exists(Path.Combine(source, "setup.ps1")))
                     throw new InstallException("The download did not hold claude-voice. Check your internet connection and try again.");
 
-                CopyTree(source, plan.Folder);
+                try { CopyTree(source, plan.Folder); }
+                catch (IOException ex)
+                {
+                    // A file the running app holds open cannot be replaced under it -- Pocket keeps a
+                    // voice's weights mapped while it speaks. Only a file that changed is ever written
+                    // (see CopyTree), so this is a real update: stop the app, and lay the code down again.
+                    if (await RunningVersionAsync() == null) throw;
+                    Say($"In use by the running voice app ({ex.Message}) -- stopping it to finish.");
+                    await QuitRunningEngineAsync();
+                    CopyTree(source, plan.Folder);
+                }
                 Say("claude-voice is in place.");
             }
             finally
@@ -243,13 +253,30 @@ namespace ClaudeVoiceSetup
             foreach (var file in Directory.GetFiles(from))
             {
                 if (NeverCopied.Contains(Path.GetFileName(file))) continue;
-                File.Copy(file, Path.Combine(to, Path.GetFileName(file)), true);
+                var dest = Path.Combine(to, Path.GetFileName(file));
+                // The same file is left where it is. Rewriting it changes nothing, and fails outright
+                // when the running app has it open -- which, now that adding an engine leaves the app
+                // running, is every Pocket voice it is speaking with (2026-09-25).
+                if (SameFile(file, dest)) continue;
+                File.Copy(file, dest, true);
             }
             foreach (var dir in Directory.GetDirectories(from))
             {
                 if (NeverCopied.Contains(Path.GetFileName(dir))) continue;
                 CopyTree(dir, Path.Combine(to, Path.GetFileName(dir)));
             }
+        }
+
+        /// <summary>Same length and same last-write time: a copy keeps the time, and so does a zip.</summary>
+        private static bool SameFile(string a, string b)
+        {
+            try
+            {
+                var fa = new FileInfo(a);
+                var fb = new FileInfo(b);
+                return fb.Exists && fa.Length == fb.Length && fa.LastWriteTimeUtc == fb.LastWriteTimeUtc;
+            }
+            catch { return false; }
         }
 
         private async Task DownloadAsync(string url, string dest, CancellationToken cancel)
@@ -389,11 +416,16 @@ namespace ClaudeVoiceSetup
             switch (step)
             {
                 case 1: Report("engine", "Making Breeze a place to live", null, "Its own copy of Python, kept apart from everything else."); break;
-                case 2: Report("engine", "Downloading PyTorch, the engine Breeze runs on", null,
-                               "2.9 GB. This part has no counter — usually 5 to 15 minutes."); break;
+                case 2:
+                    Report("engine", "Downloading PyTorch, the engine Breeze runs on", null, "2.9 GB — usually 5 to 15 minutes.");
+                    WatchPipProgress(plan, "engine", "Downloading PyTorch, the engine Breeze runs on", "PyTorch", bar: true);
+                    break;
                 case 3: Report("engine", "Checking PyTorch can see your graphics card", null, ""); break;
                 case 4: Report("engine", "Downloading Breeze's code", null, ""); break;
-                case 5: Report("engine", "Installing what Breeze needs", null, "A few hundred MB more — no counter for this part."); break;
+                case 5:
+                    Report("engine", "Installing what Breeze needs", null, "PyTorch is in. Now the smaller pieces around it — a few hundred MB.");
+                    WatchPipProgress(plan, "engine", "Installing what Breeze needs", null, bar: false);
+                    break;
                 case 6:
                     Report("model", "Downloading the Breeze voice model", 0, "7.7 GB — the long part. It carries on if the connection drops.");
                     WatchFolderGrow(BreezeWeightsFolder(plan), 7_700_000_000L, "model", "Downloading the Breeze voice model", "Breeze model");
@@ -434,6 +466,67 @@ namespace ClaudeVoiceSetup
                     Report(phase, headline, Math.Min(0.99, (double)have / expected), Amounts(what, have, expected));
                 }
             });
+        }
+
+        /// <summary>pip's own count, from the "Progress n of m" lines breeze_setup has it write into
+        /// Breeze's install log. PyTorch's 2.9 GB used to show no movement at all, for long enough to
+        /// look stuck (2026-09-25). Without <paramref name="bar"/> only the words move: after PyTorch
+        /// come many small packages, and a bar starting over for each one reads as going backwards.
+        /// <paramref name="what"/> names the download; null names each package as pip reaches it.</summary>
+        private void WatchPipProgress(InstallPlan plan, string phase, string headline, string what, bool bar)
+        {
+            var log = Path.Combine(plan.Folder, "logs", "breeze-install.log");
+            var from = FileLength(log);      // only what this step writes
+            var cts = new CancellationTokenSource();
+            _folderWatch = cts;
+            Task.Run(async () =>
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    try { await Task.Delay(1000, cts.Token); } catch { break; }
+                    var (name, done, total) = LastPipProgress(log, from);
+                    if (total <= 0 || cts.IsCancellationRequested) continue;
+                    var label = what ?? name;
+                    var amounts = Amounts(label, done, total);
+                    Report(phase, headline, bar ? Math.Min(0.99, (double)done / total) : (double?)null,
+                           what == null && name.Length > 0 ? name + ": " + amounts : amounts);
+                }
+            });
+        }
+
+        private static long FileLength(string path)
+        {
+            try { return File.Exists(path) ? new FileInfo(path).Length : 0; } catch { return 0; }
+        }
+
+        private static readonly Regex PipProgress = new Regex(@"^Progress (\d+) of (\d+)", RegexOptions.Multiline);
+        private static readonly Regex PipDownloading = new Regex(@"^\s*Downloading (\S+?)-\d", RegexOptions.Multiline);
+
+        /// <summary>The package pip is fetching and how far it has got, read from the end of the log
+        /// (shared with the writer, which still has it open).</summary>
+        private static (string name, long done, long total) LastPipProgress(string log, long from)
+        {
+            try
+            {
+                using (var fs = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                    var start = Math.Max(from, fs.Length - 65536);
+                    if (start >= fs.Length) return ("", 0, 0);
+                    fs.Seek(start, SeekOrigin.Begin);
+                    string tail;
+                    using (var reader = new StreamReader(fs, Encoding.UTF8)) tail = reader.ReadToEnd();
+                    var progress = PipProgress.Matches(tail);
+                    if (progress.Count == 0) return ("", 0, 0);
+                    var last = progress[progress.Count - 1];
+                    var names = PipDownloading.Matches(tail.Substring(0, last.Index));
+                    var name = names.Count > 0 ? Uri.UnescapeDataString(names[names.Count - 1].Groups[1].Value) : "";
+                    name = name.Substring(name.LastIndexOf('/') + 1);   // an index other than PyPI prints the whole URL
+                    return (name,
+                            long.Parse(last.Groups[1].Value, CultureInfo.InvariantCulture),
+                            long.Parse(last.Groups[2].Value, CultureInfo.InvariantCulture));
+                }
+            }
+            catch { return ("", 0, 0); }
         }
 
         private void StopWatchingFolder()
@@ -531,13 +624,40 @@ namespace ClaudeVoiceSetup
         {
             // New code under a running engine would go on being the OLD engine until it restarts,
             // and the next thing a game asks of it would be answered by a version that does not
-            // know the question.
-            if (!await EngineUpAsync()) return;
-            try { await PostAsync("/quit", "{}", TimeSpan.FromSeconds(3)); } catch { }
-            await Task.Delay(1500);
+            // know the question. The same code is no reason to go quiet, though: adding an engine
+            // from a game (Breeze, twenty minutes of downloading) used to silence the voices it
+            // already had for all of it, and stopping that install then left nothing running at
+            // all (2026-09-25). setup.ps1 moves the app onto the new engine once it is there.
+            var running = await RunningVersionAsync();
+            if (running == null || running == Version) return;
+            await QuitRunningEngineAsync();
         }
 
-        private static async Task<bool> WaitForEngineAsync(TimeSpan patience, CancellationToken cancel)
+        /// <summary>Asks the app to go, and waits until it has -- a file it held is only free once
+        /// its process has ended, not when it has said yes.</summary>
+        private static async Task QuitRunningEngineAsync()
+        {
+            try { await PostAsync("/quit", "{}", TimeSpan.FromSeconds(3)); } catch { }
+            for (var i = 0; i < 20 && await RunningVersionAsync() != null; i++)
+                await Task.Delay(500);
+            await Task.Delay(1000);
+        }
+
+        /// <summary>The version the app answering on the port gives for itself: null when nothing
+        /// answers, empty when it is too old to say.</summary>
+        private static async Task<string> RunningVersionAsync()
+        {
+            try
+            {
+                var json = await PostAsync("/health", "{}", TimeSpan.FromSeconds(2));
+                if (json == null) return null;
+                var doc = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
+                return doc != null && doc.TryGetValue("version", out var v) && v is string s ? s : "";
+            }
+            catch { return null; }
+        }
+
+        private static async Task<bool> WaitForEngineAsync(string engine, TimeSpan patience, CancellationToken cancel)
         {
             var until = DateTime.UtcNow + patience;
             while (DateTime.UtcNow < until)
@@ -549,7 +669,11 @@ namespace ClaudeVoiceSetup
                     if (json != null)
                     {
                         var doc = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
-                        if (doc != null && doc.TryGetValue("ready", out var ready) && ready is bool b && b) return true;
+                        // Ready with the engine just installed -- not the one that went on talking
+                        // through the install, which would answer "ready" before this one had loaded.
+                        if (doc != null && doc.TryGetValue("ready", out var ready) && ready is bool b && b &&
+                            (!doc.TryGetValue("engineLoaded", out var loaded) || !(loaded is string l) || l.Length == 0 || l == engine))
+                            return true;
                     }
                 }
                 catch { /* not up yet */ }
@@ -657,7 +781,32 @@ namespace ClaudeVoiceSetup
                 { "fraction", Overall(_phase, _phaseFraction) },
                 { "error", error },
                 { "log", StatusFile.LogPath },
+                // Two things an install started by a game has failed to leave behind while every run
+                // from a shell left both (2026-09-25): its lines in setup.log, and its entry in
+                // Settings > Apps. The log cannot say why it could not be written, so this file does.
+                { "logError", StatusFile.LogError },
+                { "logTail", StatusFile.LogError.Length > 0 ? LastLines(Log, 40) : "" },
+                { "appsEntry", ListedInApps() },
             }, force);
+        }
+
+        private static string LastLines(string text, int count)
+        {
+            var lines = text.Split('\n');
+            return string.Join("\n", lines, Math.Max(0, lines.Length - count), Math.Min(count, lines.Length));
+        }
+
+        /// <summary>Whether Settings > Apps lists claude-voice, asked from this process's own view of
+        /// the registry -- the view a game's child has, which is the one in question.</summary>
+        private static bool ListedInApps()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Uninstall\claude-voice"))
+                    return key != null;
+            }
+            catch { return false; }
         }
 
         private void Say(string line)

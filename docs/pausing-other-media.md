@@ -75,7 +75,7 @@ after she stops. Wiring it in is three things:
 2. `hush.Watcher(speaker.busy, log).start()` in `main()`, and `.stop()` in the `finally`,
    so a podcast is never left paused by an engine that has gone.
 3. A `pauseMedia` key in the config, off by default, read on the watcher's own timer, and a
-   tick box under the cog.
+   tick box in Settings (the three bars at the top left; it was a cog until 1.16).
 
 ## What it will never do
 

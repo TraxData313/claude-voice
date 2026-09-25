@@ -307,6 +307,7 @@ DEFAULTS = {
     "panelTopmost": False,
     # Dark colours in the panel. Its own tick box writes this too.
     "panelDark": False,
+    "hideGameVoices": False,     # the panel's list leaves out voices a game added
     # Load the engine and turn the voice on as the panel opens -- 'auto start
     # engine', in the panel's settings dialog. Off here, and it stays off until
     # somebody ticks it: opening a window should not quietly take three and a
@@ -568,6 +569,18 @@ def voice_roots(state=None):
         if os.path.isdir(r) and r not in out:
             out.append(r)
     return out
+
+
+def is_added_voice(voice, state=None):
+    """A voice from a folder that is not this app's own: one of extraVoicesDirs,
+    where a game such as Immersive AI registers its people. The panel can hide
+    these from its list (hideGameVoices); nothing that speaks with them -- the
+    game above all -- is ever affected."""
+    roots = voice_roots(state)
+    if not roots:
+        return False
+    own = os.path.normcase(os.path.abspath(roots[0]))
+    return os.path.normcase(os.path.abspath(voice.get("root") or roots[0])) != own
 
 
 # --------------------------------------------------------------------------
@@ -847,6 +860,8 @@ TEST_LINES = {
             "own machine. No cloud, no waiting. Pretty neat, right?",
     "max": "Hey! I'm Max! Come on, let's get through this list. "
            "One more, and then we're done!",
+    "neya": "Hi. I'm Neya. I'll read you every answer, right here, on your "
+            "own machine. Take your time. I'm right here with you.",
 }
 
 
@@ -2089,15 +2104,20 @@ def hook_health(paths=None, log_path=None):
     """How this tool's Claude Code hooks are wired, for 'status' to say.
 
     Returns {"events": [...], "files": [...], "backslashed": bool,
-    "missing": [...], "last": "YYYY-MM-DD HH:MM:SS" or None}. Read off the
-    settings files and the hook's own trace; nothing is run. `backslashed`
-    is the one that matters: Claude Code runs a hook's command through bash on
-    Windows, and bash takes the backslashes in C:\\Users\\... for escapes, so
-    such a hook fails on every single call without a word to anybody.
+    "unguarded": bool, "missing": [...], "last": "YYYY-MM-DD HH:MM:SS" or None}.
+    Read off the settings files and the hook's own trace; nothing is run.
+    `backslashed` is the one that matters: Claude Code runs a hook's command
+    through bash on Windows, and bash takes the backslashes in C:\\Users\\...
+    for escapes, so such a hook fails on every single call without a word to
+    anybody. `unguarded` is the other: a bare "python speak_hook.py" works
+    today, but the day this folder moves python exits 2, which Claude Code reads
+    as "block", and every prompt and tool call is refused. install.ps1 has
+    written the guarded line, which runs the hook through runpy, since 1.15.1.
     """
     paths = paths or [os.path.expanduser(os.path.join("~", ".claude", "settings.json")),
                       os.path.join(ROOT, ".claude", "settings.json")]
-    found = {"events": [], "files": [], "backslashed": False, "missing": [], "last": None}
+    found = {"events": [], "files": [], "backslashed": False, "unguarded": False,
+             "missing": [], "last": None}
     for path in paths:
         try:
             with open(path, encoding="utf-8-sig") as fh:
@@ -2116,6 +2136,8 @@ def hook_health(paths=None, log_path=None):
                         found["events"].append(event)
                     if "\\" in command:
                         found["backslashed"] = True
+                    if "run_path" not in command:
+                        found["unguarded"] = True
         if mine:
             found["files"].append(path)
     if found["events"]:
@@ -2154,10 +2176,13 @@ def set_voice(voice_id, state=None):
 def set_engine(name, state=None):
     """Switch engines, bringing a voice that engine actually has.
 
-    Returns (engine, voice). The voice is whoever was speaking there last, or
-    that engine's default the first time -- never the old engine's, which does
-    not exist on the new one and would leave the next answer silent with a
-    LookupError nobody sees.
+    Returns (engine, voice). The voice is the one speaking now, wherever the
+    new engine has her too -- a switch changes how she is spoken, not who is
+    speaking (Anton, 2026-09-25: "when I switch the engine the voice actor
+    stays the same, not switch to Abby if im using Neya"). Only where it lacks
+    her: whoever was speaking there last, then that engine's default. Never a
+    voice the new engine does not have, which would leave the next answer
+    silent with a LookupError nobody sees.
     """
     want = (name or "").strip().lower()
     if want not in ENGINES:
@@ -2183,16 +2208,31 @@ def set_engine(name, state=None):
 
     after = dict(state)
     after["engine"] = want
+    current = state.get("voice")
     remembered = (state.get("voiceByEngine") or {}).get(want)
-    choices = [v["id"] for v in catalog(after, want)]
-    if remembered in choices:
+    rows = catalog(after, want)
+    choices = [v["id"] for v in rows]
+    if current in choices:
+        voice_id = current
+    elif remembered in choices:
         voice_id = remembered
+    elif "abby" in choices:
+        # Abby first on every engine that has her, Pocket included (it does
+        # wherever it can clone): she is the face on the window and the voice
+        # the whole thing is named after. Pocket's own default is a man's, and
+        # the panel draws a man's Pocket voice with Max's face -- which is how a
+        # switch to Pocket came up as "Max" (Anton, 2026-09-25: "make sure Abby
+        # is opened by default on each model, not Max or someone else").
+        voice_id = "abby"
     elif want == "pocket":
+        # No cloning, so no Abby: a woman's voice of its own, which the panel
+        # shows with Abby's face, and only then whatever Pocket itself prefers.
         import pocket_engine
 
-        voice_id = pocket_engine.default_voice(engine_language(after))
+        voice_id = next((v["id"] for v in rows if (v.get("sex") or "").lower().startswith("f")),
+                        None) or pocket_engine.default_voice(engine_language(after))
     else:
-        voice_id = "abby" if "abby" in choices else (choices[0] if choices else None)
+        voice_id = choices[0] if choices else None
 
     patch_state(engine=want)
     if voice_id:

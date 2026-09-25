@@ -175,7 +175,9 @@ if (Test-Path $wherePath) {
     if (Same $root $repo) {
         Plan "the note that tells games where it is: $wherePath" {
             Remove-Item -LiteralPath $wherePath -Force
-            foreach ($f in "setup-status.json", "setup-cancel") {
+            # The setup's own log too: left behind, it kept this folder alive after everything
+            # else had gone.
+            foreach ($f in "setup-status.json", "setup-cancel", "setup.log") {
                 $p = Join-Path $whereDir $f
                 if (Test-Path $p) { Remove-Item -LiteralPath $p -Force }
             }

@@ -11,6 +11,7 @@ that needed a GPU would never be run.
 """
 
 import unittest
+from unittest.mock import patch
 
 import pocket_engine
 import voice_lib
@@ -33,6 +34,41 @@ class ChoosingAnEngine(unittest.TestCase):
                          "english")
         self.assertEqual(voice_lib.engine_language({"pocketLanguage": "italian"}),
                          "italian")
+
+
+class WhoSpeaksAfterASwitch(unittest.TestCase):
+    """Abby first on every engine that has her. A first switch to Pocket used to
+    land on its own default, a man's voice, which the panel draws with Max's face."""
+
+    def switch_to_pocket(self, rows, remembered=None, current=None):
+        state = {"engine": "qwen", "voiceByEngine": {"pocket": remembered} if remembered else {}}
+        if current:
+            state["voice"] = current
+        with patch.object(voice_lib, "catalog", return_value=rows), \
+             patch.object(pocket_engine, "available", return_value=True), \
+             patch.object(voice_lib, "patch_state"), \
+             patch.object(voice_lib, "load_state", return_value=state), \
+             patch.object(voice_lib, "set_voice", side_effect=lambda vid, _state=None: ({"id": vid}, False)):
+            return voice_lib.set_engine("pocket", state)[1]["id"]
+
+    def test_abby_where_the_engine_has_her(self):
+        rows = [{"id": "alba", "sex": "male"}, {"id": "abby", "sex": "female"},
+                {"id": "anna", "sex": "female"}]
+        self.assertEqual(self.switch_to_pocket(rows), "abby")
+
+    def test_a_woman_of_its_own_where_it_cannot_clone(self):
+        rows = [{"id": "alba", "sex": "male"}, {"id": "anna", "sex": "female"}]
+        self.assertEqual(self.switch_to_pocket(rows), "anna")
+
+    def test_the_last_choice_made_there_wins_where_she_is_missing(self):
+        rows = [{"id": "alba", "sex": "male"}, {"id": "abby", "sex": "female"}]
+        self.assertEqual(self.switch_to_pocket(rows, remembered="alba", current="sibylla"), "alba")
+
+    def test_the_voice_speaking_now_comes_along(self):
+        # Neya on Qwen, switched to Pocket where she was carried across: still
+        # Neya, not the Abby Pocket last spoke with.
+        rows = [{"id": "abby", "sex": "female"}, {"id": "neya", "sex": "female"}]
+        self.assertEqual(self.switch_to_pocket(rows, remembered="abby", current="neya"), "neya")
 
 
 class Catalogues(unittest.TestCase):
@@ -235,6 +271,75 @@ class ThePocketEngineItself(unittest.TestCase):
         eng.model = object()          # far enough in to reach the name check
         with self.assertRaises(LookupError):
             eng.voice_state("nobody-by-that-name")
+
+
+class AFailedStartIsNotTheEnd(unittest.TestCase):
+    """2026-09-25: a Breeze install stopped halfway left the config naming a
+    Breeze that was not there. The engine failed to start, its thread ended,
+    and picking Pocket afterwards changed nothing until a restart. Now the
+    thread carries on, and a pick made while nothing runs wakes it."""
+
+    def setUp(self):
+        import queue
+        import threading
+
+        import speak_server
+
+        self.speak_server = speak_server
+        self.live = {"engine": "breeze"}
+        self.builds = []
+
+        def build(state):
+            self.builds.append(state.get("engine"))
+            if state.get("engine") == "breeze":
+                raise RuntimeError("Breeze TTS 2 is not where the config says")
+            return state.get("engine"), object()
+
+        sp = self.sp = speak_server.Speaker.__new__(speak_server.Speaker)
+        sp.state = dict(self.live)
+        sp.jobs = queue.Queue()
+        sp.lock = threading.Lock()
+        sp.current = None
+        sp.error = None
+        sp.ready = threading.Event()
+        sp.nudge = threading.Event()
+        sp.engine_name = None
+        sp._live = lambda: dict(self.live)
+        for target, name, value in ((speak_server, "build_engine", build),
+                                    (speak_server, "log", lambda *_a, **_k: None),
+                                    (speak_server, "rss_mb", lambda: 0),
+                                    (voice_lib, "engine_of", lambda s: s.get("engine"))):
+            patcher = patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.thread = threading.Thread(target=sp._engine_loop, daemon=True)
+        self.thread.start()
+        self.assertTrue(sp.ready.wait(3))
+
+    def wait_for(self, check, seconds=5.0):
+        import time
+        until = time.time() + seconds
+        while time.time() < until:
+            if check():
+                return True
+            time.sleep(0.05)
+        return False
+
+    def test_the_thread_outlives_a_failed_start(self):
+        self.assertIsNotNone(self.sp.error)
+        self.assertTrue(self.thread.is_alive())
+
+    def test_a_working_pick_loads_without_anything_said(self):
+        self.live["engine"] = "pocket"
+        self.sp.nudge.set()
+        self.assertTrue(self.wait_for(lambda: self.sp.error is None and self.sp.engine_name == "pocket"))
+        self.assertEqual(self.builds, ["breeze", "pocket"])
+
+    def test_no_nudge_no_load(self):
+        # A pick is otherwise loaded on the next thing said, as before: waking
+        # is only for when nothing is running at all.
+        self.live["engine"] = "pocket"
+        self.assertFalse(self.wait_for(lambda: len(self.builds) > 1, seconds=1.5))
 
 
 if __name__ == "__main__":
