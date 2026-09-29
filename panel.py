@@ -1815,6 +1815,11 @@ class Panel:
         self.engine_btn.configure(state="disabled")
         threading.Thread(target=lambda: voice_lib.start_server(voice_lib.load_state()),
                          name="start", daemon=True).start()
+        # Unloading turned the voice off, and has to (see unload_engine). Loading
+        # has to undo that, or the engine button reads as a restart and is
+        # really a mute: the engine comes back, a spoken test line works, and
+        # every session stays silent. Twice in one morning, 2026-09-29.
+        self.turn_voice_on()
 
     # A click has to survive the next poll, which was already in flight and
     # still says otherwise. Without this the tick you just made flickers back.
