@@ -852,6 +852,9 @@ class Panel:
         self.mood = ttk.Label(said, text="", font=FONT_SMALL, justify="left",
                               wraplength=270, anchor="w")
         self.moods = [self.mood]
+        # How far a model load has got, under the line that is waiting for it.
+        # Packed only while one is under way, so it takes no room otherwise.
+        self.load_bar = ttk.Progressbar(said, mode="determinate", maximum=100)
 
         bar = ttk.Frame(head)
         bar.pack(fill="x", pady=(6, 0))
@@ -1866,6 +1869,7 @@ class Panel:
             self.now.configure(text="— nothing playing")
             self.whose.configure(text="")
         self.show_mood((cur or {}).get("mood") or (cur or {}).get("instruction"))
+        self.show_loading(st.get("loading"), cur)
         # The engine's own word on whether a mood would be used, which is what
         # decides whether the typer offers a box for one.
         self.takes_mood = bool(st.get("instruction"))
@@ -1920,7 +1924,7 @@ class Panel:
 
         if st.get("error"):
             note = f"engine failed: {one_line(st['error'], 28)}"
-        elif not st.get("ready"):
+        elif not st.get("ready") or st.get("loading"):
             note = "engine: loading the model…"
         elif st.get("speaking"):
             note = "engine: speaking"
@@ -1933,6 +1937,42 @@ class Panel:
         elif not st.get("watching"):
             note += " · not watching"
         self.status.configure(text=note)
+
+    def show_loading(self, load, cur):
+        """The engine is loading a model: say which, how far, and how long.
+
+        A line waits under the play mark all the while, and three minutes of
+        that with no word on why read as a hang (2026-09-30, a Breeze start
+        sharing the GPU with a game). Breeze reports stages and a fraction;
+        the others only say they are loading, and get a bar that just moves.
+        """
+        if not load:
+            if self.drawn.get("load_bar"):
+                self.load_bar.stop()
+                self.load_bar.pack_forget()
+                self.drawn["load_bar"] = None
+            return
+        mins, secs = divmod(int(load.get("seconds") or 0), 60)
+        name = {"breeze": "Breeze 2", "qwen": "Qwen", "pocket": "Pocket"}.get(
+            load.get("engine"), load.get("engine") or "the model")
+        frac = load.get("fraction")
+        words = f"loading {name} · {load.get('stage') or 'loading'} · {mins}:{secs:02d}"
+        if frac is not None:
+            words += f" · {round(frac * 100)}%"
+        self.whose.configure(text=words)
+        if cur:
+            self.now.configure(text=f"⏳ “{one_line(cur['text'], 200)}”")
+        mode = "determinate" if frac is not None else "indeterminate"
+        if self.drawn.get("load_bar") != mode:
+            self.load_bar.stop()
+            self.load_bar.configure(mode=mode)
+            if mode == "indeterminate":
+                self.load_bar.start(40)
+            if not self.drawn.get("load_bar"):
+                self.load_bar.pack(fill="x", pady=(4, 0))
+            self.drawn["load_bar"] = mode
+        if frac is not None:
+            self.load_bar["value"] = frac * 100
 
     def render_down(self):
         if self.held("engine"):

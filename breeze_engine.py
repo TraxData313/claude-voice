@@ -28,6 +28,7 @@ synthesize_streaming, synthesize, close, and a module-level SAMPLE_RATE.
 import array
 import ctypes
 import http.client
+import math
 import os
 import random
 import re
@@ -75,6 +76,23 @@ MAX_CHARS = 500
 # of it compiling. Later starts find the compiled kernels on disk and take
 # about half a minute. Anything past fifteen minutes is not coming up.
 START_TIMEOUT = 900.0
+
+# How far along a start is, read off what the server prints while it comes up:
+# the first words of a line it writes, what to call that stage, and roughly
+# how much of the wait is behind once it appears. Later markers win. The
+# fractions are from the log of an ordinary start, where the warm-up is most
+# of it; nothing breaks if a Breeze update rewords one -- that stage is just
+# not reported, and the bar creeps on towards the next one it does know.
+START_STAGES = (
+    ("Waiting for application startup", "starting Python", 0.05),
+    ("Loading checkpoint shards", "reading the weights", 0.15),
+    ("Warming up backbone graph", "warming up on the GPU", 0.30),
+    ("Capturing depth decoder", "capturing GPU graphs", 0.50),
+    ("Depth decoder CUDA graphs captured for all", "capturing GPU graphs", 0.65),
+    ("breeze_codec forcing", "tuning the codec", 0.80),
+    ("fast warmup:", "almost there", 0.92),
+    ("Application startup complete", "almost there", 0.95),
+)
 
 # A long line can spend a while before its first byte on an unaccelerated
 # start; nothing it does takes longer than this between two reads.
@@ -275,16 +293,19 @@ class Engine:
     """
 
     def __init__(self, python, repo, model, fast=True, log=None, log_path=None,
-                 start_timeout=START_TIMEOUT):
+                 start_timeout=START_TIMEOUT, progress=None):
         self.python, self.repo, self.model = python, repo, model
         self.fast = bool(fast)
         self._log_to = log
         self.log_path = log_path
+        # Called as progress(stage, fraction) while the server comes up.
+        self.progress = progress
         self.start_timeout = start_timeout
         self.proc = None
         self.port = None
         self._job = None
         self._logfile = None
+        self._log_from = None
         # The reference clip goes up with every request -- the API takes it as
         # an upload and encodes it each time -- so it is read off disk once
         # per voice rather than once per line.
@@ -334,6 +355,9 @@ class Engine:
             self._logfile.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} "
                                 f"starting: {' '.join(cmd)}\n")
             self._logfile.flush()
+        # Where this start's own output begins, so the stages read are its own
+        # and not an earlier start's further up the same file.
+        self._log_from = self._logfile.tell() if self._logfile else None
         out = self._logfile or subprocess.DEVNULL
         began = time.monotonic()
         self._log("starting breeze tts 2 ("
@@ -358,7 +382,9 @@ class Engine:
         """Until /health says ok. uvicorn listens only once the load and, when
         fast, the compiling and graph capture are done, so a refused
         connection means 'not yet' and nothing else."""
+        seen = (None, 0.02, began)          # stage, its fraction, when it appeared
         while True:
+            seen = self._report_stage(seen)
             code = self.proc.poll()
             if code is not None:
                 raise RuntimeError(f"breeze stopped while starting (exit code {code})"
@@ -372,6 +398,45 @@ class Engine:
                 raise RuntimeError(f"breeze was not up after {self.start_timeout:.0f}s"
                                    + self._log_tail())
             time.sleep(0.5)
+
+    def _report_stage(self, seen):
+        """Tell self.progress how far the start has got; returns the new `seen`.
+
+        Between two markers the fraction creeps towards the next one rather
+        than sitting still, because the warm-up alone can be a minute and a
+        half with nothing printed, and a bar that does not move for that long
+        looks exactly like the hang it is there to rule out.
+        """
+        if not self.progress:
+            return seen
+        stage, frac, since = seen
+        found = self._latest_stage()
+        if found and found[0] != stage:
+            stage, frac = found
+            since = time.monotonic()
+        nxt = next((f for _, _, f in START_STAGES if f > frac), 0.97)
+        shown = frac + (nxt - frac) * (1 - math.exp(-(time.monotonic() - since) / 25))
+        try:
+            self.progress(stage or "starting Python", round(shown, 3))
+        except Exception:                                  # noqa: BLE001
+            pass                        # a report failing must not fail the start
+        return stage, frac, since
+
+    def _latest_stage(self):
+        """The last START_STAGES marker in this start's output, as (name, fraction)."""
+        if not self.log_path or self._log_from is None:
+            return None
+        try:
+            with open(self.log_path, "rb") as fh:
+                fh.seek(self._log_from)
+                text = fh.read().decode("utf-8", "replace")
+        except OSError:
+            return None
+        best = None
+        for marker, name, frac in START_STAGES:
+            if marker in text:
+                best = (name, frac)
+        return best
 
     def _get(self, path):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)

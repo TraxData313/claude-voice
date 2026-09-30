@@ -171,7 +171,7 @@ def rss_mb():
         return None
 
 
-def build_engine(state):
+def build_engine(state, progress=None):
     """Whichever engine the config asks for, loaded and ready to speak.
 
     All three are held to the same three calls -- load_models,
@@ -223,11 +223,14 @@ def build_engine(state):
         eng = breeze_engine.Engine(
             state.get("breezePython"), state.get("breezeDir"), state.get("breezeModel"),
             fast=state.get("breezeFast", True), log=log,
-            log_path=voice_lib._rolled(os.path.join(voice_lib.LOG_DIR, "breeze-server.log")))
+            log_path=voice_lib._rolled(os.path.join(voice_lib.LOG_DIR, "breeze-server.log")),
+            progress=progress)
         eng.load_models()
         # One short line, thrown away. The first request after a start pays
         # for whatever CUDA sets up lazily -- measured 0.52 s to the first
         # sound cold against 0.20 s warm -- and paying it here is invisible.
+        if progress:
+            progress("saying a first word", 0.97)
         try:
             _, warm = voice_lib.resolve(state.get("voice"), state.get("source"), state)
             eng.synthesize("Hi.", **warm)
@@ -310,6 +313,11 @@ class Speaker:
         self.hist_lock = threading.Lock()
         self.ready = threading.Event()
         self.error = None
+        # What is being loaded right now, and how far along: None when nothing
+        # is. A Breeze start is anywhere from thirty seconds to three minutes,
+        # and a line sitting under a play mark for that long with no word on
+        # why reads as a hang (2026-09-30).
+        self.loading = None
         # Set when an engine is picked while none is running, so the engine
         # thread loads it at once instead of waiting for something to be said.
         self.nudge = threading.Event()
@@ -532,8 +540,32 @@ class Speaker:
             "underruns": self.underruns,
             "seam": round(self.seam_typical(), 3),
             "engineLoaded": self.engine_name,
+            "loading": self._loading_now(),
             "pid": os.getpid(),
         }
+
+    def _loading_now(self):
+        load = self.loading
+        if not load:
+            return None
+        return {"engine": load["engine"], "stage": load["stage"],
+                "fraction": load["fraction"],
+                "seconds": round(time.monotonic() - load["began"])}
+
+    def _build(self, state):
+        """build_engine, with self.loading kept up to date while it runs."""
+        want = voice_lib.engine_of(state)
+        self.loading = {"engine": want, "stage": "loading the model", "fraction": None,
+                        "began": time.monotonic()}
+
+        def progress(stage, fraction=None):
+            if self.loading is not None:
+                self.loading = {**self.loading, "stage": stage, "fraction": fraction}
+
+        try:
+            return build_engine(state, progress)
+        finally:
+            self.loading = None
 
     # -- internals ---------------------------------------------------------
     @staticmethod
@@ -737,7 +769,7 @@ class Speaker:
     def _engine_loop(self):
         eng = None
         try:
-            self.engine_name, eng = build_engine(self.state)
+            self.engine_name, eng = self._build(self.state)
             log(f"engine ready ({self.engine_name})")
         except Exception as exc:
             # The thread carries on without an engine rather than ending here.
@@ -798,7 +830,7 @@ class Speaker:
                     log(f"  unloaded {self.engine_name}: "
                         f"{before:.0f} MB -> {freed:.0f} MB")
                 try:
-                    self.engine_name, eng = build_engine(self._live())
+                    self.engine_name, eng = self._build(self._live())
                     self.error = None
                     now = rss_mb()
                     log(f"engine ready ({self.engine_name})"
