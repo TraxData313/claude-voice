@@ -594,3 +594,11 @@ handle open, so the folder looked stalled while the process had written 289 MB. 
 answer to "is it still downloading" came from the process's own write counter, never from
 the folder. It is also why the install window shows which step it is on and for how long,
 rather than a byte count it would have had to make up.
+
+**A cached model can still take minutes to load.** Pocket asks Hugging Face whether each
+cached file is current. Behind a proxy that re-signs TLS, Python's certifi bundle rejects
+the proxy, and huggingface_hub retries every file five times with backoff — about 25
+seconds a file — before quietly using the cache. The engine sat at "loading the model" for
+a hundred seconds with no CPU and no error, and looked hung. `pocket_engine` now injects
+`truststore` when it is installed, so Python trusts what Windows trusts: the same load took
+8 seconds.

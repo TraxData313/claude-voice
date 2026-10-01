@@ -236,6 +236,27 @@ def default_voice(language=DEFAULT_LANGUAGE):
     return next((r["id"] for r in rows if r["id"] == DEFAULT_VOICE), rows[0]["id"])
 
 
+def _trust_windows_certificates():
+    """Let Python check certificates against Windows' store, not certifi's.
+
+    Even with every file cached, the model load asks Hugging Face whether each
+    one is current. Behind a corporate proxy that re-signs TLS, Python's own
+    bundle rejects the proxy's certificate, and huggingface_hub does not give
+    up -- it retries each file five times with backoff, about 25 seconds a
+    file, before falling back to the cache. The engine sat at "loading the
+    model" for well over a minute and looked hung. Windows already trusts the
+    proxy, so borrowing its store makes the check succeed in a moment.
+
+    Optional: truststore is not a dependency, and without it the load is slow
+    on such a network rather than broken.
+    """
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
+
+
 class Engine:
     """Held to the same shape as qwen_engine.Engine, and no wider.
 
@@ -271,6 +292,7 @@ class Engine:
         same way for either engine; Qwen's wants a model directory and a talker
         filename, and this one gets both of those from the package.
         """
+        _trust_windows_certificates()
         from pocket_tts import TTSModel                   # imports torch: seconds
 
         name = model_for(self.language)
