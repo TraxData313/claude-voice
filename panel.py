@@ -372,6 +372,7 @@ class Icons:
         self.on_disk = {}
         self.chose = {}          # which file each drawn size came from, and how
         self.fitted = None       # the one picture drawn big, and the box it fits
+        self.source = (None, None)   # the biggest file, opened by Pillow, if any
 
     def get(self, voice_id, size):
         key = (voice_id, size)
@@ -467,6 +468,10 @@ class Icons:
         key = (voice_id, wide, tall)
         if self.fitted and self.fitted[0] == key:
             return self.fitted[1]
+        smooth = self._fit_smooth(voice_id, wide, tall, over)
+        if smooth is not None:
+            self.fitted = (key, smooth)
+            return smooth
         best = None
         for src in self.stored(voice_id):
             base = self.get(voice_id, src)
@@ -498,6 +503,44 @@ class Icons:
             picture = picture.subsample(shrink)
         self.fitted = (key, (picture, w, h))
         return self.fitted[1]
+
+    def _fit_smooth(self, voice_id, wide, tall, over):
+        """fit(), resampled properly by Pillow when there is one, else None.
+
+        Tk can only reach a size by zooming (every pixel copied into a block)
+        and then subsampling (every nth pixel kept, the rest thrown away). For
+        a 24px icon nobody can tell. For her, drawn 480 wide out of the 640
+        file, it is three-up-four-down: blocks, then gaps, and a face with
+        jagged edges. Pillow averages instead, and lands on any size at all,
+        so she also fills the width exactly rather than nearly.
+
+        Pillow is not something the panel insists on -- it is not installed by
+        setup -- so without it this says None and fit() does it the old way.
+        """
+        try:
+            from PIL import Image, ImageTk
+        except ImportError:
+            return None
+        sizes = self.stored(voice_id)
+        if not sizes:
+            return None
+        if self.source[0] != voice_id:
+            path = os.path.join(self.where, f"{voice_id}-{sizes[-1]}.png")
+            try:
+                with Image.open(path) as im:
+                    self.source = (voice_id, im.convert("RGB"))
+            except OSError:
+                return None
+        src = self.source[1]
+        scale = min(wide * over / src.width, tall / src.height)
+        w, h = int(src.width * scale), int(src.height * scale)
+        if w < 60 or h < 1:
+            return (None, 0, 0)
+        try:
+            picture = ImageTk.PhotoImage(src.resize((w, h), Image.LANCZOS))
+        except (tk.TclError, RuntimeError):
+            return None                    # no Tk image bridge; the old way
+        return (picture, w, h)
 
 
 def one_line(text, width):
