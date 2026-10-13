@@ -369,6 +369,25 @@ def _env(p):
     return env
 
 
+def _progress_bar(p, env):
+    """pip's --progress-bar for the new environment: "raw" where its pip has it, else "on".
+
+    "raw" only arrived in pip 24.1, and the environment gets whichever pip the
+    Python that made it ships -- an older Python ships an older pip, which calls
+    "raw" an invalid choice and stops the install before a byte is fetched
+    (reported on Steam, 2026-10). "on" every pip accepts; it only costs the
+    setup its counter.
+    """
+    try:
+        out = subprocess.run([p["python"], "-m", "pip", "--version"], capture_output=True,
+                             text=True, env=env, creationflags=CREATE_NO_WINDOW,
+                             timeout=120).stdout
+        version = tuple(int(n) for n in re.match(r"pip (\d+)\.(\d+)", out).groups())
+    except (OSError, subprocess.SubprocessError, AttributeError):
+        return "on"
+    return "raw" if version >= (24, 1) else "on"
+
+
 def _download_code(p, log):
     """BreezeBlue's code at the pinned commit, as a zip -- no git needed."""
     url = f"https://codeload.github.com/{CODE_REPO}/zip/{CODE_COMMIT}"
@@ -492,8 +511,10 @@ def install(target, say=print):
                     # "raw" has pip write "Progress <bytes> of <total>" lines into the log,
                     # which is what lets a setup draw a real bar for these 2.9 GB. Without it
                     # the step sat on "no counter" long enough to look stuck (2026-09-25).
+                    # An older pip has no "raw"; _progress_bar falls back to "on" there.
                     _run([p["python"], "-m", "pip", "install", *TORCH,
-                          "--index-url", TORCH_INDEX, "--progress-bar", "raw"], log, env=env)
+                          "--index-url", TORCH_INDEX, "--progress-bar", _progress_bar(p, env)],
+                         log, env=env)
                 elif step == "cuda":
                     found = _check_cuda(p, log, env)
                     say(f"      torch {found['torch']} sees the card")
@@ -505,7 +526,7 @@ def install(target, say=print):
                         fh.write(CONSTRAINTS)
                     _run([p["python"], "-m", "pip", "install", "-r",
                           os.path.join(p["code"], "requirements.txt"), "-c", pins, TRITON,
-                          "--progress-bar", "raw"], log, env=env)
+                          "--progress-bar", _progress_bar(p, env)], log, env=env)
                 elif step == "weights":
                     fetch = ("from huggingface_hub import snapshot_download; "
                              f"snapshot_download(repo_id={WEIGHTS_REPO!r}, "

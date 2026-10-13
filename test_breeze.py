@@ -446,5 +446,30 @@ class TheMachineCheck(unittest.TestCase):
             self.assertTrue(path.startswith(where), path)
 
 
+class PipsProgressBar(unittest.TestCase):
+    """pip 24.0 and older refuse "raw" outright, which failed the whole install."""
+
+    def bar(self, said=None, fails=None):
+        def run(*args, **kwargs):
+            if fails:
+                raise fails
+            return breeze_setup.subprocess.CompletedProcess(args, 0, said, "")
+        with patch.object(breeze_setup.subprocess, "run", side_effect=run):
+            return breeze_setup._progress_bar({"python": "python.exe"}, {})
+
+    def test_a_pip_that_has_raw_gets_the_counter(self):
+        self.assertEqual(self.bar("pip 24.1 from C:\\x (python 3.13)"), "raw")
+        self.assertEqual(self.bar("pip 25.3 from C:\\x (python 3.13)"), "raw")
+
+    def test_an_older_pip_gets_on(self):
+        self.assertEqual(self.bar("pip 24.0 from C:\\x (python 3.12)"), "on")
+        self.assertEqual(self.bar("pip 23.0.1 from C:\\x (python 3.10)"), "on")
+
+    def test_a_pip_that_will_not_say_gets_on(self):
+        self.assertEqual(self.bar(""), "on")
+        self.assertEqual(self.bar(fails=OSError("gone")), "on")
+        self.assertEqual(self.bar(fails=breeze_setup.subprocess.TimeoutExpired("pip", 120)), "on")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
