@@ -70,7 +70,9 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 # logs, the build output of the retired setup window, and the tests.
 SKIP_DIRS = {".git", ".github", ".claude", ".claude-plugin", ".manager", "logs",
              "__pycache__", "setup-app", "voices-local", "original_Abby_and_Max_generated_pics"}
-SKIP_FILES = {"config.json", "installed.json", "demo.mp4"}
+# .gitignore is never copied: in app\ that name is OLD_SETUP_GUARD, written by
+# guard_against_old_setup, and a read-only copy of it must not travel.
+SKIP_FILES = {"config.json", "installed.json", "demo.mp4", ".gitignore"}
 
 ENGINES = ("pocket", "qwen", "breeze", "none")
 
@@ -648,10 +650,69 @@ def stop_everything(lay, out, extra=(), scripts=()):
 # files
 # --------------------------------------------------------------------------
 
+def _rmtree(path, ignore_errors=False):
+    """shutil.rmtree that also removes read-only files (OLD_SETUP_GUARD). Python
+    3.12's own leaves them, which would leave app.old behind and then block the
+    next swap_in. With ignore_errors it goes on past what will not go (a file a
+    running process holds), as shutil's own does."""
+    import stat
+
+    def again(func, failed, *_):
+        try:
+            os.chmod(failed, stat.S_IWRITE)
+            func(failed)
+        except OSError:
+            if not ignore_errors:
+                raise
+
+    hook = {"onexc": again} if sys.version_info >= (3, 12) else {"onerror": again}
+    try:
+        shutil.rmtree(path, **hook)
+    except OSError:
+        if not ignore_errors:
+            raise
+
+
+# An Immersive AI release from before the registry key (3.4 to 3.6) still
+# downloads ClaudeVoiceSetup.exe 1.16 to add an engine. That exe installs into
+# the folder where.json names -- app\ for this layout -- by laying the 1.16 code
+# over it file by file and then running the 1.16 setup.ps1 there: a 2.0 install
+# turned back into half of a 1.16 one, on the system's Python. It copies the
+# zip's files in name order, and the first is .gitignore. A read-only file of
+# that name makes its very first copy fail with an error it does not catch
+# (UnauthorizedAccessException; an IOException it would retry), so it stops
+# before it has written anything, and the game says the install did not finish.
+OLD_SETUP_GUARD = ".gitignore"
+OLD_SETUP_GUARD_TEXT = (
+    "# claude-voice 2.0 or later is installed in this folder.\n"
+    "#\n"
+    "# This file is read-only on purpose. ClaudeVoiceSetup.exe from before 2.0 (which\n"
+    "# Immersive AI 3.4 to 3.6 download to add a voice engine) would otherwise copy\n"
+    "# its old code over this folder; this file is the first it tries to write, so\n"
+    "# it stops there with 'Access to the path ... is denied' and changes nothing.\n"
+    "#\n"
+    "# To add an engine: the voice app's panel, or run install.ps1 again\n"
+    "# (https://github.com/TraxData313/claude-voice/blob/main/docs/install.md).\n"
+    "# A newer Immersive AI installs engines without that exe.\n"
+)
+
+
+def guard_against_old_setup(app_dir):
+    """Write OLD_SETUP_GUARD into `app_dir`, read-only. Idempotent."""
+    import stat
+    path = os.path.join(app_dir, OLD_SETUP_GUARD)
+    if os.path.exists(path):
+        os.chmod(path, stat.S_IWRITE)
+    with open(path, "w", encoding="utf-8", newline="\r\n") as fh:
+        fh.write(OLD_SETUP_GUARD_TEXT)
+    os.chmod(path, stat.S_IREAD)
+    return path
+
+
 def copy_app(source, dest):
     """This project's files from `source` into a fresh `dest`. Returns the count."""
     if os.path.exists(dest):
-        shutil.rmtree(dest)
+        _rmtree(dest)
     count = 0
     for here, dirs, files in os.walk(source):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
@@ -682,7 +743,7 @@ def swap_in(new, live):
     back if the second fails. The live folder is never half old, half new."""
     old = live + ".old"
     if os.path.exists(old):
-        shutil.rmtree(old, ignore_errors=True)
+        _rmtree(old, ignore_errors=True)
     had = os.path.exists(live)
     if had:
         _retry(os.rename, live, old)
@@ -693,7 +754,7 @@ def swap_in(new, live):
             os.rename(old, live)
         raise
     if had:
-        shutil.rmtree(old, ignore_errors=True)
+        _rmtree(old, ignore_errors=True)
 
 
 def sha256_of(path):
@@ -865,7 +926,7 @@ def migrate_old_layout(lay, out, dry_run, source=None):
         path = os.path.join(root, name)
         try:
             if os.path.isdir(path):
-                shutil.rmtree(path)
+                _rmtree(path)
             else:
                 os.remove(path)
         except OSError as exc:
@@ -883,7 +944,7 @@ def sweep_parked(lay):
         return
     for name in names:
         if name.startswith(lay.product + "-removed-"):
-            shutil.rmtree(os.path.join(temp, name), ignore_errors=True)
+            _rmtree(os.path.join(temp, name), ignore_errors=True)
 
 
 # --------------------------------------------------------------------------
@@ -1041,7 +1102,7 @@ def install_qwen(lay, out, big, dry_run):
         pkg = download(STUDIO_URL, os.path.join(os.environ.get("TEMP", lay.notes), "qwen-studio-pkg",
                                                 os.path.basename(STUDIO_URL)), out, "studio")
         staging = studio + ".unpack"
-        shutil.rmtree(staging, ignore_errors=True)
+        _rmtree(staging, ignore_errors=True)
         with zipfile.ZipFile(pkg) as z:
             z.extractall(staging)
         top = staging if _studio_ok(staging) else next(
@@ -1049,9 +1110,9 @@ def install_qwen(lay, out, big, dry_run):
         if not top:
             raise Refused(f"unpacked {os.path.basename(pkg)} but found no runtime\\bin\\server\\jvm.dll in it")
         if os.path.exists(studio):
-            shutil.rmtree(studio)
+            _rmtree(studio)
         os.rename(top, studio)
-        shutil.rmtree(staging, ignore_errors=True)
+        _rmtree(staging, ignore_errors=True)
         claims["studio"] = studio
         out.line("studio", studio)
     models = os.path.join(big, "models") if big else os.path.join(os.path.expanduser("~"), ".qwen-tts-studio", "models")
@@ -1278,6 +1339,7 @@ def install(lay, source, out, engine=None, claude=True, big=None, port=None, opt
         staged = lay.app + ".new"
         n = copy_app(source, staged)
         run([lay.python, "-m", "compileall", "-q", staged], out)
+        guard_against_old_setup(staged)
         out.line("app", f"{n} files from {source}")
         if os.path.isdir(lay.app):
             # The panel, when it was open and not the one running this (an
@@ -1314,7 +1376,7 @@ def install(lay, source, out, engine=None, claude=True, big=None, port=None, opt
         # here on, it can be taken off the way any program is.
         reg_write(lay.uninstall_key, uninstall_values(lay, manifest["version"], folder_kb(lay.root)))
     if copied:
-        shutil.rmtree(copied, ignore_errors=True)      # app\ has it all now
+        _rmtree(copied, ignore_errors=True)      # app\ has it all now
 
     studio = None
     if engine == "pocket":
@@ -1439,10 +1501,10 @@ def plan_uninstall(lay, doc):
     claims = doc.get("claims") or {}
     if claims.get("breeze") and os.path.isdir(claims["breeze"]):
         plan.append((f"Breeze, the engine that laughs (about 11 GB): {claims['breeze']}",
-                     lambda: shutil.rmtree(claims["breeze"], ignore_errors=True)))
+                     lambda: _rmtree(claims["breeze"], ignore_errors=True)))
     if claims.get("studio") and _studio_ok(claims["studio"]):
         plan.append((f"Qwen-TTS Studio: {claims['studio']}",
-                     lambda: shutil.rmtree(claims["studio"], ignore_errors=True)))
+                     lambda: _rmtree(claims["studio"], ignore_errors=True)))
     if claims.get("models"):
         files = [os.path.join(claims["models"], m) for m in QWEN_MODELS
                  if os.path.isfile(os.path.join(claims["models"], m))]
@@ -1451,7 +1513,7 @@ def plan_uninstall(lay, doc):
                          lambda: [os.remove(f) for f in files]))
     if claims.get("pocketWeights"):
         for w in _hf_pocket_weights():
-            plan.append((f"Pocket's voice model: {w}", lambda p=w: shutil.rmtree(p, ignore_errors=True)))
+            plan.append((f"Pocket's voice model: {w}", lambda p=w: _rmtree(p, ignore_errors=True)))
     if reg_read(lay.uninstall_key) is not None:
         plan.append((f"its entry in Settings > Apps", lambda: reg_delete_key(lay.uninstall_key)))
     plan.append((f"the program itself: {lay.root}", None))
@@ -1480,13 +1542,13 @@ def park_runtime(lay, out):
     # Only what an install puts there: `--root D:\Tools` must not take D:\Tools
     # and everything else in it along.
     for path in our_children(lay.root):
-        shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else _quiet_remove(path)
+        _rmtree(path, ignore_errors=True) if os.path.isdir(path) else _quiet_remove(path)
     try:
         os.rmdir(lay.root)
     except OSError:
         pass
     if parked:
-        shutil.rmtree(parked, ignore_errors=True)
+        _rmtree(parked, ignore_errors=True)
     return parked, not our_children(lay.root)
 
 
@@ -1589,7 +1651,7 @@ def uninstall(lay, out, quiet=False, remove_data=None, dry_run=False):
     for folder in dict.fromkeys((lay.data, lay.notes)):
         for name in names:
             path = os.path.join(folder, name)
-            shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else _quiet_remove(path)
+            _rmtree(path, ignore_errors=True) if os.path.isdir(path) else _quiet_remove(path)
         try:
             os.rmdir(folder)           # only when nothing else is in it
         except OSError:
@@ -1624,7 +1686,7 @@ def fetch_source(url, out):
     """GitHub's zip of a branch, unpacked into a fresh temp folder. Returns the
     folder inside it that holds voice_lib.py."""
     work = os.path.join(os.environ.get("TEMP") or _local(), f"{PRODUCT}-update-{os.getpid()}")
-    shutil.rmtree(work, ignore_errors=True)
+    _rmtree(work, ignore_errors=True)
     os.makedirs(work)
     pkg = download(url, os.path.join(work, "source.zip"), out, "download")
     with zipfile.ZipFile(pkg) as z:

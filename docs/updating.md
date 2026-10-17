@@ -196,4 +196,6 @@ Versions are plain numbers compared piece by piece (`1.10.0` beats `1.9.9`). A s
 `-beta` is ignored, so do not rely on one to mean anything.
 
 There is no separate GitHub Release in this scheme. The annotated tag is the plugin release
-marker, and `version.json` remains what the update checker reads.
+marker, and `version.json` remains what the update checker reads. The one GitHub Release that
+matters is v1.16.0: it must stay "Latest" with its `ClaudeVoiceSetup.exe`, because Immersive AI
+3.4 to 3.6 download it from there ([setup-app/README.md](../setup-app/README.md)).

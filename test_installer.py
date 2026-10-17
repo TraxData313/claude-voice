@@ -99,7 +99,7 @@ class Files(Base):
         _tree(src, {"voice_lib.py": "", "installer.py": "", "config.json": "{}", "installed.json": "{}",
                     "test_x.py": "", ".git/HEAD": "", "logs/a.log": "", "voices/female/abby/voice.json": "{}",
                     "docs/icons/abby.ico": "", "setup-app/bin/x.exe": "", "__pycache__/x.pyc": "",
-                    "config.json.123.new": ""})
+                    "config.json.123.new": "", ".gitignore": "logs/"})
         dest = os.path.join(self.tmp, "dest")
         installer.copy_app(src, dest)
         got = sorted(os.path.relpath(os.path.join(h, f), dest).replace("\\", "/")
@@ -121,6 +121,61 @@ class Files(Base):
             installer.swap_in(os.path.join(self.tmp, "missing"), live)
         with open(os.path.join(live, "v.txt")) as fh:
             self.assertEqual(fh.read(), "new")
+
+    def test_the_old_setup_guard_is_read_only_and_written_again_on_update(self):
+        app = os.path.join(self.tmp, "app")
+        os.makedirs(app)
+        path = installer.guard_against_old_setup(app)
+        self.assertEqual(os.path.basename(path), ".gitignore")
+        with self.assertRaises(PermissionError):
+            open(path, "a").close()
+        installer.guard_against_old_setup(app)          # over its own read-only self
+        with open(path, encoding="utf-8") as fh:
+            self.assertIn("2.0", fh.read())
+
+    @unittest.skipUnless(os.name == "nt", "the old setup exe is .NET Framework on Windows")
+    def test_the_old_setup_exe_cannot_copy_over_the_guard(self):
+        # ClaudeVoiceSetup.exe 1.16 copies with File.Copy(src, dest, true) and catches
+        # only IOException. A read-only target must raise what it does not catch.
+        app = os.path.join(self.tmp, "app")
+        os.makedirs(app)
+        guard = installer.guard_against_old_setup(app)
+        src = os.path.join(self.tmp, "old.gitignore")
+        with open(src, "w") as fh:
+            fh.write("logs/\n")
+        script = ("try { [System.IO.File]::Copy($env:CV_SRC, $env:CV_DEST, $true); 'copied' } "
+                  "catch { $_.Exception.InnerException.GetType().FullName }")
+        got = subprocess.run(["powershell.exe", "-NoProfile", "-Command", script],
+                             env={**os.environ, "CV_SRC": src, "CV_DEST": guard},
+                             capture_output=True, text=True, timeout=60).stdout.strip()
+        self.assertEqual(got, "System.UnauthorizedAccessException")
+        with open(guard, encoding="utf-8") as fh:
+            self.assertIn("claude-voice 2.0", fh.read())
+
+    def test_a_guarded_app_is_swapped_and_removed_like_any_other(self):
+        live, new = os.path.join(self.tmp, "app"), os.path.join(self.tmp, "app.new")
+        for folder, v in ((live, "1"), (new, "2")):
+            _tree(folder, {"v.txt": v})
+            installer.guard_against_old_setup(folder)
+        installer.swap_in(new, live)
+        self.assertFalse(os.path.exists(live + ".old"), "a read-only guard kept app.old behind")
+        newer = os.path.join(self.tmp, "app.newer")
+        installer.copy_app(live, newer)                 # the guard does not travel...
+        self.assertFalse(os.path.exists(os.path.join(newer, ".gitignore")))
+        installer.guard_against_old_setup(newer)
+        installer.copy_app(live, newer)                 # ...and a guarded leftover is cleared
+        installer.swap_in(newer, live)
+        self.assertFalse(os.path.exists(live + ".old"))
+        _tree(self.lay.root, {"runtime/python.exe": "x", "app/voice_lib.py": "", "install.json": "{}"})
+        installer.guard_against_old_setup(os.path.join(self.lay.root, "app"))
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        temp = os.path.join(self.tmp, "temp")
+        os.makedirs(temp)
+        with patch.dict(os.environ, {"TEMP": temp}):
+            _, gone = installer.park_runtime(self.lay, Quiet(self.lay))
+        self.assertTrue(gone)
+        self.assertFalse(os.path.exists(self.lay.root))
 
     def test_park_runtime_leaves_no_program_folder(self):
         _tree(self.lay.root, {"runtime/python.exe": "x", "runtime/Lib/os.py": "", "app/voice_lib.py": "",
