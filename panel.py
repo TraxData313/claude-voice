@@ -2498,11 +2498,12 @@ class Panel:
             voices = []            # no voices folder; the dropdown stays empty
         import pocket_engine
 
-        self.takes_mood = bool(voice_lib.engine_can(engine, "instruction"))
+        self.takes_mood = bool(voice_lib.engine_can(engine, "instruction", state))
         self.takes_events = tuple(voice_lib.engine_can(engine, "events"))
         self.render_engine({"engine": engine, "engines": list(voice_lib.ENGINES),
                             "pocketReady": pocket_engine.available(),
-                            "breezeReady": voice_lib.engine_ready("breeze", state)})
+                            "breezeReady": voice_lib.engine_ready("breeze", state),
+                            "qwenReady": voice_lib.engine_ready("qwen", state)})
         self.render_voices({"voices": voices, "voice": state.get("voice")})
         self.draw_face(state.get("voice"))
 
@@ -2521,6 +2522,8 @@ class Panel:
         """
         if "breezeReady" in st:
             self.drawn["breezeReady"] = bool(st.get("breezeReady"))
+        if "qwenReady" in st:
+            self.drawn["qwenReady"] = bool(st.get("qwenReady"))
         offer = [e for e in (st.get("engines") or list(ENGINE_LABELS))
                  if e != "pocket" or st.get("pocketReady", True)]
         if offer != self.drawn.get("tts-engines"):
@@ -2538,11 +2541,14 @@ class Panel:
         want = next((e for e, label in ENGINE_LABELS.items() if label == shown), None)
         if not want or want == self.engine:
             return
-        if want == "breeze" and not self.drawn.get("breezeReady"):
+        if want in ("breeze", "qwen") and not self.drawn.get(want + "Ready", True):
             # Asked, never fetched. The dropdown goes back to whatever is
             # speaking until the install has finished and switched it itself.
+            # Qwen lands here where Studio cannot load -- Smart App Control
+            # refuses its DLLs -- and Qwen on PyTorch is not installed yet;
+            # switching anyway only ever fell back to Pocket (2026-10-17).
             self.engine_box.set(ENGINE_LABELS.get(self.engine, self.engine or ""))
-            self.open_breeze_setup()
+            self.open_breeze_setup(want)
             return
         # "tts-engine" rather than "engine": that key is already taken by the
         # load/unload switch, which holds it for twenty-five seconds while a
@@ -3049,8 +3055,19 @@ class Panel:
         self.settings = None
         self.storage_box = None
 
-    # -- installing Breeze, when somebody picks it --------------------------
-    def open_breeze_setup(self):
+    # -- installing Breeze or Qwen, when somebody picks it ------------------
+    def _setup_module(self):
+        """The installer the open window is for: breeze_setup or qwen_setup.
+        Both have the same calls and the same status file shape."""
+        if getattr(self, "setup_engine", "breeze") == "qwen":
+            import qwen_setup
+
+            return qwen_setup
+        import breeze_setup
+
+        return breeze_setup
+
+    def open_breeze_setup(self, engine="breeze"):
         """What stands between picking Breeze and eleven gigabytes arriving.
 
         Nobody gets Breeze because an update came in: picking it before it is
@@ -3065,15 +3082,17 @@ class Panel:
         away; this window only reads the status file the install keeps, so it
         can be closed and opened again and finds the install where it had got.
         """
-        import breeze_setup
-
         if self.setup_win is not None and self.setup_win.winfo_exists():
-            self.setup_win.deiconify()           # already open; come back to it
-            self.setup_win.lift()
-            return
+            if getattr(self, "setup_engine", "breeze") == engine:
+                self.setup_win.deiconify()       # already open; come back to it
+                self.setup_win.lift()
+                return
+            self.close_breeze_setup()            # the other engine's window
+        self.setup_engine = engine
+        setup = self._setup_module()
 
         win = self.setup_win = tk.Toplevel(self.root)
-        win.title("Breeze TTS 2")
+        win.title(setup.TITLE)
         win.transient(self.root)
         win.wm_attributes("-topmost", self.on_top.get())
         win.protocol("WM_DELETE_WINDOW", self.close_breeze_setup)
@@ -3084,8 +3103,8 @@ class Panel:
 
         frame = ttk.Frame(win)
         frame.pack(fill="both", expand=True, padx=4, pady=(0, 12))
-        self._section(frame, "the voice that laughs")
-        self._note(frame, voice_lib.engine_info("breeze")["blurb"])
+        self._section(frame, setup.TAGLINE)
+        self._note(frame, setup.NOTE or voice_lib.engine_info(engine)["blurb"])
 
         self._section(frame, "what it needs, and what this machine has")
         self.setup_rows = ttk.Frame(frame)
@@ -3093,17 +3112,16 @@ class Panel:
         self._note(self.setup_rows, "asking the graphics card…", pad=0)
 
         self._section(frame, "where it goes")
-        self.setup_target = breeze_setup.default_target()
+        self.setup_target = setup.default_target()
         line = ttk.Frame(frame)
         line.pack(fill="x", padx=8, pady=(2, 0))
         self.setup_where = ttk.Label(line, text=self.setup_target, font=FONT_SMALL)
         self.setup_where.pack(side="left")
         ttk.Button(line, text="change…", width=9,
                    command=self.pick_setup_target).pack(side="right")
-        self._note(frame, f"About {breeze_setup.DOWNLOAD_GB} GB to download, and 15 "
+        self._note(frame, f"About {setup.DOWNLOAD_GB} GB to download, and 10 "
                    "to 30 minutes. Nothing outside that folder is touched, and "
-                   "deleting it undoes all of it. The model's weights are for "
-                   "research and non-commercial use only.")
+                   "deleting it undoes all of it. " + setup.LICENCE)
 
         self.setup_status = ttk.Label(frame, text="", font=FONT_SMALL,
                                       wraplength=320, justify="left")
@@ -3138,12 +3156,11 @@ class Panel:
     def check_for_breeze(self):
         """Ask the machine, off the Tk thread: nvidia-smi takes a second or so,
         and a window that freezes while it opens looks broken."""
-        import breeze_setup
-
+        setup = self._setup_module()
         target = self.setup_target
 
         def go():
-            self.setup_inbox.put(("checked", breeze_setup.check_machine(target)))
+            self.setup_inbox.put(("checked", setup.check_machine(target)))
 
         threading.Thread(target=go, name="breeze-check", daemon=True).start()
 
@@ -3154,14 +3171,14 @@ class Panel:
         from tkinter import filedialog
 
         chosen = filedialog.askdirectory(parent=self.setup_win, mustexist=True,
-                                         title="Where should Breeze TTS 2 go?")
+                                         title=f"Where should {self._setup_module().TITLE} go?")
         if not chosen:
             return
         chosen = os.path.normpath(chosen)
         busy = [f for f in os.listdir(chosen) if f != "installed.json"] \
             if os.path.isdir(chosen) else []
         if busy and not os.path.exists(os.path.join(chosen, "installed.json")):
-            chosen = os.path.join(chosen, "claude-voice-breeze")
+            chosen = os.path.join(chosen, "claude-voice-" + self.setup_engine)
         self.setup_target = chosen
         self.setup_where.configure(text=chosen)
         self.setup_go.state(["disabled"])
@@ -3169,18 +3186,17 @@ class Panel:
 
     def start_breeze_install(self):
         """Hand it to a process of its own, and watch that process's status."""
-        import breeze_setup
-
-        if breeze_setup.running() or self.setup_verdict in (None, "no"):
+        setup = self._setup_module()
+        if setup.running() or self.setup_verdict in (None, "no"):
             return
         os.makedirs(voice_lib.LOG_DIR, exist_ok=True)
-        out = open(os.path.join(voice_lib.LOG_DIR, "breeze-install.out"), "a",
+        out = open(os.path.join(voice_lib.LOG_DIR, f"{setup.ENGINE}-install.out"), "a",
                    encoding="utf-8")
         DETACHED = 0x00000008 | 0x08000000       # DETACHED_PROCESS | CREATE_NO_WINDOW
         # --yes because the button was the asking; the command still refuses a
         # machine that cannot run it, whatever it is told.
         subprocess.Popen([voice_lib._python(), os.path.join(voice_lib.ROOT, "voice_cli.py"),
-                          "install", "breeze", "--yes", "--to", self.setup_target],
+                          "install", setup.ENGINE, "--yes", "--to", self.setup_target],
                          stdout=out, stderr=out, stdin=subprocess.DEVNULL,
                          creationflags=DETACHED, close_fds=True, cwd=voice_lib._workdir())
         self.setup_started = time.time()
@@ -3195,12 +3211,11 @@ class Panel:
         folder that may since have been deleted, and reading "installed" off it
         would be the window lying.
         """
-        import breeze_setup
-
         if self.setup_win is None or not self.setup_win.winfo_exists():
             return
-        status = breeze_setup.read_status()
-        live = breeze_setup.running()
+        setup = self._setup_module()
+        status = setup.read_status()
+        live = setup.running()
         mine = bool(self.setup_started and status.get("updated", 0) >= self.setup_started - 1)
         if live or mine:
             self.setup_inbox.put(("status", status, bool(live)))
@@ -3210,7 +3225,7 @@ class Panel:
             # would be the window pretending otherwise.
             self.setup_inbox.put(("status", {
                 "state": "failed",
-                "error": "the installer did not start -- logs\\breeze-install.out "
+                "error": f"the installer did not start -- logs\\{setup.ENGINE}-install.out "
                          "says why"}, False))
         self.setup_win.after(1000, self.watch_breeze_install)
 
@@ -3249,9 +3264,7 @@ class Panel:
                 "no": "This machine cannot run it, so there is nothing to download."}
         if self.setup_started is None:
             self.setup_status.configure(text=says[report["verdict"]])
-        import breeze_setup
-
-        if report["verdict"] != "no" and not breeze_setup.running() \
+        if report["verdict"] != "no" and not self._setup_module().running() \
                 and self.setup_started is None:
             self.setup_go.state(["!disabled"])
 
@@ -3273,16 +3286,17 @@ class Panel:
         self.setup_bar.pack_forget()
         self.setup_close.configure(text="close")
         if state == "done":
+            engine = self.setup_engine
             self.setup_status.configure(
-                text="Installed. Breeze is the engine now: the next thing said "
-                     "loads it, which takes about half a minute."
+                text=f"Installed. {self._setup_module().TITLE} is the engine now: the "
+                     "next thing said loads it, which takes about half a minute."
                      + ("" if status.get("fast", True) else " It runs without its "
                         "fast stages on this card, so expect a wait before each line."))
-            self.drawn["breezeReady"] = True
+            self.drawn[engine + "Ready"] = True
             self.hold("tts-engine", 4.0)
             self.hold("voice", 4.0)
-            self.engine = "breeze"
-            self.act("/set-engine", {"engine": "breeze"})
+            self.engine = engine
+            self.act("/set-engine", {"engine": engine})
             self.setup_started = None            # shown once; do not switch twice
         elif state == "failed":
             self.setup_status.configure(

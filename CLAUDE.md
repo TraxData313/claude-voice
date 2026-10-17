@@ -31,12 +31,12 @@ the same idea: explain *why*, not what the line already says.
 
 ## Before you finish
 
-- `python -m py_compile speak_server.py voice_lib.py voice_cli.py panel.py speak_hook.py
+- `python -m py_compile speak_server.py voice_lib.py voice_cli.py panel.py speak_hook.py qwen_server.py qwen_torch_engine.py qwen_setup.py
   update_check.py installer.py`
 - Changed the install? `python test_installer.py`. A real run must not touch the real install:
   `install.ps1 -Root <temp> -Product claude-voice-test -DataDir <temp> -ClaudeDir <temp>
   -ShortcutDir <temp> -Port 8799`, then the uninstall its Settings → Apps entry names. Bump
-  `runtime.json` and `install.ps1` together (the test checks), and re-pin `requirements-pocket.txt`
+  `runtime.json` and `install.ps1` together (the test checks), and re-pin `requirements-pocket.txt` or `requirements-qwen.txt`
   only after seeing the new wheels load with Smart App Control on.
 - Changed a command? `python voice_cli.py help --markdown` regenerates `docs/commands.md`.
 - **Releasing?** Bump `version` and `date` in `version.json`, write its `headline` for the

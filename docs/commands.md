@@ -63,6 +63,7 @@ command — it is `/voice on`, never `/voice_on`.
 | `register [--kind installed\|dev]` | Tell games where this copy is (a key in the user's registry). The installer does it; a git checkout opts in here. |
 | `unregister [--force]` | Take that registration away again, if it names this copy. |
 | `install breeze [--check]` | Check this machine for Breeze TTS 2, the voice that laughs, then offer to download it (about 11 GB). Asks first. |
+| `install qwen [--check]` | Check this machine for Qwen on PyTorch -- Qwen with Smart App Control on -- then offer to download it (about 7 GB). Asks first. |
 
 ## Keeping it current
 

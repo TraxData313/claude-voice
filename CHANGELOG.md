@@ -6,6 +6,26 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## Unreleased
+
+**Qwen runs with Smart App Control on.** Picking Qwen on a machine where Windows refuses
+Qwen-TTS Studio used to switch, fall back to Pocket on its own, and look as if the choice
+would not stick. Now Qwen runs there on PyTorch instead.
+
+- **`/voice install qwen`** (or picking Qwen in the panel, where Studio cannot run) installs
+  Qwen on PyTorch: about 7 GB, in a folder of its own, at package versions seen to load
+  with Smart App Control enforcing. Every existing voice works on it unchanged.
+  `install.ps1 -Engine qwen` takes this road where Smart App Control is on.
+- It speaks at 1.6–1.7× realtime with the first sound in 0.2–0.4 s on an RTX 5080 laptop,
+  streamed: the code predictor is replayed as a CUDA graph. See
+  [engines.md](docs/engines.md#qwen-on-pytorch-qwen-with-smart-app-control-on).
+- On PyTorch Qwen takes no mood beside the words (the Base model has no input for one),
+  and says so.
+- **A line queued for one engine and spoken by another keeps its voice.** When Qwen fell
+  back to Pocket mid-line, the line reached Pocket without a Pocket voice and was read as
+  Alba, a man — a game's wife included. Each line is now re-cast for the engine that loads.
+- The machine check reads 2026 NVIDIA drivers, which print "CUDA UMD Version".
+
 ## 2.0.0 — 2026-10-17
 
 **A program of its own, on a signed Python; Claude Code's hooks are the only way in; and a

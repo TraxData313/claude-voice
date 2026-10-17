@@ -230,11 +230,26 @@ class TheBreezeWindow(unittest.TestCase):
         one.engine_box.set(panel.ENGINE_LABELS["breeze"])
         one.drawn["breezeReady"] = False
         opened = []
-        with patch.object(panel.Panel, "open_breeze_setup", lambda self: opened.append(1)):
+        with patch.object(panel.Panel, "open_breeze_setup",
+                          lambda self, engine="breeze": opened.append(engine)):
             panel.Panel.pick_engine(one)
-        self.assertEqual(opened, [1])
+        self.assertEqual(opened, ["breeze"])
         self.assertEqual(one.sent, {}, "nothing is switched, and nothing downloaded")
         self.assertEqual(one.engine_box.get(), panel.ENGINE_LABELS["pocket"])
+
+    def test_qwen_that_cannot_run_here_offers_its_install_too(self):
+        # Smart App Control refusing Studio, and Qwen on PyTorch not installed:
+        # switching would only fall back to Pocket, so the installer opens.
+        one = self.bare()
+        one.engine_box = ttk.Combobox(self.root, values=list(panel.ENGINE_LABELS.values()))
+        one.engine_box.set(panel.ENGINE_LABELS["qwen"])
+        one.drawn["qwenReady"] = False
+        opened = []
+        with patch.object(panel.Panel, "open_breeze_setup",
+                          lambda self, engine="breeze": opened.append(engine)):
+            panel.Panel.pick_engine(one)
+        self.assertEqual(opened, ["qwen"])
+        self.assertEqual(one.sent, {})
 
     def test_picking_it_installed_just_switches(self):
         one = self.bare()

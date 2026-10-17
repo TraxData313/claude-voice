@@ -207,6 +207,16 @@ DEFAULTS = {
     # 13 GB peak -- and speaks at about half realtime, so only for a card that
     # cannot hold them. See breeze_engine.FAST_FLAGS.
     "breezeFast": True,
+    # Qwen on PyTorch, in an environment of its own like Breeze: its python.exe
+    # and the Qwen3-TTS Base weights. Where both are there, this is how the
+    # Qwen engine runs -- Studio's unsigned DLLs are refused by Smart App
+    # Control, these files are not. Written by 'voice_cli.py install qwen' and
+    # the panel's installer; empty means not installed. See qwen_server.py.
+    "qwenPython": "",
+    "qwenModel": "",
+    # The code predictor replayed as a CUDA graph: 1.7x realtime instead of
+    # 0.6x. Off only to rule it out when something sounds wrong.
+    "qwenGraph": True,
 
     # --- runtime state, written by voice_cli ------------------------------
     "enabled": False,
@@ -556,13 +566,15 @@ ENGINE_INFO = {
     # from a dropdown is really asking. For Breeze that is its start, which
     # peaks at 13.1 GB and settles at about 9; for Qwen it is 3.3 GB.
     "qwen": {
-        "label": "Qwen — GPU 3.3 GB",
+        "label": "Qwen — GPU 5 GB",
         "blurb": (
-            "The original, and the better voice. Needs Qwen-TTS Studio and a "
-            "graphics card with about 3.3 GB free. Reads Cyrillic, and every "
-            "voice in the voices folder was cloned here."
+            "The original, and the better voice. Runs on an NVIDIA graphics "
+            "card with about 5 GB free, through PyTorch -- which works with "
+            "Windows' Smart App Control on -- as a download of about 7 GB. "
+            "Reads Cyrillic, and every voice in the voices folder was cloned "
+            "on it. (Qwen-TTS Studio still works where Smart App Control is off.)"
         ),
-        "url": "https://github.com/Danmoreng/qwen-tts-studio",
+        "url": "https://github.com/QwenLM/Qwen3-TTS",
     },
     "pocket": {
         "label": "Pocket TTS — CPU",
@@ -603,19 +615,53 @@ ENGINE_CAN = {
 }
 
 
-def engine_can(name, what):
+def engine_can(name, what, state=None):
     """What an engine can do: engine_can("breeze", "events"). Never raises --
-    an unknown engine can do nothing, which is the safe answer."""
+    an unknown engine can do nothing, which is the safe answer.
+
+    Qwen's mood depends on how it runs: Studio has a field for one, the Base
+    model qwen-tts runs has no instruction input at all. Saying a mood is taken
+    when it is dropped would have sessions writing directions nobody hears.
+    """
+    if name == "qwen" and what == "instruction":
+        try:
+            return qwen_backend(state) == "studio"
+        except Exception:                                   # noqa: BLE001
+            return True
     return ENGINE_CAN.get(name, {}).get(what, () if what == "events" else False)
+
+
+def qwen_backend(state=None):
+    """How the Qwen engine runs here: "torch" where Qwen on PyTorch is
+    installed, else "studio". Existence checks only -- a dropdown asks this."""
+    import qwen_torch_engine
+
+    state = state if state is not None else load_state()
+    if qwen_torch_engine.available(state.get("qwenPython"), state.get("qwenModel")):
+        return "torch"
+    return "studio"
+
+
+def studio_usable(state=None):
+    """Could Qwen-TTS Studio load here: is it installed, and is Smart App
+    Control -- which refuses its unsigned DLLs -- off. Read from the registry,
+    never by loading a DLL, which is itself a refusal and a Windows toast."""
+    import qwen_engine
+
+    state = state if state is not None else load_state()
+    studio = os.path.expandvars(state.get("studioDir") or "")
+    if not studio or not os.path.isfile(os.path.join(studio, "qwen3_tts.dll")):
+        return False
+    return qwen_engine.smart_app_control() not in ("on", "evaluation")
 
 
 def engine_ready(name, state=None):
     """Could this engine start right now, without installing anything?
 
-    Qwen answers yes and lets its own load say otherwise -- Studio has always
-    been this tool's first assumption. The other two are optional: Pocket is a
-    pip package and Breeze a separate download, and both are asked about in a
-    dropdown's worth of time, so neither answer imports anything.
+    Qwen is ready where Qwen on PyTorch is installed, or where Studio is and
+    Smart App Control will let it load. Pocket is a pip package and Breeze a
+    separate download. All of it is asked about in a dropdown's worth of time,
+    so no answer imports a model or loads a DLL.
     """
     if name == "pocket":
         import pocket_engine
@@ -627,6 +673,9 @@ def engine_ready(name, state=None):
         state = state if state is not None else load_state()
         return breeze_engine.available(state.get("breezePython"), state.get("breezeDir"),
                                        state.get("breezeModel"))
+    if name == "qwen":
+        state = state if state is not None else load_state()
+        return qwen_backend(state) == "torch" or studio_usable(state)
     return name in ENGINES
 
 
@@ -2464,7 +2513,7 @@ def session_note(state=None):
         who = state.get("voice") or ""
     speaker = (f"speaking as {who} through {engine_name(engine)}" if who
                else f"speaking through {engine_name(engine)}")
-    moods = engine_can(engine, "instruction")
+    moods = engine_can(engine, "instruction", state)
     sounds = engine_can(engine, "events")
 
     if not on:
@@ -2893,6 +2942,16 @@ def set_engine(name, state=None):
             "Breeze TTS 2 is not installed. It is a separate download of about "
             "eleven gigabytes and needs an NVIDIA card with 12 GB or more. Check "
             "this machine and install it with: python voice_cli.py install breeze")
+
+    if want == "qwen" and not engine_ready("qwen", state):
+        # Studio cannot load here (missing, or Smart App Control refuses its
+        # DLLs) and Qwen on PyTorch is not installed yet. Switching anyway is
+        # what used to happen: the engine then fell back to Pocket on its own,
+        # and the choice looked as if it would not stick (2026-10-17).
+        raise LookupError(
+            "Qwen is not installed for this machine yet. It runs on an NVIDIA "
+            "card through PyTorch, a download of about 7 GB that works with "
+            "Smart App Control on. Install it with: python voice_cli.py install qwen")
 
     after = dict(state)
     after["engine"] = want

@@ -36,7 +36,9 @@ class WhatItCanDo(unittest.TestCase):
 
     def test_only_breeze_makes_sounds_and_pocket_takes_no_mood(self):
         self.assertEqual(voice_lib.engine_can("qwen", "events"), ())
-        self.assertTrue(voice_lib.engine_can("qwen", "instruction"))
+        # On Studio. Qwen on PyTorch takes none -- test_qwen.py -- so the
+        # config is given, not this machine's.
+        self.assertTrue(voice_lib.engine_can("qwen", "instruction", {}))
         self.assertFalse(voice_lib.engine_can("pocket", "instruction"))
         self.assertTrue(voice_lib.engine_can("breeze", "instruction"))
         self.assertEqual(voice_lib.engine_can("nonsense", "events"), ())

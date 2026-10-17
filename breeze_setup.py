@@ -36,6 +36,13 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
+# What the panel's install window and the CLI say about it; qwen_setup has the same.
+ENGINE = "breeze"
+TITLE = "Breeze TTS 2"
+TAGLINE = "the voice that laughs"
+NOTE = None                                  # the engine's own blurb says it
+LICENCE = "The model's weights are for research and non-commercial use only."
+
 # The versions that were tested together on 2026-09-24, and so the ones fetched.
 # Newer may well work; these did. See docs/laughing.md for what was measured.
 CODE_REPO = "breezeblue-ai/breeze-tts"
@@ -148,7 +155,15 @@ def cuda_version(exe=None):
                              creationflags=CREATE_NO_WINDOW).stdout
     except (OSError, subprocess.SubprocessError):
         return None
-    m = re.search(r"CUDA Version:\s*(\d+)\.(\d+)", out)
+    return parse_cuda_version(out)
+
+
+def parse_cuda_version(header):
+    """(major, minor) off nvidia-smi's header, or None. Drivers from 2026 on
+    print "CUDA UMD Version: 13.4" where older ones said "CUDA Version: 12.8";
+    reading only the old spelling called a 617 driver's CUDA unknown and the
+    machine slow (2026-10-17)."""
+    m = re.search(r"CUDA (?:UMD )?Version:\s*(\d+)\.(\d+)", header or "")
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 

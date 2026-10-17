@@ -119,7 +119,7 @@ def _told_line(state):
     if not state.get("enabled"):
         return "that the voice is off"
     engine = voice_lib.engine_of(state)
-    moods = voice_lib.engine_can(engine, "instruction")
+    moods = voice_lib.engine_can(engine, "instruction", state)
     sounds = voice_lib.engine_can(engine, "events")
     if moods and sounds:
         return "it may write a mood and sounds, like (whisper) and (laugh)"
@@ -247,17 +247,36 @@ def cmd_engine(state, args):
     print("  It loads on the next thing spoken, so the first one is slower.")
 
 
+def _setup_for(name):
+    """The installer module for an optional engine, or None."""
+    if name == "breeze":
+        import breeze_setup
+
+        return breeze_setup
+    if name == "qwen":
+        import qwen_setup
+
+        return qwen_setup
+    return None
+
+
+def _installed(name, state):
+    """Is this engine's own download already in place. Qwen counts only on
+    PyTorch -- Studio is a different install, and the one this replaces."""
+    if name == "qwen":
+        return voice_lib.qwen_backend(state) == "torch"
+    return voice_lib.engine_ready(name, state)
+
+
 def cmd_install(state, args):
-    """Install Breeze TTS 2, the optional engine that laughs. Asks first.
+    """Install an optional engine: Breeze TTS 2, or Qwen on PyTorch. Asks first.
 
     Never run by anything but somebody typing it, or the panel's window after
-    somebody pressed its button: it is about eleven gigabytes and it needs a
-    particular graphics card, and both are said out loud before anything is
-    fetched. --check says whether this machine can run it and stops there.
+    somebody pressed its button: each is gigabytes and needs a particular
+    graphics card, and both are said out loud before anything is fetched.
+    --check says whether this machine can run it and stops there.
     """
-    import breeze_setup
-
-    usage = "usage: voice_cli.py install breeze [--check] [--to <folder>] [--yes]"
+    usage = "usage: voice_cli.py install breeze|qwen [--check] [--to <folder>] [--yes]"
     rest, target, flags = [], None, set()
     it = iter(args)
     for a in it:
@@ -269,19 +288,22 @@ def cmd_install(state, args):
             flags.add(a.lstrip("-").lower())
         else:
             rest.append(a.lower())
-    if rest[:1] != ["breeze"]:
+    name = rest[0] if rest else ""
+    setup = _setup_for(name)
+    if setup is None:
         raise SystemExit(usage)
+    title = getattr(setup, "TITLE", "Breeze TTS 2")
 
-    busy = breeze_setup.running()
+    busy = setup.running()
     if busy:
         print(f"An install is already running: step {busy.get('step')} of "
               f"{busy.get('steps')}, {busy.get('label')}.")
-        print(f"  Its log: {breeze_setup.LOG_PATH}")
+        print(f"  Its log: {setup.LOG_PATH}")
         return
 
-    report = breeze_setup.check_machine(target)
+    report = setup.check_machine(target)
     marks = {True: "ok", None: "!!", False: "no"}
-    print("Breeze TTS 2 -- what it needs, and what this machine has:\n")
+    print(f"{title} -- what it needs, and what this machine has:\n")
     for row in report["rows"]:
         print(f"  [{marks[row['ok']]}] {row['need']}")
         print(f"       {row['have']}")
@@ -290,16 +312,17 @@ def cmd_install(state, args):
         return
     if report["verdict"] == "no":
         raise SystemExit("This machine cannot run it, so nothing was downloaded.")
-    if voice_lib.engine_ready("breeze", state) and "again" not in flags:
-        print(f"It is already installed: {state.get('breezeModel')}")
-        print("  Switch to it with:  python voice_cli.py engine breeze")
+    if _installed(name, state) and "again" not in flags:
+        print(f"It is already installed: {state.get(name + 'Model')}")
+        print(f"  Switch to it with:  python voice_cli.py engine {name}")
         return
 
     where = os.path.abspath(report["target"])
-    print(f"  Downloads about {breeze_setup.DOWNLOAD_GB} GB into {where}")
-    print("  and takes 15 to 30 minutes, most of it the download. Nothing else on")
+    print(f"  Downloads about {setup.DOWNLOAD_GB} GB into {where}")
+    print("  and takes 10 to 30 minutes, most of it the download. Nothing else on")
     print("  this machine is changed, and deleting that folder undoes all of it.")
-    print("  The model's weights are for research and non-commercial use only.")
+    print("  " + getattr(setup, "LICENCE",
+                         "The model's weights are for research and non-commercial use only."))
     if report["verdict"] == "slow":
         print("  On this card it runs without its fast stages, slower than speech.")
     if "yes" not in flags:
@@ -312,14 +335,14 @@ def cmd_install(state, args):
             return
     print()
     try:
-        breeze_setup.install(where, say=lambda line: print(line, flush=True))
+        setup.install(where, say=lambda line: print(line, flush=True))
     except KeyboardInterrupt:
         raise SystemExit("\nStopped. Run the same command again to carry on from "
                          "where it got to.")
     except Exception as exc:
         raise SystemExit(f"\nThe install stopped: {exc}\nRun the same command again "
                          "to carry on from where it got to.")
-    print("  Switch to it with:  python voice_cli.py engine breeze")
+    print(f"  Switch to it with:  python voice_cli.py engine {name}")
 
 
 def _describe(info):
@@ -963,6 +986,7 @@ HELP = [
         ("register", "[--kind installed|dev]", "Tell games where this copy is (a key in the user's registry). The installer does it; a git checkout opts in here."),
         ("unregister", "[--force]", "Take that registration away again, if it names this copy."),
         ("install", "breeze [--check]", "Check this machine for Breeze TTS 2, the voice that laughs, then offer to download it (about 11 GB). Asks first."),
+        ("install", "qwen [--check]", "Check this machine for Qwen on PyTorch -- Qwen with Smart App Control on -- then offer to download it (about 7 GB). Asks first."),
     ]),
     ("Keeping it current", [
         ("version", "", "What this copy is. Contacts nobody -- worth quoting in a bug report."),

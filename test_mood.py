@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import qwen_engine
 import speak_server
+import voice_lib
 
 
 def job(instruction=None, **kwargs):
@@ -48,9 +49,16 @@ class WhatAJobKeeps(unittest.TestCase):
 
 
 class WhoGetsIt(unittest.TestCase):
-    def test_qwen_is_called_with_it(self):
-        called = Speaker("qwen")._kwargs(job("sound tired", embedding_path="a.bin"))
+    def test_qwen_on_studio_is_called_with_it(self):
+        with patch.object(voice_lib, "qwen_backend", lambda state=None: "studio"):
+            called = Speaker("qwen")._kwargs(job("sound tired", embedding_path="a.bin"))
         self.assertEqual(called, {"embedding_path": "a.bin", "instruction": "sound tired"})
+
+    def test_qwen_on_pytorch_is_not(self):
+        # The Base model has no input for one.
+        with patch.object(voice_lib, "qwen_backend", lambda state=None: "torch"):
+            called = Speaker("qwen")._kwargs(job("sound tired", embedding_path="a.bin"))
+        self.assertEqual(called, {"embedding_path": "a.bin"})
 
     def test_pocket_never_sees_a_keyword_it_does_not_declare(self):
         given = job("sound tired", pocket_voice="abby")

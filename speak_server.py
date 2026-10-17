@@ -238,6 +238,28 @@ def build_engine(state, progress=None):
             log(f"could not warm the voice: {exc}")
         return which, eng
 
+    if voice_lib.qwen_backend(state) == "torch":
+        import qwen_torch_engine
+
+        # Qwen on PyTorch, in its own environment and process -- the way Qwen
+        # runs where Smart App Control refuses Studio, and wherever it is
+        # installed, since it is the one that also runs where Studio does not.
+        # See qwen_torch_engine.py. The voice speaking now says the first word,
+        # which captures the predictor's graph before anything real is said.
+        warm = None
+        try:
+            _, kwargs = voice_lib.resolve(state.get("voice"), "embedding", state)
+            warm = kwargs.get("embedding_path")
+        except LookupError:
+            pass
+        eng = qwen_torch_engine.Engine(
+            state.get("qwenPython"), state.get("qwenModel"),
+            graph=state.get("qwenGraph", True), log=log,
+            log_path=voice_lib._rolled(os.path.join(voice_lib.LOG_DIR, "qwen-server.log")),
+            progress=progress, warm_voice=warm)
+        eng.load_models()
+        return which, eng
+
     from qwen_engine import Engine
 
     eng = Engine(state["studioDir"], verbose=True)
@@ -976,7 +998,7 @@ class Speaker:
         the engine that is actually loaded rather than the one the config
         names.
         """
-        if job.instruction and self.engine_name in INSTRUCTED_ENGINES:
+        if job.instruction and _instructed(self.engine_name):
             return {**job.kwargs, "instruction": job.instruction}
         return job.kwargs
 
@@ -984,7 +1006,7 @@ class Speaker:
         """How much longer than plain this job may run before it is called a
         derail: more when it carries a mood the loaded engine performs, since a
         mood is often *meant* to slow the reading down."""
-        if job.instruction and self.engine_name in INSTRUCTED_ENGINES:
+        if job.instruction and _instructed(self.engine_name):
             return voice_lib.INSTRUCTED_SLACK
         return 1.0
 
@@ -1824,6 +1846,12 @@ _POCKET = {"known": None}
 # voice_lib.ENGINE_CAN, which the panel and the API read as well.
 INSTRUCTED_ENGINES = tuple(e for e in voice_lib.ENGINES
                            if voice_lib.engine_can(e, "instruction"))
+
+
+def _instructed(engine, state=None):
+    """Does this engine take a mood -- asked now, not at import: Qwen takes one
+    on Studio and none on PyTorch, and which it is can change while running."""
+    return bool(voice_lib.engine_can(engine, "instruction", state))
 MAX_INSTRUCTION = 200
 
 
@@ -1838,7 +1866,7 @@ def _takes_instruction(state=None):
     """
     try:
         state = state if state is not None else voice_lib.load_state()
-        return voice_lib.engine_of(state) in INSTRUCTED_ENGINES
+        return _instructed(voice_lib.engine_of(state), state)
     except Exception:
         return False
 
@@ -2001,16 +2029,16 @@ def _capabilities(state, loaded):
         "engine": engine,
         "engineLoaded": loaded,
         "voice": state.get("voice"),
-        "instruction": engine in INSTRUCTED_ENGINES,
+        "instruction": _instructed(engine, state),
         "maxInstruction": MAX_INSTRUCTION,
         "events": list(voice_lib.engine_can(engine, "events")),
         "eventSyntax": "(laugh)",
-        "moods": voice_lib.MOODS if engine in INSTRUCTED_ENGINES else {},
+        "moods": voice_lib.MOODS if _instructed(engine, state) else {},
         "moodsHeard": list(voice_lib.MOODS_HEARD),
         "engines": {
             name: {"label": voice_lib.engine_info(name)["label"],
                    "installed": _engine_ready(name, state),
-                   "instruction": bool(voice_lib.engine_can(name, "instruction")),
+                   "instruction": _instructed(name, state),
                    "events": list(voice_lib.engine_can(name, "events"))}
             for name in voice_lib.ENGINES},
     }

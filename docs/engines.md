@@ -8,24 +8,27 @@ languages and starts in a fifth of the time, and an optional one that laughs.
 /voice engine            # which one is speaking
 /voice engine pocket     # switch
 /voice install breeze    # check this machine for the third, and offer it
+/voice install qwen      # Qwen with Smart App Control on: see below
 ```
 
 Or the top dropdown in the panel, above the voice.
 
 **Pocket is the default for a new install** (since 2.0). Windows 11's Smart App
-Control, on by default on a clean install, refuses to load Qwen's unsigned
+Control, on by default on a clean install, refuses to load Qwen-TTS Studio's unsigned
 `qwen3_tts.dll`. The engine asks Windows before it touches Studio — the registry says
 whether Smart App Control is enforcing — and loads nothing when it is, because even a
-refused load puts a notice on your screen. It switches to Pocket (or Breeze when there
-is no Pocket), writes that into the config, and the panel says *"Windows Smart App
-Control blocked the Qwen engine; switched to Pocket TTS."* Picking Qwen again is
-refused the same way for as long as Smart App Control is on.
+refused load puts a notice on your screen.
+
+**Qwen still runs with Smart App Control on** — on PyTorch instead of Studio
+([below](#qwen-on-pytorch-qwen-with-smart-app-control-on)). Picking Qwen on a machine
+where Studio is refused opens its installer rather than switching; once it is installed,
+Qwen is simply Qwen again.
 **[When Windows says "part of this app has been blocked" →](troubleshooting.md#5-part-of-this-app-has-been-blocked)**
 
 | | **Qwen** | **Pocket TTS** | **Breeze TTS 2** |
 |---|---|---|---|
-| install | `install.ps1 -Engine qwen`: Studio and the 2.2 GB model, a GPU, Smart App Control off | the default: pinned into the program's own Python by the installer | a separate download of about 11 GB, [only when asked](#breeze-tts-2-the-one-that-laughs) |
-| runs on | GPU, 3.3 GB | CPU, two cores | GPU, 13 GB free to start and 9 GB after — a 16 GB card |
+| install | `install.ps1 -Engine qwen`: on PyTorch (about 7 GB) where Smart App Control is on, Studio where it is off | the default: pinned into the program's own Python by the installer | a separate download of about 11 GB, [only when asked](#breeze-tts-2-the-one-that-laughs) |
+| runs on | GPU: 3.3 GB on Studio, 4.7 GB on PyTorch | CPU, two cores | GPU, 13 GB free to start and 9 GB after — a 16 GB card |
 | first audio | 812 ms | **181 ms** | **180–370 ms** |
 | throughput | 3.7–4.0× realtime | 4.0–4.5× realtime | 1.6–2.1× realtime |
 | voices | the ones in `voices\`, cloned here | 21 built in, English | the ones in `voices\` with a clip and its words — Abby |
@@ -490,3 +493,50 @@ Pocket hands back about 80 ms of audio at a time, against Qwen's second. That
 suits the player rather than straining it: playback is cut on silence, and more
 pieces means more places to cut, so the seams land deeper inside the pauses. See
 [how-it-works.md](how-it-works.md) for what the buffering does with them.
+
+## Qwen on PyTorch: Qwen with Smart App Control on
+
+Studio is a GGML build of Qwen3-TTS, and its DLLs carry no signature, so Smart App
+Control refuses all of them. The same model runs on PyTorch and Qwen's own `qwen-tts`
+package — python.org's signed Python and PyPI wheels Microsoft already knows — and on
+2026-10-17 not one of those files was refused with Smart App Control enforcing. Turning
+Smart App Control off is not an answer to ask of anyone: it cannot be turned back on
+without reinstalling Windows.
+
+```
+/voice install qwen --check   # what it needs, beside what this machine has
+/voice install qwen           # about 7 GB: CUDA PyTorch, qwen-tts, the 1.7B Base model
+```
+
+Or pick Qwen in the panel: where Studio cannot run, that opens the same installer.
+
+**It lives in a folder of its own**, like Breeze: `env\` with the exact package set
+`requirements-qwen.txt` pins (the cp312 wheels seen to load under Smart App Control —
+re-pin only after watching a new set load with it on), and `weights\` at a pinned
+revision. `qwenPython` and `qwenModel` in the config point at them. The server is
+`qwen_server.py` from this folder, run out of that environment as a process of its own,
+tied to the engine by a job object so it cannot outlive it.
+
+**Every voice you have works on it as it is.** Studio's `embedding.json` is the same
+speaker encoder's output: 0.99 cosine against what qwen-tts extracts from the voice's own
+clip. `source icl` uses the voice's clip and its words (`breeze-reference.wav` and `.txt`)
+instead, where the folder has them. Studio's own `icl-prompt.json` is not used: it stores
+a description of the voice where the transcript belongs, and Qwen reads against the
+wrong words.
+
+**Why it is fast enough.** Stock, it was 0.31× realtime on an RTX 5080 laptop. Two things:
+
+- SDPA attention instead of the eager fallback qwen-tts takes without flash-attn: 0.6×.
+- For every frame of sound — twelve a second — the talker asks a five-layer code
+  predictor for fifteen codes through transformers' `generate()`, and that machinery
+  cost ~90 ms a frame against 83 ms of sound. The whole fifteen-token run has fixed
+  shapes, so `qwen_server.py` captures it once as a CUDA graph and replays it: 12 ms a
+  frame. No compiler and no Triton — nothing is built on the spot for Windows to judge.
+
+Result: **1.6–1.7× realtime, first sound in 0.2–0.4 s**, streamed as it is made (the
+codec decodes short pieces with left context, the scheme qwen-tts's own
+`chunked_decode` uses with longer ones). `qwenGraph: false` in the config turns the graph
+off, to rule it out if something sounds wrong.
+
+**What it cannot do that Studio could:** take a mood beside the words. The Base model has
+no instruction input, so on PyTorch the engine says it takes none, and sessions are told so.

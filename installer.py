@@ -902,7 +902,7 @@ def migrate_old_layout(lay, out, dry_run, source=None):
     claims = read_json(os.path.join(root, "installed.json"))
     out.line("older install", f"found in {root}: moving it to the new layout")
     if dry_run:
-        return {k: v for k, v in claims.items() if k in ("studio", "models", "breeze")}
+        return {k: v for k, v in claims.items() if k in ("studio", "models", "breeze", "qwen")}
     cfg = os.path.join(root, "config.json")
     if os.path.isfile(cfg) and not os.path.isfile(os.path.join(lay.data, "config.json")):
         os.makedirs(lay.data, exist_ok=True)
@@ -931,7 +931,7 @@ def migrate_old_layout(lay, out, dry_run, source=None):
                 os.remove(path)
         except OSError as exc:
             out.line("left", f"{path}: {exc}")
-    return {k: v for k, v in claims.items() if k in ("studio", "models", "breeze")}
+    return {k: v for k, v in claims.items() if k in ("studio", "models", "breeze", "qwen")}
 
 
 def sweep_parked(lay):
@@ -1086,7 +1086,7 @@ def _engine_before(lay):
 
 def install_qwen(lay, out, big, dry_run):
     """Studio and the 1.7b model, each skipped when already on this machine.
-    Smart App Control refuses Studio's DLLs; the engine says so and falls back."""
+    Only where Smart App Control is off: with it on, install_qwen_torch."""
     out.status(phase="engine", headline="Fetching Qwen-TTS Studio")
     claims, config = {}, {}
     studio = os.path.join(big, "qwen-tts-studio") if big else os.path.join(_local(), "Programs", "qwen-tts-studio")
@@ -1131,6 +1131,30 @@ def install_qwen(lay, out, big, dry_run):
             claims["models"] = models
     config.update(studioDir=studio, modelDir=models, talker=QWEN_MODELS[0])
     return claims, config
+
+
+def install_qwen_torch(lay, out, big, dry_run):
+    """Qwen on PyTorch, for a machine where Smart App Control refuses Studio:
+    through the installer the panel and `voice_cli install qwen` share."""
+    out.status(phase="engine", headline="Installing Qwen on PyTorch", detail="about 7 GB")
+    if dry_run:
+        out.line("would install", "Qwen on PyTorch (voice_cli install qwen --yes)")
+        return {}
+    had = read_json(os.path.join(lay.data, "config.json")).get("qwenModel")
+    cmd = [lay.python, os.path.join(lay.app, "voice_cli.py"), "install", "qwen", "--yes"]
+    if big and not had:
+        cmd += ["--to", os.path.join(big, "qwen")]
+    run(cmd, out, cwd=lay.data)
+    run([lay.python, os.path.join(lay.app, "voice_cli.py"), "engine", "qwen"], out, cwd=lay.data)
+    now = read_json(os.path.join(lay.data, "config.json")).get("qwenModel")
+    return {"qwen": os.path.dirname(now)} if now and not had else {}
+
+
+def _sac_on():
+    """Smart App Control enforcing or evaluating: Studio's DLLs would be refused."""
+    import qwen_engine
+
+    return qwen_engine.smart_app_control() in ("on", "evaluation")
 
 
 def install_breeze(lay, out, big, dry_run):
@@ -1344,7 +1368,7 @@ def install(lay, source, out, engine=None, claude=True, big=None, port=None, opt
         if os.path.isdir(lay.app):
             # The panel, when it was open and not the one running this (an
             # update from the CLI or the game), is opened again at the end.
-            panel = stop_everything(lay, out, [claims.get("breeze")]) or panel
+            panel = stop_everything(lay, out, [claims.get("breeze"), claims.get("qwen")]) or panel
         swap_in(staged, lay.app)
         write_json(os.path.join(lay.app, "installed.json"),
                    {"root": lay.app, "kind": "installed", "program": lay.root, "data": big or "",
@@ -1381,12 +1405,18 @@ def install(lay, source, out, engine=None, claude=True, big=None, port=None, opt
     studio = None
     if engine == "pocket":
         install_pocket(lay, out, dry_run, claims)
-    elif engine == "qwen":
+    elif engine == "qwen" and not _sac_on():
         got, studio = install_qwen(lay, out, big, dry_run)
         claims.update(got)
-    write_config(lay, out, engine, port, studio, dry_run)
+    # Qwen with Smart App Control on is Qwen on PyTorch: Studio's unsigned DLLs
+    # would only be refused. Pocket is set first, so the voice speaks while the
+    # 7 GB arrive and if they never do.
+    torch_qwen = engine == "qwen" and _sac_on()
+    write_config(lay, out, "pocket" if torch_qwen else engine, port, studio, dry_run)
     if engine == "breeze":
         claims.update(install_breeze(lay, out, big, dry_run))
+    if torch_qwen:
+        claims.update(install_qwen_torch(lay, out, big, dry_run))
     out.check_cancel()
 
     if claude:
@@ -1502,6 +1532,9 @@ def plan_uninstall(lay, doc):
     if claims.get("breeze") and os.path.isdir(claims["breeze"]):
         plan.append((f"Breeze, the engine that laughs (about 11 GB): {claims['breeze']}",
                      lambda: _rmtree(claims["breeze"], ignore_errors=True)))
+    if claims.get("qwen") and os.path.isdir(claims["qwen"]):
+        plan.append((f"Qwen on PyTorch (about 10 GB): {claims['qwen']}",
+                     lambda: _rmtree(claims["qwen"], ignore_errors=True)))
     if claims.get("studio") and _studio_ok(claims["studio"]):
         plan.append((f"Qwen-TTS Studio: {claims['studio']}",
                      lambda: _rmtree(claims["studio"], ignore_errors=True)))
@@ -1626,7 +1659,8 @@ def uninstall(lay, out, quiet=False, remove_data=None, dry_run=False):
         remove_data = bool(mine) and _ask(
             "Also delete your own settings and voices?\n\n" + "\n".join("  - " + m for m in mine) +
             "\n\nKept, they are used again if claude-voice is ever installed again.", quiet, False)
-    stop_everything(lay, out, [(doc.get("claims") or {}).get("breeze")])
+    stop_everything(lay, out, [(doc.get("claims") or {}).get("breeze"),
+                               (doc.get("claims") or {}).get("qwen")])
     failed = []
     for what, act in plan:
         if act is None:
