@@ -36,7 +36,7 @@
   "name": "claude-voice",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Windows",
-  "description": "Claude Code reads its answers aloud, locally, in a voice you choose. Local Qwen-TTS: no cloud, no API key, no account, and no audio leaving the machine.",
+  "description": "Claude Code reads its answers aloud, locally, in a voice you choose. A local speech model: no cloud, no API key, no account, and no audio leaving the machine.",
   "url": "https://traxdata313.github.io/claude-voice/",
   "codeRepository": "https://github.com/TraxData313/claude-voice",
   "license": "https://unlicense.org/",
@@ -231,29 +231,28 @@ in it: set it up, turn it on, and give me the spoken tour.</pre>
     </div>
 
     <p>
-      That is the whole of it. Claude fetches Python if you lack it, then the engine and
-      its model, installs, opens the panel and switches it on — then tells you
-      <em>out loud</em> how to drive it. Ten minutes, nearly all of it download — about
-      3 GB of engine and model, which resumes where it stopped if the connection drops.
+      That is the whole of it. Claude installs it, opens the panel and switches it on — then
+      tells you <em>out loud</em> how to drive it. A few minutes, nearly all of it download:
+      a few hundred MB for the default engine, which runs on any PC.
     </p>
     <p>
-      <strong>No administrator rights anywhere</strong>, so it goes on a locked-down work
-      laptop as easily as your own.
-      <a href="https://github.com/TraxData313/claude-voice/blob/main/docs/install.md">By
-      hand, other builds, every-project install →</a>
+      Or in PowerShell, with no clone:
+      <code>powershell -c "irm https://raw.githubusercontent.com/TraxData313/claude-voice/main/install.ps1 | iex"</code>
     </p>
     <p>
-      Never opened a terminal?
-      <a href="https://github.com/TraxData313/claude-voice/releases/latest/download/ClaudeVoiceSetup.exe"><strong>ClaudeVoiceSetup.exe</strong></a>
-      does all of it in one window.
+      Either way it becomes a program of its own: <strong>Abby for Claude</strong> in the Start
+      menu, an Uninstall in Settings &rarr; Apps, a private copy of python.org's signed Python,
+      <strong>no administrator rights anywhere</strong>, and fine with Smart App Control.
+      <a href="https://github.com/TraxData313/claude-voice/blob/main/docs/install.md">What it
+      does, and where it puts things →</a>
     </p>
   </section>
 
   <section class="engines">
     <h2>Three engines</h2>
     <p>
-      <strong>Qwen</strong> is the original: it reads every alphabet and wants an NVIDIA
-      card. <strong>Pocket</strong> needs no graphics card at all and runs on any PC.
+      <strong>Pocket</strong>, the default, needs no graphics card at all and runs on any PC.
+      <strong>Qwen</strong> is the original: it reads every alphabet and wants an NVIDIA card.
       <strong>Breeze</strong> acts as well as reads — it laughs, sighs and whispers where the
       text asks it to — and wants a 16 GB card. Switch between them from the panel whenever
       you like.
@@ -271,11 +270,11 @@ in it: set it up, turn it on, and give me the spoken tour.</pre>
   </section>
 
   <p class="note">
-    <strong>What it wants:</strong> Windows, and about 3 GB of disk for the engine and the
-    model. No administrator rights at any point, and nothing to sign up for. Qwen wants an
-    NVIDIA card with roughly 4 GB of video memory — an estimate rather than a measurement,
-    and the <a href="https://github.com/TraxData313/claude-voice#what-it-needs">repository
-    says plainly why</a>. No such card? Pocket runs on the processor instead.
+    <strong>What it wants:</strong> Windows, and a few hundred MB of disk for Pocket, the
+    default engine, which runs on the processor. No administrator rights at any point, and
+    nothing to sign up for. Qwen, which reads every alphabet, wants an NVIDIA card with roughly
+    4 GB of video memory, 3 GB of disk, and Smart App Control off —
+    <a href="https://github.com/TraxData313/claude-voice#what-it-needs">what it needs</a>.
   </p>
 
   <p class="note">

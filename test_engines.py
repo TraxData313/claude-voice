@@ -21,13 +21,14 @@ POCKET = {"engine": "pocket", "voicesDir": "voices"}
 
 
 class ChoosingAnEngine(unittest.TestCase):
-    def test_default_is_the_original(self):
-        self.assertEqual(voice_lib.engine_of({}), "qwen")
+    def test_default_is_pocket(self):
+        # Since 2026-10-17: the engine Smart App Control lets load.
+        self.assertEqual(voice_lib.engine_of({}), "pocket")
 
     def test_a_typo_falls_back_rather_than_raising(self):
         # On the path to speaking. A bad name should cost the wrong engine,
         # never silence with no explanation.
-        self.assertEqual(voice_lib.engine_of({"engine": "poket"}), "qwen")
+        self.assertEqual(voice_lib.engine_of({"engine": "poket"}), "pocket")
 
     def test_language_falls_back_the_same_way(self):
         self.assertEqual(voice_lib.engine_language({"pocketLanguage": "klingon"}),
@@ -289,7 +290,7 @@ class AFailedStartIsNotTheEnd(unittest.TestCase):
         self.live = {"engine": "breeze"}
         self.builds = []
 
-        def build(state):
+        def build(state, progress=None):
             self.builds.append(state.get("engine"))
             if state.get("engine") == "breeze":
                 raise RuntimeError("Breeze TTS 2 is not where the config says")

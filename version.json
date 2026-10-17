@@ -1,16 +1,16 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
-  "version": "1.16.0",
-  "date": "2026-09-25",
+  "version": "2.0.0",
+  "date": "2026-10-17",
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "Meet Neya, a new voice beside me. And adding an engine no longer leaves you in silence.",
+  "headline": "I am a proper program now, with a Python of my own and a real uninstall, and I speak your answers but not the lines in between, unless you ask.",
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "A new voice, Neya: soft-spoken and calming, on all three engines. Switching engines now keeps whichever voice you are using.",
-    "Adding an engine, from a game or anywhere, keeps the one you have talking until the new one is ready.",
-    "The menu opens Settings, which starts with where every engine keeps its files and how big they are, and can hide the voices a game added."
+    "claude-voice installs as a program of its own, on a signed copy of Python, so Smart App Control lets it run. Existing installs move over by running the installer once.",
+    "Claude Code's hooks hand me each finished answer. Nothing reads your transcripts or rewrites your CLAUDE.md any more, and the lines between tool calls are off unless you turn them on.",
+    "Games find me through the registry, even when I am not running, and I move to a free port when another program has mine."
   ],
-  "_needsSetup": "true when a release changes the slash command, the hooks or the notes -- the parts a pull alone does not reinstall.",
+  "_needsSetup": "true when a release changes the hooks, the slash command or the install scripts -- the parts a git pull alone does not reinstall. An installed copy's update re-runs its installer by itself.",
   "needsSetup": true,
   "changelog": "https://github.com/TraxData313/claude-voice/blob/main/CHANGELOG.md"
 }

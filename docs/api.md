@@ -1,7 +1,8 @@
 # Talking to her from another program
 
-The engine is a small HTTP server on `127.0.0.1:8765`. Everything that speaks through it —
-the transcript watcher, the hooks, the panel — does so with one of the requests below, and
+The engine is a small HTTP server on `127.0.0.1:8765` — or the next free port when another
+program holds that one; [discovery.md](discovery.md) says how to find which. Everything that speaks through it —
+Claude Code's hooks, the panel — does so with one of the requests below, and
 anything else on this machine can do the same: an assistant, a script, a game. This page is
 the whole contract, written for whoever is teaching a program to use it.
 
@@ -151,12 +152,13 @@ performed than you expected — somebody may have switched engines.
 | `POST /set-voice` `{"voice": "abby"}` | who speaks from now on, for every session |
 | `POST /set-engine` `{"engine": "breeze"}` | which engine speaks; it loads on the next line |
 | `POST /volume` `{"level": 0.6}` | 0 to 1, audible mid-sentence |
-| `POST /health` | whether it is up, which version, and whether a mood or a sound would be performed |
+| `POST /health` | whether it is up, which version, its `port` (and `portNote` when it is not the one it wanted), the folder it runs from (`root`), and whether a mood or a sound would be performed |
 | `POST /voices` | every voice the engine speaking now can use, each with its `sex` and `culture` |
 | `POST /voice-roots` `{"add": "C:\\…"}` | also read the voices in that folder, where they lie. `remove` takes one away |
 | `POST /storage` | where each engine's files are on disk and how many bytes they take (`bytes` in all, `sizes` folder by folder), and the app's own folder |
 | `POST /panel` | opens the panel window, or raises the one already open |
 | `POST /quit` | closes the engine and hands its memory back |
+| `POST /hook` | what `speak_hook.py` sends for each Claude Code hook call or Codex turn. Its shape follows the hooks; a program of your own wants `/speak` |
 
 `/set-engine` answers 404 for Breeze when it is not installed, with a sentence saying how.
 It is never downloaded by a request: that takes somebody at the panel or the command line
@@ -168,9 +170,11 @@ The Immersive AI mod for Mount & Blade II: Bannerlord speaks every character thr
 these are the few things it needed that a Claude session did not. Anything that gives a voice to
 many characters can use them the same way.
 
-- **Find it asleep.** Every engine start writes `%LOCALAPPDATA%\claude-voice\where.json` —
-  `root`, `python`, `port`, `version`. Start it with `python <root>\voice_cli.py start` (no
-  window), then wait for `/health` to say `ready: true`; the first load takes up to a minute.
+- **Find it asleep.** Read `HKCU\Software\claude-voice` first: `InstallDir`, `Launcher` (the
+  exact command that starts it, no window) and `Port`. Fall back to
+  `%LOCALAPPDATA%\claude-voice\where.json`, which every engine start writes. Then wait for
+  `/health` to say `ready: true`; the first load takes up to a minute.
+  **[The whole contract →](discovery.md)**
 - **Bring your own voices.** `POST /voice-roots {"add": "<folder>"}` and the voices in it join the
   catalogue as they lie, never copied, never written to. The folder may be laid out as
   `<sex>\<id>`, `<sex>\<culture>\<id>`, or flat `<id>` with `Gender` (1 woman, 2 man) and
@@ -185,11 +189,13 @@ many characters can use them the same way.
   aloud before reading the rest. `unreadable: "refuse"` answers
   `422 {"unreadable": true, "engine": "pocket"}` instead, and says nothing; tell the player on
   your own screen that Qwen reads every language.
-- **Installing it for somebody.** `setup-app\` builds `ClaudeVoiceSetup.exe`, a one-window
-  installer for people who have never opened a terminal; a game can download it from the latest
-  release and run it with `--for "<your game>"`. See [setup-app/README.md](../setup-app/README.md).
-- **Installing it without a window.** `--quiet --engine qwen --data D:\claude-voice` installs with
-  nothing on screen — right for a full-screen game, where a window popping up is the bug — and
+- **Installing it for somebody.** There is no setup `.exe`, and there will not be: Smart App
+  Control refuses an unsigned one, and the program is python.org's signed Python instead. Fetch the project, then python.org's Python as its `runtime.json` pins it (check
+  the SHA-256, and that `python.exe` is signed by the Python Software Foundation), unpack it into
+  `<program>\runtime`, and run `installer.py install --root <program> --source <project>` on it:
+  what `install.ps1` does, and what the Immersive AI mod does in C#. See [install.md](install.md).
+- **Installing it without a window.** `installer.py install … --quiet --no-claude --engine qwen
+  --big-data D:\claude-voice` installs with nothing on screen — right for a full-screen game, where a window popping up is the bug — and
   writes `%LOCALAPPDATA%\claude-voice\setup-status.json` as it goes: `state` (running, done,
   failed, cancelled), which of four `phase`s (app, engine, model, start), a `headline` and a
   `detail` ("1.2 of 2.2 GB · 14 MB/s · about 2 min left"), `phaseFraction` and `fraction`, and
@@ -198,7 +204,8 @@ many characters can use them the same way.
   quits does not stop it, and the next one can pick the progress up from the same file.
 - **Show where the gigabytes went.** `POST /storage` answers each engine's folders and their size,
   so a player can see what each is for, open the folder, and take it away again —
-  `<root>\uninstall.ps1 -Yes`, the same thing Settings → Apps runs.
+  the `QuietUninstallString` of `HKCU\…\Uninstall\claude-voice`, the same uninstaller Settings →
+  Apps runs (the program's own pythonw running `installer.py uninstall --quiet`).
 
 ## Things worth knowing
 

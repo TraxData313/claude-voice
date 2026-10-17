@@ -6,6 +6,62 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## 2.0.0 — 2026-10-17
+
+**A program of its own, on a signed Python; Claude Code's hooks are the only way in; and a
+game finds it even when it is not running.** Major, because where it is installed and how it
+hears Claude Code have both changed.
+
+### What changes for you
+
+- **The lines between tool calls are no longer spoken by default.** You hear each finished
+  answer (its `## TL;DR`) and anything waiting on you. No hook Claude Code runs carries those
+  in-between lines, and reading them meant tailing your transcripts. To have them back:
+  `/voice narrate transcript on`, then `/voice hooks install`, then restart Claude Code.
+- **Nothing writes into your `~\.claude\CLAUDE.md` any more.** The speaking rules reach each
+  session through its `SessionStart` hook. Installing 2.0 (or `hooks install`) cuts the old
+  `<!-- claude-voice -->` block out of that file — only between its markers.
+- **Restart Claude Code once after updating**, so sessions run the new hooks.
+
+### What to do
+
+- **Installed with `setup.ps1` or `ClaudeVoiceSetup.exe`:** run the one-line install once —
+  `powershell -c "irm https://raw.githubusercontent.com/TraxData313/claude-voice/main/install.ps1 | iex"`.
+  It moves the old install into the new layout and keeps your settings.
+- **Running from a git clone:** after the pull, either stay on the clone —
+  `python voice_cli.py hooks install` and `python voice_cli.py register`, then `kill` and
+  `start` — or switch to an install: `python voice_cli.py kill`, close the panel, and
+  `powershell -ExecutionPolicy Bypass -File .\install.ps1` from the clone. That carries the
+  clone's settings over and takes the hooks and the registration with it.
+
+### What is new
+
+- **A real install.** `install.ps1` puts claude-voice in `%LOCALAPPDATA%\Programs\claude-voice`
+  on a private copy of python.org's Python 3.12, checked against its SHA-256 and its Python
+  Software Foundation signature. Your own Python is never touched. **Abby for Claude** in the
+  Start menu, **claude-voice** in Settings → Apps with an uninstaller that asks before it takes
+  your settings and voices. Settings live in `%LOCALAPPDATA%\claude-voice`, untouched by updates.
+- **Works with Smart App Control.** There is no `.exe`, and will not be: an unsigned one cannot
+  run under it. The engine's packages are pinned to builds seen to load with it on.
+- **Qwen is refused up front under Smart App Control** — asked of the registry, so no blocked
+  DLL and no Windows notice — and the engine switches to Pocket and says so in the panel.
+  **Pocket is the default engine** for a new install.
+- **Updates swap the program.** `/voice update --apply` on an install fetches the release and
+  hands it to that release's own installer; the panel stays open.
+- **Hooks only.** The transcript watcher is gone. The Stop hook hands over the final message,
+  the speaking hooks run `async` so a slow engine never holds up a turn, and an answer that
+  found the engine down is said once it is back.
+- **Games find it through `HKCU\Software\claude-voice`**, written at install, before anything
+  runs. `voice_cli.py register` / `unregister` for a checkout.
+  **[How a game finds it →](docs/discovery.md)**
+- **A taken port no longer stops the engine.** It names the program holding 8765, takes the
+  next free one, tells the panel, hooks and games, and moves back when 8765 is free.
+- **The panel stops stuttering.** The engine switch no longer flickers between states, and the
+  layout no longer reflows a dozen times per change. Settings are written atomically, so the
+  panel and the CLI cannot tear the config between them.
+- **The engine answers the panel while it speaks.** Per-sample loops that held the GIL for
+  seconds are gone; `/state` answers in about 10 ms during synthesis.
+
 ## 1.16.0 — 2026-09-25
 
 **A new voice, Neya; adding an engine keeps the old one talking; a menu that says where the

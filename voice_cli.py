@@ -68,14 +68,8 @@ def cmd_status(state, _args):
     print(f"  volume       : {_volume_percent(state)}%")
     print(f"  max chars    : {state['maxChars']}")
     print(f"  engine       : {engine}  (port {state['port']})")
-    if health and health.get("watching"):
-        how = "following sessions itself (no hooks needed)"
-    elif state.get("watch", True):
-        how = "will follow sessions once the engine starts"
-    else:
-        how = "off -- relying on Claude Code hooks instead"
-    print(f"  watching     : {how}")
     print(f"  hooks        : {_hooks_line()}")
+    print(f"  games find it: {_registration_line()}")
     print(f"  sessions told: {_told_line(state)}")
     if voice_lib.engine_of(state) == "pocket":
         print(f"  voices from  : {len(voice_lib.catalog(state))} built into "
@@ -101,21 +95,20 @@ def _hooks_line():
     """Whether Claude Code's hooks can reach this tool at all, in one line.
 
     Worth a line of its own because a broken hook says nothing: Claude Code
-    records the failure in the transcript and carries on, and the watcher goes
-    on speaking, so everything seems fine except the permission alerts, which
-    only a hook can hear.
+    records the failure in the transcript and carries on, and the hooks are
+    the only way a session is heard at all.
     """
     found = voice_lib.hook_health()
     if not found["events"]:
-        return "none installed -- the watcher still speaks; alerts need them"
+        return "none installed -- no session is heard. 'voice_cli.py hooks install'"
     if found["backslashed"]:
         return ("written with backslashes, which bash reads as escapes, so every "
-                "one fails. Run setup.ps1 again")
+                "one fails. 'voice_cli.py hooks install'")
     if found["unguarded"]:
         return ("the old kind, which would lock Claude Code out if this folder were "
-                "ever moved or deleted. Run setup.ps1 again")
+                "ever moved or deleted. 'voice_cli.py hooks install'")
     if found["missing"]:
-        return (", ".join(found["events"]) + " -- run setup.ps1 again for "
+        return (", ".join(found["events"]) + " -- 'voice_cli.py hooks install' adds "
                 + ", ".join(found["missing"]))
     return ("all " + str(len(found["events"])) + " events, last ran "
             + (found["last"] or "never"))
@@ -192,7 +185,7 @@ def _persona_lines(state):
     """The character that goes with the current voice, for whoever speaks as it.
 
     'status' is what a session runs to find out where it stands, so it says the
-    same thing voice_lib.announce_voice writes into CLAUDE.md rather than a
+    same thing voice_lib.persona_note tells a session rather than a
     terser version of it -- a session that read both should not come away with
     two different ideas of how much of the character to let show.
 
@@ -221,8 +214,7 @@ def cmd_set(state, args):
     state["voice"] = voice["id"]
     print(f"Voice set to {_voice_label(state)}")
     if announced:
-        print("  New sessions will know they are speaking as "
-              f"{voice['name']} without being asked.")
+        print(f"  Sessions hear they are speaking as {voice['name']} at their next prompt.")
 
 
 def cmd_engine(state, args):
@@ -777,7 +769,7 @@ def cmd_clone(state, args):
     vid = (a.id or os.path.splitext(os.path.basename(wav))[0]).strip().lower()
     vid = "".join(c if c.isalnum() or c in "_-" else "_" for c in vid)
     name = a.name or vid.replace("_", " ").title()
-    out_dir = os.path.join(voice_lib.voice_roots(state)[0], a.sex, a.culture, vid)
+    out_dir = os.path.join(voice_lib.own_voices_dir(state), a.sex, a.culture, vid)
 
     # Two engines at once will fight over the GPU, so put the warm one away.
     if voice_lib.server_alive(state["port"]):
@@ -825,13 +817,103 @@ def cmd_clone(state, args):
     print(f"Try it:  python voice_cli.py set {vid} && python voice_cli.py say \"hello\"")
 
 
-def cmd_watch(state, args):
-    if not args or args[0] not in ("on", "off"):
-        raise SystemExit("usage: voice_cli.py watch on|off")
-    state["watch"] = args[0] == "on"
-    voice_lib.save_state(state)
-    print(f"Transcript watching {'on' if state['watch'] else 'off'}. "
-          "Restart the engine for it to take effect: kill, then start.")
+def cmd_hooks(state, args):
+    """Claude Code's hooks: the only way sessions reach the voice.
+
+    'hooks install' writes them into a settings file (the user's own by
+    default, so every project is heard) and takes out the block older versions
+    spliced into ~/.claude/CLAUDE.md, since the hooks now say all of that.
+    'hooks remove' takes both out again. Running either twice changes nothing.
+    Everybody else's hooks, and the rest of both files, are left as they were.
+    """
+    sub = (args[0].lower() if args else "status")
+    opts = {}
+    rest = args[1:]
+    while rest:
+        flag = rest.pop(0)
+        if flag in ("--settings", "--python", "--claude-md") and rest:
+            opts[flag[2:]] = rest.pop(0)
+        elif flag in ("--keep-note", "--mine"):
+            opts[flag[2:]] = True
+        else:
+            raise SystemExit(f"unknown option '{flag}'")
+    path = opts.get("settings") or voice_lib.CLAUDE_SETTINGS
+    if sub == "install":
+        command = voice_lib.hook_command(python=opts.get("python"))
+        events = voice_lib.install_hooks(path, command)
+        print(f"Hooks written to {path}: {', '.join(events)}.")
+        print(f"  command: {command}")
+        if voice_lib._lines_heard(state):
+            print("  PreToolUse is on every tool, to read the lines between tool calls"
+                  " off the transcript (narrate transcript on).")
+        if not opts.get("keep-note") and voice_lib.remove_notes(opts.get("claude-md")):
+            print(f"Took the old claude-voice block out of {opts.get('claude-md') or voice_lib.CLAUDE_MD};"
+                  " the SessionStart hook says all of it now.")
+        print("Sessions already open pick the hooks up when Claude Code restarts.")
+    elif sub in ("remove", "uninstall"):
+        # --mine: only this copy's hooks, as an uninstaller wants; a checkout's stay.
+        gone = voice_lib.remove_hooks(path, voice_lib.HOOK_SCRIPT if opts.get("mine") else None)
+        print(f"Hooks {'removed from' if gone else 'were not in'} {path}.")
+        if not opts.get("keep-note") and voice_lib.remove_notes(opts.get("claude-md")):
+            print(f"Took the old claude-voice block out of {opts.get('claude-md') or voice_lib.CLAUDE_MD}.")
+    elif sub == "status":
+        print(f"  hooks        : {_hooks_line()}")
+    else:
+        raise SystemExit("usage: voice_cli.py hooks [install|remove|status]"
+                         " [--settings PATH] [--python EXE] [--claude-md PATH] [--keep-note] [--mine]")
+
+
+def cmd_register(state, args):
+    """Tell games where this copy is: the HKCU registry key they read first.
+
+    The installer does this itself. A developer's own checkout is never
+    registered unasked, so this is how one opts in. Running it twice changes
+    nothing but the time stamp; it takes the key over from any other copy.
+    """
+    kind, python = None, None
+    rest = list(args)
+    while rest:
+        flag = rest.pop(0)
+        if flag == "--kind" and rest:
+            kind = rest.pop(0).lower()
+        elif flag == "--python" and rest:
+            python = rest.pop(0)
+        else:
+            raise SystemExit("usage: voice_cli.py register [--kind installed|dev] [--python EXE]")
+    before = voice_lib.registration()
+    try:
+        values = voice_lib.register(kind=kind, python=python, state=state)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"could not register: {exc}")
+    if before and before.get("InstallDir") and not voice_lib._same_path(before["InstallDir"], voice_lib.ROOT):
+        print(f"  (it named {before['InstallDir']} before; that copy is no longer the one games find)")
+    print(f"Registered in HKCU\\{voice_lib.REG_KEY} as {values['Kind']}:")
+    for name in ("InstallDir", "Version", "Launcher", "Port", "PortHome"):
+        print(f"  {name:<11}: {values[name]}")
+
+
+def cmd_unregister(state, args):
+    """Take the registry key away again, if it names this copy (--force: any)."""
+    force = "--force" in args
+    result = voice_lib.unregister(force=force)
+    if result == "removed":
+        print(f"Removed HKCU\\{voice_lib.REG_KEY}. Games now find this copy only through where.json.")
+    elif result == "absent":
+        print("Nothing to remove: no registration.")
+    else:
+        found = voice_lib.registration() or {}
+        print(f"Left alone: it names {found.get('InstallDir')}, not this copy."
+              " 'unregister --force' removes it anyway.")
+
+
+def _registration_line():
+    found = voice_lib.registration()
+    if not found:
+        return "none -- games find this copy only while where.json names it. 'voice_cli.py register'"
+    where = found.get("InstallDir") or "?"
+    if not voice_lib._same_path(where, voice_lib.ROOT):
+        return f"names another copy: {where}"
+    return f"{found.get('Kind', '?')}, port {found.get('Port', '?')}"
 
 
 REPO_URL = "https://github.com/TraxData313/claude-voice"
@@ -843,7 +925,7 @@ HELP = [
         ("on", "[--panel]", "Start speaking. Loads the engine if it is cold (40-60s the first time)."),
         ("off", "", "Stop speaking. The engine stays warm, so 'on' is instant."),
         ("toggle", "", "Whichever of the two you are not."),
-        ("status", "", "Voice, engine, and whether it is following your sessions."),
+        ("status", "", "Voice, engine, and whether Claude Code's hooks are wired."),
         ("panel", "", "A small window on top: what is playing, the queue, and the switches."),
     ]),
     ("Choosing a voice", [
@@ -866,10 +948,10 @@ HELP = [
         ("history", "<count>", "Utterances kept for replay, and their wavs. Default 40."),
         ("playback", "<mode>", "auto, instant, buffered or whole: how much speech is ready before the first word."),
         ("playback", "report", "What the traces say this machine needed. Reads local files, sends nothing."),
-        ("narrate", "on|off", "Whether the short lines said mid-work are spoken."),
+        ("narrate", "on|off", "Whether the short lines said mid-work are spoken (needs 'narrate transcript on')."),
+        ("narrate", "transcript on|off", "Read those lines off the session's transcript, the one way a hook can get them. Off by default."),
         ("thinking", "on|off", "Speak a thinking block when the response said nothing else. On by default."),
         ("alerts", "on|off", "Say so when the session stops for you -- a permission prompt, a question left waiting."),
-        ("watch", "on|off", "Follow sessions directly. Off means relying on hooks alone."),
         ("headless", "on|off", "Speak runs a program started -- `claude -p` and SDK callers. Off by default."),
         ("mediakey", "on|off", "Let the play/pause key on a keyboard or headphones work the pause. On by default."),
         ("source", "embedding|icl", "Which clone to use. 'icl' is closer, and heavier."),
@@ -877,11 +959,14 @@ HELP = [
     ("The engine itself", [
         ("start", "", "Load the model without turning the voice on."),
         ("kill", "", "Unload it and give the memory back."),
+        ("hooks", "[install|remove]", "Wire Claude Code's hooks into ~/.claude/settings.json, or take them out. No argument says how they stand."),
+        ("register", "[--kind installed|dev]", "Tell games where this copy is (a key in the user's registry). The installer does it; a git checkout opts in here."),
+        ("unregister", "[--force]", "Take that registration away again, if it names this copy."),
         ("install", "breeze [--check]", "Check this machine for Breeze TTS 2, the voice that laughs, then offer to download it (about 11 GB). Asks first."),
     ]),
     ("Keeping it current", [
         ("version", "", "What this copy is. Contacts nobody -- worth quoting in a bug report."),
-        ("update", "[--apply]", "Is there a newer version? --apply pulls it and restarts the engine."),
+        ("update", "[--apply]", "Is there a newer version? --apply takes it and restarts the engine."),
         ("update", "on|off", "Allow one look a week. Off by default: nothing is contacted until you say so."),
     ]),
 ]
@@ -902,7 +987,7 @@ def cmd_help(state, args):
             print(f"    {name + ' ' + arg:<28} {desc}")
         print()
     print("  Aliases: " + "; ".join(f"{k} = {v}" for k, v in ALIASES.items()))
-    print("  Voices shipped: abby (female), max (male). Others come from your\n"
+    print("  Voices shipped: abby and neya (female), max (male). Others come from your\n"
           "  training folder and are marked 'local only' in the list.")
     print(f"\n  The voice is one setting shared by every session: change it here and it\n"
           f"  changes everywhere. Full details, and how it all works:\n"
@@ -1020,11 +1105,22 @@ def cmd_headless(state, args):
 
 
 def cmd_narrate(state, args):
+    if args and args[0] == "transcript" and args[1:2] and args[1] in ("on", "off"):
+        state["narrateFromTranscript"] = args[1] == "on"
+        voice_lib.save_state(state)
+        print("Lines between tool calls are "
+              + ("read off the session's transcript by the PreToolUse hook."
+                 if state["narrateFromTranscript"] else "not heard; only answers and alerts.")
+              + " Run 'hooks install' again so PreToolUse fires on "
+              + ("every tool." if state["narrateFromTranscript"] else "questions only."))
+        return
     if not args or args[0] not in ("on", "off"):
-        raise SystemExit("usage: voice_cli.py narrate on|off")
+        raise SystemExit("usage: voice_cli.py narrate on|off  |  narrate transcript on|off")
     state["narrate"] = args[0] == "on"
     voice_lib.save_state(state)
-    print(f"Mid-work narration {'on' if state['narrate'] else 'off'}.")
+    print(f"Mid-work narration {'on' if state['narrate'] else 'off'}."
+          + ("" if state.get("narrateFromTranscript") else
+             " (No hook carries those lines; 'narrate transcript on' is what brings them.)"))
 
 
 def cmd_thinking(state, args):
@@ -1045,8 +1141,8 @@ def cmd_alerts(state, args):
     voice_lib.save_state(state)
     print("Prompts waiting on you are "
           + ("announced." if state["alerts"] else "silent.")
-          + " These arrive through the hook only, so they need Claude Code"
-            " restarted after an install -- the watcher cannot see them.")
+          + " They arrive through the Notification hook, so they need Claude Code"
+            " restarted after an install.")
 
 
 COMMANDS = {
@@ -1059,6 +1155,7 @@ COMMANDS = {
     "mediakey": cmd_mediakey, "media": cmd_mediakey,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,
     "install": cmd_install,
+    "register": cmd_register, "unregister": cmd_unregister,
     "history": cmd_history, "playback": cmd_playback, "buffer": cmd_playback,
     "volume": cmd_volume, "vol": cmd_volume, "loud": cmd_volume,
     "clone": cmd_clone,
@@ -1069,7 +1166,7 @@ COMMANDS = {
     "replay-all": cmd_replay_all, "replay_all": cmd_replay_all,
     "replayall": cmd_replay_all, "all": cmd_replay_all,
     "repeat-all": cmd_replay_all, "repeat_all": cmd_replay_all,
-    "narrate": cmd_narrate, "watch": cmd_watch, "headless": cmd_headless,
+    "narrate": cmd_narrate, "hooks": cmd_hooks, "headless": cmd_headless,
     "alerts": cmd_alerts, "alert": cmd_alerts, "prompts": cmd_alerts,
     "thinking": cmd_thinking, "thoughts": cmd_thinking,
     "update": cmd_update, "upgrade": cmd_update, "version": cmd_version,
@@ -1092,8 +1189,10 @@ def main():
     state = voice_lib.load_state()
     # The weekly look, if it has been allowed and is overdue. Detached, so it
     # cannot slow this command down or fail along with it -- and skipped for
-    # 'update' itself, which is on its way to ask GitHub directly.
-    if cmd not in ("update", "upgrade"):
+    # 'update' itself, which is on its way to ask GitHub directly. Skipped too
+    # for what an installer runs: a detached Python started from an uninstall
+    # would hold the very runtime folder it is about to delete.
+    if cmd not in ("update", "upgrade", "hooks", "register", "unregister"):
         import update_check
         update_check.refresh_soon(state)
     COMMANDS[cmd](state, args)

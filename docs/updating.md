@@ -1,14 +1,24 @@
 # Getting the newer one
 
-This was installed by cloning a repo, so updating it is a `git pull` — plus one step that
-is easy to miss and makes the pull look like it did nothing.
-
-```powershell
-python voice_cli.py update            # is there a newer one, and what is in it
-python voice_cli.py update --apply    # take it, and put the engine back
+```
+/voice update            # is there a newer one, and what is in it
+/voice update --apply    # take it, and put the engine back
 ```
 
-Or `/voice update` inside Claude Code. Both are the same tool.
+Or the button at the bottom of the panel. What `--apply` does depends on what this copy is:
+
+| | |
+|---|---|
+| **An install** (the usual) | fetches GitHub's zip of `main`, and hands it to *that* release's `installer.py`, which stages the new `app\` beside the running one, swaps the two, re-registers it and restarts the engine if it was running. Your settings, logs and voices in `%LOCALAPPDATA%\claude-voice` are never touched, the panel stays open, and an update that fails leaves what was there before |
+| **A git checkout** | a careful `git pull`, then `kill` and `start` — see [below](#a-git-checkout) |
+
+A release that needs a different Python than the one installed says so and stops: run
+`install.ps1` again, which fetches the new one and keeps everything else.
+
+An install made before 2.0 — by `setup.ps1` or `ClaudeVoiceSetup.exe`, straight into
+`%LOCALAPPDATA%\Programs\claude-voice` — cannot update itself into the new layout. Run the
+one-line install from [install.md](install.md) once; it moves that copy over and keeps its
+settings.
 
 ## From the panel, without typing anything
 
@@ -21,12 +31,12 @@ The bottom row of the panel does the whole of it:
 | *up to date, 2 days ago* | how the last look went, when there is nothing else to say |
 | **v1.0.0** | in the far corner, and clickable — it turns the link colour when there is something to take |
 
-The weekly look is a tick behind the settings cog, **auto-check for updates**. Ticking it
+The weekly look is a tick in Settings (the three bars, top left), **auto-check for updates**. Ticking it
 also looks straight away, so you see one happen rather than waiting a week to find out that
 it works. Untick it and nothing in this program ever contacts anything.
 
-If the pull is refused — local changes in the way, usually — the reason appears in that same
-row, and the full account goes to `logs\panel.log`.
+If the update is refused — local changes in a checkout's way, usually — the reason appears in
+that same row, and the full account goes to `logs\panel.log`.
 
 The panel never checks anything by itself. It reads the answer of whatever check last ran.
 
@@ -39,7 +49,7 @@ putting back, and only one of them is ever your problem:
 |---|---|
 | **the engine** | **automatic.** The update stops it and starts it again itself, and waits for the model to load — 40–60 seconds, during which the panel says the engine is down. This is the whole reason `--apply` exists |
 | **the panel window** | **one click.** It is the process it was started as, so it cannot become the new code by itself. After a successful update its button says `reopen panel`; pressing it saves the window's position, closes it, and opens the new one in the same place |
-| **Claude Code** | **only sometimes.** Hooks and the `/voice` command are read once, at session start, so a release that changes them needs a restart of Claude Code — and it will say so, in the panel and on the command line, rather than leaving you to guess |
+| **Claude Code** | **only sometimes.** Hooks and the `/voice` command are read when a session starts, so a release that changes them needs a restart of Claude Code — and it will say so, in the panel and on the command line, rather than leaving you to guess. An install's update rewrites them itself; a checkout needs `hooks install` |
 
 From the command line it is the same, minus the window: `update --apply` restarts the engine
 and tells you if anything else is outstanding.
@@ -47,23 +57,23 @@ and tells you if anything else is outstanding.
 ## The step people miss
 
 **The engine loaded the code when it started, and goes on running that copy.** It holds a
-2 GB model in memory and is meant to live for days, so it does not watch its own source. Pull
-new code under a running engine and nothing whatsoever changes about how it speaks.
+model in memory and is meant to live for days, so it does not watch its own source. Put new
+code under a running engine and nothing whatsoever changes about how it speaks.
 
-So a code update is always: pull, then `kill`, then `start`. That is exactly what `--apply`
-does, and why it exists.
+So a code update is always: new code, then `kill`, then `start`. That is exactly what
+`--apply` does, and why it exists.
 
-Settings are the other way round — `config.json` is re-read on every sweep, so a change to
-the voice, the volume or `maxChars` takes effect with nothing restarted.
+Settings are the other way round — `config.json` is re-read whenever it changes, so a change
+to the voice, the volume or `maxChars` takes effect with nothing restarted.
 
 ## What version am I on?
 
-```powershell
-python voice_cli.py version
+```
+/voice version
 ```
 
-`version.json` in the repo folder is the truth, `/voice status` shows it on the `updates`
-line, and the panel prints it in the bottom right corner. **Quote it in a bug report** —
+`version.json` in the program's `app\` folder (or the checkout) is the truth, `/voice status`
+shows it on the `updates` line, and the panel prints it in the bottom right corner. **Quote it in a bug report** —
 before this existed, the answer to "which version?" was "whatever was on `main` that day".
 
 ## The check, and what it sends
@@ -75,9 +85,7 @@ before this existed, the answer to "which version?" was "whatever was on `main` 
 | `/voice update` | looks **now**. Typing it is the asking, so this works whatever the setting says |
 | `/voice update on` | allows one look a week, without being asked again |
 
-`update on` is the only thing that makes this project use the network on its own. The
-installer can set it at install time with `-UpdateChecks`, and says which way it went either
-way.
+`update on` is the only thing that makes this project use the network on its own.
 
 What goes out, when it goes out at all, is a single GET of one public file:
 
@@ -104,13 +112,34 @@ a log rather than an error in your way.
 
 ## Turning it off again
 
-```powershell
-python voice_cli.py update off
-```
+`/voice update off`, or set `"updateCheck": false` in `config.json`. `"updateCheckDays": 0` also means never.
 
-Or set `"updateCheck": false` in `config.json`. `"updateCheckDays": 0` also means never.
+## A git checkout
 
-## When it says git is not on PATH
+A clone updates by pulling, and `--apply` does that carefully: `--ff-only`, refusing a dirty
+tree or a branch with nowhere to pull from, checking that `HEAD` actually moved before
+claiming anything, then `kill` and `start`. It never installs anything into the clone.
+
+- **Local changes to tracked files** stop it. It lists them and pulls nothing. Commit or
+  `git stash` first. Untracked files — a voice folder you added, your own notes — are never in
+  the way.
+- **A branch tracking nothing**, or a pull that will not fast-forward, stops it. Both mean this
+  copy has a history of its own, and untangling that by hand is the only safe answer.
+- **It does not rewrite the hooks.** When a release changes them (`needsSetup`, or a changed
+  `templates\` or install script), it says to run `python voice_cli.py hooks install` and
+  restart Claude Code.
+
+Without git, or for a copy that is not a clone: download
+<https://github.com/TraxData313/claude-voice/archive/refs/heads/main.zip>, copy it over the
+folder, run `python voice_cli.py hooks install`, then `kill` and `start`. Nothing of yours is in
+that zip.
+
+To stop running from the clone and use an install instead: `python voice_cli.py kill`, close the
+panel, then `powershell -ExecutionPolicy Bypass -File .\install.ps1` from the clone. It carries
+the clone's settings over and takes the hooks and the registration with it.
+**[A developer's checkout →](install.md#a-developers-checkout)**
+
+### When it says git is not on PATH
 
 The panel's button can say that while the very same pull works in your terminal, and both are
 telling the truth. **A PATH belongs to a process.** The panel is started from the Desktop
@@ -125,7 +154,7 @@ Desktop's bundled copy, and prints which one it used — so this now sorts itsel
 line naming the folder is the explanation of why the button used to fail.
 
 Listing it properly is still worth doing, because every other tool on that machine shares the
-blind spot. `setup.ps1` reports it, and this is the same check and the fix:
+blind spot. This is the check, and the fix:
 
 ```powershell
 # what the panel sees. Nothing back means git is not on the registry PATH
@@ -147,64 +176,15 @@ twice over: `setx` truncates at 1024 characters, and `%PATH%` there is the machi
 paths already joined — so it copies every machine entry into your user variable and you now
 have two divergent copies of the same list.
 
-## If you have no git
-
-`--apply` needs git and a clone. Without either, it says so and stops rather than guessing:
-
-1. Download <https://github.com/TraxData313/claude-voice/archive/refs/heads/main.zip>
-2. Unpack it and copy the contents over your folder, replacing what is there.
-3. Run `setup.ps1` again, then `voice_cli.py kill` and `start`.
-
-Nothing of yours is in that zip, so this does not touch `config.json`, your logs, or any
-voice you made yourself.
-
-## Why this is a `git pull` and not an installer
-
-Because **the way a thing is installed sets the way it is updated**, and this one is
-installed by cloning a repo. A checkout that updates by pulling is the normal shape for a
-tool distributed this way — it is how oh-my-zsh, nvm, pyenv and most editor plugin managers
-update themselves, and it is what the folder on disk already is.
-
-An installer-style updater — download a zip, swap the files — would be the wrong tool twice
-over. It would have to reimplement what git already does correctly (know what changed, refuse
-to trample your edits, be interruptible), and it would throw away the two things that come
-free with a checkout: **you can see exactly what changed**, and **you can go back** with
-`git checkout <old-sha>` if a release turns out badly.
-
-What *would* be sloppy is a bare `git pull` fired at a button. That can trample local edits,
-stop half-way in a merge conflict, or succeed while the running program carries on being the
-old one. So this one is `--ff-only`, refuses a dirty tree, refuses a branch with nowhere to
-pull from, checks that `HEAD` actually moved before claiming anything, and restarts what has
-to be restarted. The zip route above exists for copies that are not checkouts at all.
-
-## What `--apply` will not do
-
-It is deliberately timid, because the alternative is losing someone's work:
-
-- **Local changes to tracked files** stop it. It lists them and pulls nothing. Commit or
-  `git stash` first. Untracked files — a voice folder you added, your own notes — are not in
-  the way and are never mentioned.
-- **A branch tracking nothing**, or a pull that will not fast-forward, stops it. Both mean
-  this copy has a history of its own, and untangling that by hand is the only safe answer.
-- **It will not re-run the installer.** A `git pull` updates the repo, but the `/voice`
-  command and the hooks were *copied out* of it at setup time. When a release changes one of
-  those, `--apply` says to run `setup.ps1` again — and then to restart Claude Code, because
-  hooks and slash commands are read once, at session start.
-- **Except the note, which now reinstalls itself.** `~\.claude\CLAUDE.md` is rewritten from
-  `speaking-notes.md` by `--apply`, and again on every engine start, so a release that
-  changes how Claude is told to write reaches you by restarting Claude Code and nothing
-  else. It was the worst one to leave to a hand-run installer: a session quietly following
-  last month's rules looks exactly like a session.
-  **[What that block says →](writing-for-the-ear.md)**
-
 ## Releasing one (for whoever maintains this)
 
 A release is four files, one commit, and one annotated tag:
 
 1. **`version.json`** — bump `version`, set `date`, write a `headline` that will be *read
-   aloud*, and two or three `notes`. Set `needsSetup` to `true` if the release touches
-   `commands\` or either installer. Not for `speaking-notes.md` any more — the note puts
-   itself back after a pull, so a release that only changes the wording needs no installer.
+   aloud*, and two or three `notes`. Set `needsSetup` to `true` if the release touches the
+   hooks, `templates\` or the install scripts — a checkout's pull does not reinstall those. Not
+   for `speaking-notes.md`: sessions read it through their hook, so new wording reaches them
+   with nothing reinstalled.
 2. **`CHANGELOG.md`** — a new `## <version> — <date>` section at the top. `--apply` prints
    this section to whoever just took the update, so write it for them rather than for git.
 3. **`.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`** — set both plugin

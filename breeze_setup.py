@@ -75,7 +75,13 @@ DOWNLOAD_GB = 11
 # would be building something from source, which is where installs go to die.
 PYTHONS = ((3, 10), (3, 13))
 
-LOG_DIR = os.path.join(ROOT, "logs")
+# The app's own log folder: beside the code in a checkout, in the data folder
+# of an installed copy. voice_lib decides which.
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+import voice_lib as _voice_lib  # noqa: E402
+
+LOG_DIR = _voice_lib.LOG_DIR
 STATUS_PATH = os.path.join(LOG_DIR, "breeze-install.json")
 LOG_PATH = os.path.join(LOG_DIR, "breeze-install.log")
 

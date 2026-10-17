@@ -1,5 +1,7 @@
-# Machine-specific paths and live toggle state
+# Machine-specific paths and live toggle state, and the lock and swap file
+# that writing it atomically leaves beside it
 config.json
+config.json.*
 
 # Written here when you install for this repo as the project: the hook config
 # and the /voice command, both holding the absolute path to your own python.exe
@@ -27,7 +29,7 @@ voices/**/pocket-reference.wav
 voices/**/pocket-reference.txt
 voices/**/pocket-after.wav
 
-# The setup window's build output. The exe is a release asset, never committed.
+# The retired setup window's build output (setup-app is kept as source only; see its README).
 setup-app/bin/
 setup-app/obj/
 setup-app/dist/
@@ -36,5 +38,9 @@ setup-app/dist/
 # Immersive AI mod lives here. Read through "extraVoicesDirs" in config.json.
 voices-local/
 
-# What setup.ps1 installed on this machine, for uninstall.ps1. Per machine, never published.
+# What a pre-2.0 setup.ps1 installed on this machine. Per machine, never published.
 installed.json
+
+# The manager agent's working notes (progress, survey) for a multi-step change.
+# Scratch for whoever is doing the work, not part of the project.
+.manager/

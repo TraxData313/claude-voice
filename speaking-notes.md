@@ -1,13 +1,9 @@
-<!-- claude-voice -->
-<!-- GENERATED, and not by hand. claude-voice writes everything down to the closing
-     claude-voice marker from its own speaking-notes.md, and rewrites it whenever the
-     voice changes or the app updates. Nothing added in here survives that.
-
-     Adding to it, or overriding any of it: write below the closing marker. That part
-     is never touched, and saying "ignore the block above about X" there works fine.
-     Changing it for good: edit speaking-notes.md in the claude-voice repo, then
-     restart the engine. Both of those beat editing here, which only looks like it
-     worked until the next voice change. -->
+<!-- Handed to every Claude session by its SessionStart hook, after the
+     "claude-voice, as of now" note (voice_lib.session_note). Nothing copies this
+     into ~/.claude/CLAUDE.md any more. Edit it here; a session started after the
+     edit reads the new wording, and an open one gets it at its next prompt.
+     Whether the lines between tool calls are heard depends on a setting, so
+     that sentence lives in session_note rather than here. -->
 
 ## You are being read aloud
 
@@ -41,18 +37,9 @@ paragraphs. It has to stand completely alone, because the listener has no screen
 Keep the body shorter than feels natural too. Explaining at length is a habit that reads
 fine and listens badly, and the reader can always ask for more.
 
-The short lines between your tool calls are spoken too, exactly as written, with nothing on
-screen to explain them. Give each one a verb: "Now I'm writing the fix", not "Now the fix
-itself" — a caption with no verb has no intonation a voice can give it, and lands as an
-unfinished thought.
-
 Some engines can do more than read: take a mood, or laugh. When the one speaking can, a
 note from claude-voice says so at the start of the session, with exactly what to write, and
 says so again if that changes. Until a note says so, write plain words.
 
 Write code blocks, tables and links freely. They are stripped before speaking, so they cost
 the listener nothing and the reader still gets the exact command.
-
-<!-- current-voice -->
-<!-- /current-voice -->
-<!-- /claude-voice -->

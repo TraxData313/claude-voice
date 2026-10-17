@@ -7,8 +7,8 @@ its text is all it has. So the hook tells it (speak_hook.tell) and a bracketed
 stage direction carries the mood (voice_lib.direction).
 
 Nothing here loads a model or starts the engine. The hook is run in-process with
-its stdin, stdout, logs and config swapped for scratch ones; the watcher is
-handed a speaker that only records what it was given.
+its stdin, stdout, logs and config swapped for scratch ones; the engine's
+SessionBook is handed a speaker that only records what it was given.
 
     python test_session.py
 """
@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -31,13 +32,13 @@ import voice_lib
 voice_lib.notify = voice_lib._unlogged
 
 STATE = {"enabled": True, "engine": "breeze", "voice": "abby", "source": "embedding",
-         "port": 8765, "watch": True, "narrate": True, "alerts": True,
+         "port": 8765, "narrate": True, "alerts": True,
          "maxChars": 4000, "fullMaxChars": 4000, "narrateMaxChars": 240}
 ABBY = ({"id": "abby", "name": "Abby"}, {})
 
 
 def spoken(markdown):
-    """What the watcher would hand the engine for this message: the words, and
+    """What the engine would make of this message: the words, and
     the mood they asked for."""
     speech, _ = voice_lib.speech_for(markdown, STATE)
     return voice_lib.direction(speech)
@@ -194,20 +195,24 @@ class Hook(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, True)
         self.state = dict(STATE)
-        self.posts, self.started, self.recorded = [], [], []
+        self.posts, self.started, self.spooled = [], [], []
+        self.down = False
+
+        def post(port, path, body=None, timeout=5):
+            if self.down:
+                raise ConnectionRefusedError("down")
+            self.posts.append((path, body))
+            return {}
+
         for target, name, value in (
                 (speak_hook, "TOLD_PATH", os.path.join(self.dir, "told.json")),
                 (speak_hook, "HOOK_LOG", os.path.join(self.dir, "hook.log")),
                 (voice_lib, "LOG_DIR", self.dir),
                 (voice_lib, "load_state", lambda: dict(self.state)),
                 (voice_lib, "resolve", lambda *a, **k: ABBY),
-                (voice_lib, "post", lambda port, path, body=None, timeout=5:
-                    self.posts.append((path, body)) or {}),
-                (voice_lib, "server_alive", lambda port, timeout=1.5: {"ready": True}),
-                (voice_lib, "start_server", lambda state, wait=0: self.started.append(1)),
-                (voice_lib, "already_spoken",
-                    lambda text, remember=True: self.recorded.append(text) or False),
-                (voice_lib, "notification_due", lambda speech, within=10.0: True)):
+                (voice_lib, "post", post),
+                (voice_lib, "start_server", lambda state, wait=0, from_hook=False: not self.started.append(1)),
+                (voice_lib, "spool", lambda body: self.spooled.append(body) or True)):
             patcher = patch.object(target, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -219,15 +224,27 @@ class Hook(unittest.TestCase):
         out = io.StringIO()
         with patch("sys.stdin", io.StringIO(json.dumps(payload))), \
                 contextlib.redirect_stdout(out):
-            speak_hook.main()
+            speak_hook.main([])
         printed = out.getvalue().strip()
         return json.loads(printed)["hookSpecificOutput"] if printed else None
+
+    def transcript(self, *entries):
+        path = os.path.join(self.dir, "t.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            for e in entries:
+                fh.write(json.dumps(e) + "\n")
+        return path
 
     # -- telling -----------------------------------------------------------
     def test_a_new_session_is_told_what_the_voice_can_do(self):
         told = self.run_hook(hook_event_name="SessionStart", session_id="s1", source="startup")
         self.assertEqual(told["hookEventName"], "SessionStart")
         self.assertIn("(laugh)", told["additionalContext"])
+
+    def test_it_is_told_the_writing_rules_too_so_claude_md_need_not_be(self):
+        told = self.run_hook(hook_event_name="SessionStart", session_id="s1")
+        self.assertIn("## TL;DR", told["additionalContext"])
+        self.assertIn("The voice is currently **Abby**", told["additionalContext"])
 
     def test_it_is_told_once_and_then_only_when_something_changed(self):
         self.run_hook(hook_event_name="SessionStart", session_id="s1")
@@ -236,6 +253,13 @@ class Hook(unittest.TestCase):
         told = self.run_hook(hook_event_name="UserPromptSubmit", session_id="s1")
         self.assertIn("makes no sounds", told["additionalContext"])
         self.assertIsNone(self.run_hook(hook_event_name="UserPromptSubmit", session_id="s1"))
+
+    def test_a_new_voice_reaches_an_open_session_at_its_next_prompt(self):
+        self.run_hook(hook_event_name="SessionStart", session_id="s1")
+        with patch.object(voice_lib, "resolve", lambda *a, **k: (
+                {"id": "neya", "name": "Neya", "persona": "soft-spoken"}, {})):
+            told = self.run_hook(hook_event_name="UserPromptSubmit", session_id="s1")
+        self.assertIn("**Neya** — soft-spoken.", told["additionalContext"])
 
     def test_a_session_older_than_the_hook_is_told_at_its_next_prompt(self):
         told = self.run_hook(hook_event_name="UserPromptSubmit", session_id="old")
@@ -263,45 +287,99 @@ class Hook(unittest.TestCase):
         self.assertEqual(sorted(speak_hook._told()), ["s3", "s4", "s5"])
 
     # -- the engine -----------------------------------------------------------
+    def test_a_prompt_names_the_session_to_the_engine(self):
+        self.run_hook(hook_event_name="UserPromptSubmit", session_id="s1",
+                      transcript_path="C:/t/one.jsonl", cwd=r"C:\code\proj",
+                      prompt="Fix the panel flicker " + "x" * 500)
+        path, body = self.posts[-1]
+        self.assertEqual((path, body["event"]), ("/hook", "UserPromptSubmit"))
+        self.assertEqual(body["transcript_path"], "C:/t/one.jsonl")
+        self.assertLessEqual(len(body["prompt"]), speak_hook.PROMPT_KEEP)
+
     def test_a_prompt_brings_a_dead_engine_back_while_the_voice_is_on(self):
-        with patch.object(voice_lib, "server_alive", lambda port, timeout=1.5: None):
-            self.run_hook(hook_event_name="UserPromptSubmit", session_id="s1")
-            self.assertEqual(self.started, [1])
-            self.state["enabled"] = False
-            self.run_hook(hook_event_name="UserPromptSubmit", session_id="s1")
+        self.down = True
+        self.run_hook(hook_event_name="UserPromptSubmit", session_id="s1")
+        self.assertEqual(self.started, [1])
+        self.assertEqual(self.spooled, [], "a prompt is nothing to say later")
+        self.state["enabled"] = False
+        self.run_hook(hook_event_name="UserPromptSubmit", session_id="s1")
         self.assertEqual(self.started, [1], "switched off means left alone")
 
     # -- speaking ---------------------------------------------------------
-    def test_with_the_watcher_on_the_hook_leaves_the_lines_to_it(self):
-        self.run_hook(hook_event_name="PreToolUse", tool_name="Read", text="Now I'm reading it.")
-        self.run_hook(hook_event_name="Stop", text="All done.")
-        self.assertEqual(self.posts, [])
-        # Not even recorded as said: the watcher checks that same record, and
-        # a line marked said by a hook that did not say it is a line lost.
-        self.assertEqual(self.recorded, [])
-
-    def test_with_the_watcher_off_a_line_goes_queued_with_its_mood(self):
-        self.state["watch"] = False
-        self.run_hook(hook_event_name="PreToolUse", tool_name="Read",
-                      cwd=r"C:\code\my-project", text="(whisper) Now I'm peeking at the logs.")
+    def test_the_answer_goes_to_the_engine_from_the_payload(self):
+        self.run_hook(hook_event_name="Stop", session_id="s1", transcript_path="C:/nowhere.jsonl",
+                      last_assistant_message="Body.\n\n## TL;DR\n- Done.")
         path, body = self.posts[-1]
-        self.assertEqual(path, "/speak")
-        self.assertEqual(body["text"], "Now I'm peeking at the logs.")
-        self.assertEqual(body["mood"], "whisper")
-        self.assertTrue(body["queue"], "behind what is playing, never over it")
-        self.assertEqual(body["project"], "my-project")
+        self.assertEqual(path, "/hook")
+        self.assertEqual(body["event"], "Stop")
+        self.assertEqual(body["text"], "Body.\n\n## TL;DR\n- Done.")
+        self.assertEqual(body["entrypoint"], "claude-desktop")
 
-    def test_a_muted_session_stays_muted_whoever_reads_it(self):
-        self.state.update(watch=False, mutedSessions=[r"C:\t\one.jsonl"])
-        self.run_hook(hook_event_name="Stop", transcript_path="C:/t/one.jsonl", text="Done.")
+    def test_an_older_claude_code_without_the_field_is_read_once_off_its_transcript(self):
+        path = self.transcript(
+            {"type": "assistant", "message": {"role": "assistant",
+                                              "content": [{"type": "text", "text": "All done."}]}},
+            {"type": "assistant", "message": {"role": "assistant",
+                                              "content": [{"type": "tool_use", "name": "Bash"}]}})
+        self.run_hook(hook_event_name="Stop", transcript_path=path)
+        self.assertEqual(self.posts[-1][1]["text"], "All done.")
+
+    def test_an_answer_that_timed_out_on_a_busy_engine_is_not_kept_to_say_twice(self):
+        with patch.object(voice_lib, "post", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("slow"))):
+            self.run_hook(hook_event_name="Stop", last_assistant_message="Done.")
+        self.assertEqual(self.spooled, [])
+
+    def test_a_headless_run_sends_spools_and_starts_nothing(self):
+        self.down = True
+        with patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}):
+            self.run_hook(hook_event_name="UserPromptSubmit", session_id="s1")
+            self.run_hook(hook_event_name="Stop", last_assistant_message="Done.")
+        self.assertEqual((self.posts, self.spooled, self.started), ([], [], []))
+
+    def test_an_engine_is_started_once_per_gap_not_once_per_hook(self):
+        with patch.object(voice_lib, "SPAWN_STAMP", os.path.join(self.dir, "spawn.stamp")):
+            self.assertTrue(voice_lib._claim_spawn())
+            self.assertFalse(voice_lib._claim_spawn())
+            old = time.time() - voice_lib.SPAWN_GAP - 5
+            os.utime(voice_lib.SPAWN_STAMP, (old, old))
+            self.assertTrue(voice_lib._claim_spawn())
+
+    def test_an_answer_that_finds_the_engine_down_is_kept_and_the_engine_started(self):
+        self.down = True
+        self.run_hook(hook_event_name="Stop", last_assistant_message="Done.")
+        self.assertEqual([b["text"] for b in self.spooled], ["Done."])
+        self.assertEqual(self.started, [1])
+
+    def test_with_the_voice_off_nothing_is_sent(self):
+        self.state["enabled"] = False
+        self.run_hook(hook_event_name="Stop", last_assistant_message="Done.")
+        self.run_hook(hook_event_name="Notification", message="Claude needs your permission")
         self.assertEqual(self.posts, [])
 
-    def test_an_alert_is_heard_after_the_line_in_progress(self):
+    def test_lines_between_tool_calls_are_not_read_by_default(self):
+        path = self.transcript({"type": "assistant", "message": {
+            "role": "assistant", "content": [{"type": "text", "text": "Now I'm reading it."}]}})
+        self.run_hook(hook_event_name="PreToolUse", tool_name="Read", transcript_path=path)
+        self.assertEqual(self.posts, [])
+
+    def test_with_narrate_transcript_on_the_line_is_read_off_the_end(self):
+        self.state["narrateFromTranscript"] = True
+        path = self.transcript({"type": "assistant", "message": {
+            "role": "assistant", "content": [{"type": "text", "text": "(whisper) Peeking."}]}})
+        self.run_hook(hook_event_name="PreToolUse", tool_name="Read", transcript_path=path)
+        self.assertEqual(self.posts[-1][1]["text"], "(whisper) Peeking.")
+
+    def test_a_question_goes_with_its_input(self):
+        ask = {"questions": [{"question": "Which one?"}]}
+        self.run_hook(hook_event_name="PreToolUse", tool_name="AskUserQuestion", tool_input=ask)
+        self.assertEqual(self.posts[-1][1]["tool_input"], ask)
+
+    def test_an_alert_goes_with_its_message(self):
         self.run_hook(hook_event_name="Notification", notification_type="permission_prompt",
                       message="Claude needs your permission to use Bash")
-        path, body = self.posts[-1]
-        self.assertEqual(path, "/speak")
-        self.assertTrue(body["queue"])
+        body = self.posts[-1][1]
+        self.assertEqual(body["message"], "Claude needs your permission to use Bash")
+        self.assertEqual(body["notification_type"], "permission_prompt")
 
 
 class WhatSpeakMakesOfIt(unittest.TestCase):
@@ -341,24 +419,37 @@ class WhatSpeakMakesOfIt(unittest.TestCase):
                              (words, None, None), words)
 
 
-class Watcher(unittest.TestCase):
-    """TranscriptWatcher._say, the road nearly every line really takes."""
+class Sessions(unittest.TestCase):
+    """SessionBook: what the engine does with what a hook handed it."""
 
     def setUp(self):
         self.jobs = []
         speaker = type("Speaker", (), {"submit": lambda _, job, barge=False:
                                        self.jobs.append((job, barge))})()
-        self.watcher = speak_server.TranscriptWatcher.__new__(speak_server.TranscriptWatcher)
-        self.watcher.speaker = speaker
-        self.watcher.muted, self.watcher.labels, self.watcher.projects = set(), {}, {}
-        for name, value in (("already_spoken", lambda text, remember=True: False),
-                            ("resolve", lambda *a, **k: ABBY)):
-            patcher = patch.object(voice_lib, name, value)
+        with patch.object(voice_lib, "load_state", lambda: {}):
+            self.book = speak_server.SessionBook(speaker)
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        for target, name, value in (
+                (voice_lib, "already_spoken", lambda text, remember=True: False),
+                (voice_lib, "resolve", lambda *a, **k: ABBY),
+                (voice_lib, "notification_due", lambda speech, within=10.0: True),
+                (voice_lib, "PENDING_PATH", os.path.join(self.dir, "pending.jsonl")),
+                (voice_lib, "LOG_DIR", self.dir)):
+            patcher = patch.object(target, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
+    def hook(self, state=None, **body):
+        body.setdefault("transcript_path", "C:/t/one.jsonl")
+        body.setdefault("cwd", r"C:\code\my-project")
+        return self.book.hook(body, dict(STATE, **(state or {})))
+
+    def said(self):
+        return [j.text for j, _ in self.jobs]
+
     def say(self, speech):
-        self.watcher._say(speech, "narration", dict(STATE), "C:/t/one.jsonl")
+        self.book.say(speech, "narration", dict(STATE), "C:/t/one.jsonl")
         return self.jobs[-1][0] if self.jobs else None
 
     def test_a_mood_goes_beside_the_words_as_the_whole_instruction(self):
@@ -378,17 +469,93 @@ class Watcher(unittest.TestCase):
     def test_a_line_that_was_only_a_direction_is_not_said(self):
         self.assertIsNone(self.say("(sad)"))
 
-    def test_a_line_read_off_a_transcript_carries_its_mood_to_the_engine(self):
-        # The whole road, from a made-up transcript entry to the job: the text
-        # block is picked out, cleaned, its direction taken out and expanded.
-        self.watcher.held = {}
-        entry = {"type": "assistant", "message": {
-            "role": "assistant", "id": "msg_1", "stop_reason": "tool_use",
-            "content": [{"type": "text", "text": "(whisper) Now I'm peeking at the logs."}]}}
-        self.watcher._consider(json.dumps(entry), dict(STATE), "C:/t/one.jsonl")
+    def test_an_answer_with_a_tldr_is_heard_as_its_tldr(self):
+        reply = self.hook(event="Stop", text="Long body.\n\n## TL;DR\n(excited)\n- It works!")
+        self.assertEqual(reply["said"], "summary")
         job = self.jobs[-1][0]
-        self.assertEqual((job.mood, job.text), ("whisper", "Now I'm peeking at the logs."))
-        self.assertEqual(job.instruction, voice_lib.MOODS["whisper"])
+        self.assertEqual((job.mood, job.text), ("excited", "It works!"))
+        self.assertEqual(job.project, "my-project")
+
+    def test_an_answer_without_one_is_heard_whole(self):
+        self.assertEqual(self.hook(event="Stop", text="Short and done.")["said"], "whole answer")
+        self.assertEqual(self.said(), ["Short and done."])
+
+    def test_the_voice_off_says_nothing(self):
+        self.hook(state={"enabled": False}, event="Stop", text="Done.")
+        self.assertEqual(self.jobs, [])
+
+    def test_a_muted_session_stays_muted_however_its_path_is_spelled(self):
+        reply = self.hook(state={"mutedSessions": [r"C:\t\one.jsonl"]},
+                          event="Stop", text="Done.")
+        self.assertEqual(self.jobs, [])
+        self.assertIn("muted", reply["why"])
+
+    def test_a_headless_run_is_silent_unless_asked_for(self):
+        self.hook(event="Stop", text="Report.", entrypoint="sdk-cli")
+        self.assertEqual(self.jobs, [])
+        self.hook(state={"watchHeadless": True}, event="Stop", text="Report.",
+                  entrypoint="sdk-cli")
+        self.assertEqual(self.said(), ["Report."])
+
+    def test_a_permission_prompt_names_the_tool_from_its_own_message(self):
+        self.hook(event="Notification", message="Claude needs your permission to use WebFetch")
+        self.assertEqual(self.said(), ["I need your permission to use Web Fetch."])
+
+    def test_alerts_off_is_quiet(self):
+        self.hook(state={"alerts": False}, event="Notification",
+                  message="Claude needs your permission")
+        self.assertEqual(self.jobs, [])
+
+    def test_a_question_is_said_from_its_input(self):
+        self.hook(event="PreToolUse", tool_name="AskUserQuestion",
+                  tool_input={"questions": [{"question": "Which file first?"}]})
+        self.assertTrue(self.said() and "Which file first?" in self.said()[0], self.said())
+
+    def test_a_line_between_tools_respects_narrate(self):
+        self.hook(state={"narrate": False}, event="PreToolUse", tool_name="Read",
+                  text="Now I'm reading it.")
+        self.assertEqual(self.jobs, [])
+        self.hook(event="PreToolUse", tool_name="Read", text="Now I'm reading it.")
+        self.assertEqual(self.said(), ["Now I'm reading it."])
+
+    def test_the_panel_lists_a_session_by_its_first_prompt_and_can_mute_it(self):
+        self.hook(event="UserPromptSubmit", prompt="Fix the panel flicker please now today ok")
+        self.hook(event="UserPromptSubmit", prompt="something else entirely")
+        rows = self.book.sessions(state=dict(STATE))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["label"], "Fix the panel flicker please now")
+        self.assertEqual(rows[0]["project"], "my-project")
+        saved = []
+        with patch.object(voice_lib, "load_state", lambda: {"mutedSessions": ["C:/t/other.jsonl"]}),                 patch.object(voice_lib, "save_state", saved.append),                 patch.object(voice_lib, "CONFIG_PATH", os.path.join(self.dir, "config.json")):
+            self.book.muted = set()       # a hook adopted an older list meanwhile
+            self.book.set_muted("C:/t/one.jsonl", True)
+        self.assertTrue(self.book.sessions(state=dict(STATE))[0]["muted"])
+        self.assertEqual(saved[-1]["mutedSessions"], ["C:/t/one.jsonl", "C:/t/other.jsonl"],
+                         "edited from the config as it is, not from a stale copy")
+
+    def test_what_was_spooled_while_down_is_said_once_it_is_up(self):
+        voice_lib.spool({"event": "Stop", "transcript_path": "C:/t/two.jsonl",
+                         "text": "Said late."})
+        with open(voice_lib.PENDING_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"event": "Stop", "text": "Too old.", "at": 1}) + "\n")
+        with patch.object(voice_lib, "load_state", lambda: dict(STATE)):
+            self.book.catch_up(dict(STATE))
+        self.assertEqual(self.said(), ["Said late."])
+        self.assertFalse(os.path.exists(voice_lib.PENDING_PATH))
+
+
+class OldDefaultEngine(unittest.TestCase):
+    """A config from before 2.0 that never named an engine meant Qwen."""
+
+    def test_only_a_config_without_an_engine_and_with_studio_there(self):
+        studio = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, studio, True)
+        self.assertIsNone(voice_lib.old_default_engine({"studioDir": studio}), "no Studio in it")
+        os.makedirs(os.path.join(studio, "runtime", "bin", "server"))
+        open(os.path.join(studio, "runtime", "bin", "server", "jvm.dll"), "w").close()
+        self.assertEqual(voice_lib.old_default_engine({"studioDir": studio}), "qwen")
+        self.assertIsNone(voice_lib.old_default_engine({"studioDir": studio, "engine": "pocket"}))
+        self.assertIsNone(voice_lib.old_default_engine(None))
 
 
 if __name__ == "__main__":

@@ -1,267 +1,179 @@
 # Installing it
 
-Windows only, and one step. Paste this into a new Claude Code session:
-
-```
-Clone https://github.com/TraxData313/claude-voice here, then follow docs/tour.md
-in it: set it up, turn it on, and give me the spoken tour.
-```
-
-It clones the repo, checks you have Python and installs it if you have not, fetches the
-speech engine and the model, wires up the `/voice` command, opens the panel, switches it on,
-and then tells you out loud how to drive it. If something is genuinely wrong it says so
-plainly rather than pretending it worked.
-
-Budget about ten minutes, nearly all of it download: **~660 MB** of engine and **~2.4 GB** of
-model. Both resume if the connection drops, so a second run after a dropped VPN picks up
-where it stopped rather than starting again.
-
-**No administrator rights are needed at any point** — [why that is true, and what to do on a
-locked-down laptop](#no-administrator-rights-needed).
-
-## What your machine needs
-
-| | |
-|---|---|
-| **Windows** | the engine is a Windows build; there is no macOS or Linux one |
-| **An NVIDIA card** | for Qwen: both Studio builds below are CUDA builds, and nothing here checks before it starts downloading — so on other hardware this fails at model load rather than at the door. **No card? [Use Pocket TTS instead](#no-graphics-card)** |
-| **~4 GB of video memory** | **an estimate, not a measurement.** The talker is 1.94 GB and the tokenizer 0.27 GB, and both are loaded onto the card with room to work in. Only a 16 GB card has actually been run. If you try a smaller one, please [say how it went](https://github.com/TraxData313/claude-voice/issues) — it is the one number here nobody has established |
-| **~3 GB of disk** | 0.81 GB of unpacked engine, 2.2 GB of models |
-| **Python** | fetched for you if you have none. Standard library only |
-
-While it runs the engine holds about 350 MB of ordinary memory, and that figure does not
-grow with use — it was measured flat across a thousand generations. The first model load
-takes 40–60 seconds; afterwards she stays warm and the first words arrive in about a second.
-
-## Or install it as a plugin
-
-Claude Code can carry the `/voice` command itself:
-
-```
-/plugin marketplace add TraxData313/claude-voice
-/plugin install claude-voice@claude-voice
-/claude-voice:setup
-```
-
-The first two install the command as `/claude-voice:voice`. The third fetches the engine and
-the model — a plugin install is not the place to pull down 3 GB, so that is a separate,
-deliberate step which tells you what it is about to do and takes `--whatif` if you would
-rather see first.
-
-Afterwards `/plugin update` keeps the command current. Your `config.json` and `logs\` sit
-alongside the plugin and are untracked, so an update leaves them alone — tested, not assumed.
-
-You will end up with a plain `/voice` as well as `/claude-voice:voice`, because setup performs
-the full install and the plugin carries its own copy of the command. Both drive the same
-engine; neither interferes with the other.
-
-## Or do it yourself
-
-**No terminal at all:** [ClaudeVoiceSetup.exe](https://github.com/TraxData313/claude-voice/releases/latest/download/ClaudeVoiceSetup.exe)
-is a window around the same script — it reads your graphics card, marks the engine that suits it,
-and runs `setup.ps1` for you. [setup-app/README.md](../setup-app/README.md) says what it does.
-
-One command does everything the paragraph above describes:
+Windows only. One line in PowerShell:
 
 ```powershell
-git clone https://github.com/TraxData313/claude-voice
-cd claude-voice
-.\setup.ps1
+powershell -c "irm https://raw.githubusercontent.com/TraxData313/claude-voice/main/install.ps1 | iex"
 ```
 
-It skips whatever you already have, so running it again after a failure is cheap. `-WhatIf`
-says what it would do without writing anything.
-
-| | |
-|---|---|
-| `-Engine pocket` | no graphics card: [Pocket TTS on the CPU](#no-graphics-card), no Studio, no Qwen model |
-| `-Engine breeze` | the engine that laughs, and only it: about 11 GB, a 16 GB NVIDIA card. [Breeze →](engines.md#breeze-tts-2-the-one-that-laughs) |
-| `-NoClaude` | for a program that speaks through the [HTTP API](api.md) alone — a game, say. No hooks, no `/voice`, no note in `~\.claude\CLAUDE.md`, and on a fresh install the transcript watcher off. An existing install's Claude Code settings are left exactly as they were |
-| `-ProjectDir $env:USERPROFILE` | speak in **every** project, not just this one |
-| `-Build system` | the smaller Studio (268 MB), if you already have the CUDA runtime |
-| `-StudioDir` · `-ModelDir` | put the engine or the models somewhere else |
-| `-PythonExe` | use a particular interpreter rather than the one it finds |
-| `-NoPanel` · `-NoShortcut` | do not open the window · do not touch the Desktop |
-
-Afterwards, in Claude Code: `/voice on`. The first model load takes 40–60 seconds; after
-that the engine stays warm and answers start speaking almost at once.
-
-Installing for one project and for every project both write a `/voice` command. Do one or
-the other, not both.
-
-## No graphics card
+Or from a copy of the project (a clone, or GitHub's zip):
 
 ```powershell
-.\setup.ps1 -Engine pocket
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-That skips Studio and the Qwen model altogether — none of the 3 GB above — and instead
-runs `pip install pocket-tts`, which brings torch's CPU build with it: a few hundred MB
-rather than three gigabytes. The speech model itself comes down from Hugging Face the
-first time the engine loads, and is cached from then on. `config.json` is written with
-`"engine": "pocket"`, so the Qwen model is never loaded.
+It says each step as it takes it, and at the end claude-voice is a program like any other: in
+the Start menu as **Abby for Claude**, in **Settings → Apps** as **claude-voice** with a real
+Uninstall, and wired into Claude Code. Restart Claude Code, then `/voice on`.
 
-Abby comes along: her voice is baked for this engine in the repo, so she is the one
-speaking from the first word. What you give up is Cyrillic, and the rest of the voices in
-`voices\` — **[the two engines side by side →](engines.md)**
+**No administrator rights at any point**, and it works with **Smart App Control** on — [why
+both are true](#smart-app-control).
 
-Running `setup.ps1` or `install.ps1` again without `-Engine` keeps whichever engine
-`config.json` already names, so a re-run on this machine never starts fetching Studio.
-If you get a card later, `.\setup.ps1 -Engine qwen` fetches the rest, and the panel's
-engine dropdown switches between them.
+**As a Claude Code plugin** instead: `/plugin marketplace add TraxData313/claude-voice`, then
+`/plugin install claude-voice@claude-voice`, then `/claude-voice:setup` for the engine.
 
-## The engine that laughs
+## Why the command line names an execution policy
 
-Breeze TTS 2 is not part of setup, and no update installs it: it is about 11 GB and
-wants a 16 GB graphics card, so it is fetched only when somebody asks for it. Pick
-**Breeze 2** in the panel's engine dropdown, or run `python voice_cli.py install breeze`,
-and it checks this machine first and says what it found before asking.
-**[What it needs and where it goes →](engines.md#breeze-tts-2-the-one-that-laughs)**
+Windows ships with running script *files* switched off, and refuses one downloaded from the
+internet even where they are on. `-ExecutionPolicy Bypass` on the command line is Microsoft's
+documented way to run one script you chose: it lasts for that one PowerShell and changes no
+setting. The first form needs no flag at all, because a policy is about script files and the
+pipe never makes one — the same form uv, Scoop and others use.
 
-## Python
+Nothing claude-voice starts afterwards uses either. Read `install.ps1` first if you like; it is
+short and says what it does.
 
-`setup.ps1` looks for a real `python.exe` — on PATH, under `%LOCALAPPDATA%\Programs\Python`,
-or a conda install in the usual places — and accepts any of them. The Microsoft Store stub
-does not count: it is a launcher for the Store, not an interpreter, and it will not run from
-a hook.
+## What it does
 
-If there is none, it installs
-[Python](https://www.python.org/downloads/windows/) **per-user**: under `%LOCALAPPDATA%`,
-with `PrependPath` writing to your own registry hive, and no elevation prompt. Prefer to do
-it yourself? Tick **"Add python.exe to PATH"** in the installer, or use
-[Miniconda](https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe).
+1. **Finds the project** — the folder `install.ps1` is in, or GitHub's zip of `main`.
+2. **Fetches Python** — python.org's own Python 3.12.10 for Windows, as a plain zip (about
+   30 MB), checks it against the SHA-256 written into the script, checks that `python.exe` and
+   `pythonw.exe` are signed by the **Python Software Foundation**, and unpacks it into the program
+   folder. This Python is claude-voice's alone: it never touches one you already have, and
+   nothing is installed into yours.
+3. **Hands over to `installer.py`** on that Python, which:
+   - copies the app in, compiles it to prove every file parses, and only then swaps it into place
+   - installs the engine's packages into the private Python, at the exact versions in
+     `requirements-pocket.txt`, from PyPI
+   - writes your settings into a data folder of their own
+   - lists it in **Settings → Apps**, with an uninstaller that runs on the same signed Python
+   - puts **Abby for Claude** in the Start menu (`-Desktop` adds one there too)
+   - writes the registry key games find it by ([discovery.md](discovery.md))
+   - installs Claude Code's hooks into `~\.claude\settings.json`, and the `/voice` command
+   - starts the engine and opens the panel
 
-Either way there is nothing to `pip install` for Qwen — that road uses the standard library
-only. No virtual environment, no requirements file. Pocket TTS is the one exception, and
-`-Engine pocket` installs it for you.
-
-## What gets fetched
-
-Two things, and `setup.ps1` skips whichever you already have.
-
-**Qwen-TTS Studio**, from its [Releases
-page](https://github.com/Danmoreng/qwen-tts-studio/releases). Two builds, and the difference
-is only what they carry:
-
-| build | take it if |
+| Option | |
 |---|---|
-| **`windows-cuda-bundled`** (~663 MB, the default) | you are not sure — it brings NVIDIA's CUDA runtime with it |
-| `windows-cuda-system` (~268 MB) | you already have the CUDA runtime installed |
+| `-Engine pocket` | the default: Pocket TTS on the CPU, a few hundred MB, no graphics card |
+| `-Engine qwen` | Qwen on an NVIDIA card: Studio and the 2.2 GB model. **Smart App Control refuses Studio's DLLs** — the engine says so and falls back to Pocket |
+| `-Engine breeze` | the engine that laughs: about 11 GB, a 16 GB NVIDIA card. [Breeze →](engines.md#breeze-tts-2-the-one-that-laughs) |
+| `-NoClaude` | for a game or a program only: nothing of Claude Code's is touched |
+| `-Desktop` · `-StartWithWindows` | a Desktop shortcut · open the panel at login (a Run value, removed with the rest) |
+| `-BigData D:\voices` | one folder for the big engine files |
+| `-Root <folder>` | another program folder |
+| `-WhatIf` | say what it would do, change nothing |
 
-No separate Java is needed — Studio ships its own, and this project boots that same JVM in
-process. If you already downloaded either package by hand, leave it in `Downloads`: it is
-found and unpacked rather than fetched a second time.
+With the piped form, arguments go like this:
 
-**The model**, from
-[Serveurperso/Qwen3-TTS-GGUF](https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF) — the same
-repo Studio's own Welcome screen pulls from. Two files, both needed: the *talker* turns text
-into audio tokens, the *tokenizer* turns those back into sound.
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/TraxData313/claude-voice/main/install.ps1))) -Engine qwen
+```
 
-The size of the talker is not a preference:
+Running it again updates the program in place and keeps your settings.
 
-- **1.7b** produces **2048-dimension** speaker embeddings — what the shipped voices are.
-- 0.6b produces 1024, and **will not work** with a voice made by the larger model.
+**What Claude Code then says aloud:** each finished answer (its `## TL;DR`), and a prompt or a
+question that is waiting on you. The short lines written between tool calls are not in any hook
+Claude Code runs, so they stay silent unless you turn on `/voice narrate transcript on` and run
+`/voice hooks install` again. **[Why →](how-it-works.md#the-hooks)**
 
-An *unpacked* Studio already sitting in `Downloads` is moved out rather than used where
-it stands: Windows Storage Sense empties that folder after 30 days and has taken one
-before now. A `.zip` or `.msi` may stay there — losing it costs a download, not the install.
+Nothing is written into your `~\.claude\CLAUDE.md`. The rules for writing to be heard reach each
+session through its `SessionStart` hook instead, and an install made before 2.0 has its old
+`<!-- claude-voice -->` block cut out of that file — only between the markers.
 
-Studio lands in `%LOCALAPPDATA%\Programs\qwen-tts-studio`, the models in
-`~\.qwen-tts-studio\models`. You never have to open Studio's own window — it is welcome to
-be opened, it is a perfectly good GUI, but nothing here needs it.
+## Where everything goes
 
-## What the installer actually does
+```text
+%LOCALAPPDATA%\Programs\claude-voice\      the program
+    runtime\        python.org's Python, private; the engine's packages live in here
+    app\            the code, replaced whole by an update
+    install.json    what was installed, and everything it put outside this folder
+%LOCALAPPDATA%\claude-voice\               yours, never touched by an update
+    config.json, logs\, voices\ (the ones you make), where.json
+```
 
-`setup.ps1` hands off to `install.ps1` once the pieces are in place, and that part:
+Outside those two: the Start menu shortcut, the Settings → Apps entry and the
+`HKCU\Software\claude-voice` key, Claude Code's hooks and `/voice`, and — only when asked — a Run
+value. Pocket's voice model is fetched by the engine the first time it loads, into the shared
+Hugging Face cache.
 
-- finds `python.exe` and the Studio folder, and writes their full paths into `config.json`
-- copies the `/voice` slash command into `.claude\commands\`
-- registers the hooks in `.claude\settings.json` — note that **hooks are read once, at
-  session start**, so restart Claude Code afterwards
-- writes [the note about writing to be heard](../speaking-notes.md) into
-  `~\.claude\CLAUDE.md`, between `<!-- claude-voice -->` markers, so every future session
-  knows to end long answers with a `## TL;DR` and that only that part is spoken. Anything
-  else already in that file is left alone; `-NoNote` skips it.
-  **[Why this is the difference between bearable and not →](writing-for-the-ear.md)**
-- puts a **claude-voice shortcut on your Desktop** that opens the panel; `-NoShortcut`
-  skips it, and `.\make_shortcut.ps1` puts it back later (`-Remove` takes it away,
-  `-StartMenu` adds one there too)
-- writes every file as UTF-8 **without a BOM**, because a BOM in `settings.json` stops
-  Claude Code reading it at all
+## Smart App Control
 
-Nothing is installed system-wide, nothing runs at boot, and nothing is written outside the
-repo, your `.claude` folder, your Desktop and your home folder. To undo it, delete the repo
-folder, `~\.qwen-tts-studio`, `%LOCALAPPDATA%\Programs\qwen-tts-studio`, and the
-`<!-- claude-voice -->` block from `~\.claude\CLAUDE.md`.
+Windows 11 turns Smart App Control on for a clean install. It runs a program or loads a DLL only
+when it is signed by somebody Microsoft knows, or when Microsoft's cloud knows that exact file.
+An `.exe` built here would be neither: signing one takes a paid code-signing certificate renewed
+every year, and this project is not going to have one. So there is no `.exe`, and there will not
+be — the program is python.org's signed Python running claude-voice's own code:
 
-## No administrator rights needed
+- **The Python is signed** by the Python Software Foundation. `python.exe`, `pythonw.exe` and
+  every file with them run.
+- **The engine's packages are pinned** to builds seen to load under Smart App Control. That is
+  per file: on 2026-10-17 it refused the Python 3.13 build of one Pocket dependency
+  (sentencepiece) while allowing the 3.12 build of the same version — which is why the Python is
+  3.12, and why the versions are exact.
+- **Qwen's engine is the exception**: Qwen-TTS Studio's DLLs are unsigned and refused. The engine
+  checks before it loads anything, says so, and switches to Pocket.
 
-Nothing here elevates, and nothing wants to. Every file it writes is one you already own —
-the repo folder, your `.claude` folder, your Desktop, your home folder, your temp folder. It
-touches no registry key outside your own hive, adds no service, and installs nothing
-machine-wide. So it goes on a locked-down work laptop as easily as your own.
+If Smart App Control does refuse something, `install` says so at the end ("could not load its
+voice"), and Event Viewer → Applications and Services → Microsoft → Windows → CodeIntegrity names
+the file.
 
-The one part that *looks* like it needs rights is Studio, because it is shipped as an
-installer. It does not:
+## Updating
 
-- **The `.zip` build is the same files without the installer**, and that is what `setup.ps1`
-  takes by default. Unpack, point at it, done.
-- **An `.msi` can be unpacked without being installed.** `msiexec /a package.msi /qn
-  TARGETDIR=<folder>` is an *administrative install*, which despite the name needs no
-  administrator: it lays the package's files out in a folder and stops. No elevation, no
-  registry, no entry in Add/Remove Programs. So if you already have the `.msi` sitting in
-  `Downloads` because you tried to install it and Windows refused, `setup.ps1` finds it and
-  does exactly this — the download is not wasted.
-
-Two provisos, and neither is about permissions:
-
-- **Keep the folder somewhere you own** — `Documents`, not `Program Files`. The settings
-  file lives beside the code, so a folder you cannot write to is a voice that cannot
-  remember anything.
-- **PowerShell may refuse to run a script it did not sign**, which is a policy, not a
-  permission. Either of these gets past it without any rights at all:
-
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\setup.ps1
-  ```
-
-  ```powershell
-  Get-Content .\setup.ps1 -Raw | Invoke-Expression
-  ```
-
-  The second one works even where the first is blocked by group policy, because the rule is
-  about running script *files*.
-
-## From a game
-
-The Immersive AI mod installs this for its players without a terminal and without a window:
-it asks which engine suits their computer and which drive should hold the files, then runs
-`ClaudeVoiceSetup.exe --quiet` and draws the progress inside the game from the status file
-(see [api.md](api.md#for-a-game)). With `--data`, Studio, the Qwen model and Breeze all go in
-that one folder; Pocket's small files stay beside the app. Everything else is exactly the
-install described above.
+`voice_cli.py update --apply` (or the panel's button) takes the newest release from GitHub,
+stages it beside the running copy, swaps the two, re-registers it and restarts the engine. Your
+data folder is not touched. A release that needs a different Python says so and asks you to run
+`install.ps1` again. **[Updating →](updating.md)**
 
 ## Removing it
 
-**Settings → Apps → claude-voice → Uninstall**, when it was installed by `ClaudeVoiceSetup.exe` or
-`setup.ps1` into a folder of its own. That runs `uninstall.ps1`, which shows one window listing
-what it will take and asks first:
-
-- the claude-voice folder itself, with its voices and settings
-- Breeze, Qwen-TTS Studio and the Qwen model, Pocket's model, and Python — **each only if the
-  setup installed it**. `setup.ps1` keeps that list in `installed.json` as it goes, so a Python or
-  a Studio you already had, or one belonging to another copy of claude-voice, is never taken
-- its shortcuts, the `where.json` note games find it by, and its Claude Code hooks when it had any
+**Settings → Apps → claude-voice → Uninstall.** It lists what it will take and asks, then asks
+separately about your own settings and voices — kept unless you say otherwise. It removes the
+hooks (only its own: another copy's stay), the `/voice` command if it is its own, the shortcuts,
+the Run value, both registry keys, where.json, anything it fetched for an engine, and the program
+folder.
 
 ```powershell
-.\uninstall.ps1 -WhatIf        # says what it would remove, and removes nothing
-.\uninstall.ps1 -KeepPython    # everything but the Python it installed
+& "$env:LOCALAPPDATA\Programs\claude-voice\runtime\python.exe" "$env:LOCALAPPDATA\Programs\claude-voice\app\installer.py" uninstall --dry-run
 ```
 
-**A git clone is refused.** It is somebody's own checkout, not an install, and it is never
-listed in Settings → Apps either — delete the folder by hand if you mean it.
+The uninstaller runs on the Python it is deleting. Windows will not delete a running program's
+files, but it will rename their folder, so the runtime is moved into `%TEMP%` in one step and
+everything that lets go is deleted; a few MB of in-use files wait there until the next install
+sweeps them, or Windows clears its temp folder.
+
+## A developer's checkout
+
+A git clone is a **source**, never an install: nothing installs into it, rewrites it or removes
+it, and `install.ps1` run from one copies it into the program folder. To run straight from the
+clone instead:
+
+```powershell
+python voice_cli.py hooks install     # Claude Code's hooks point at this folder
+python voice_cli.py register          # games find it (Kind = dev)
+```
+
+Installing afterwards takes both over — the hooks and the registration then name the installed
+copy, and the clone's settings are carried into the data folder on that first install. `register`
+in the clone takes the key back.
+
+## Older installs
+
+An install made before 2.0 (code straight in `%LOCALAPPDATA%\Programs\claude-voice`, packages in
+your own Python) is moved over by running `install.ps1` once: its settings go to the data folder,
+what it had fetched (Studio, a model, Breeze) is remembered for the uninstaller, and its files
+are replaced by the new layout. The Python it may have installed for you is left alone — remove
+it from Settings → Apps if nothing else uses it. `setup.ps1` and `uninstall.ps1` still exist and
+hand over to the new ones.
+
+## From a game
+
+The Immersive AI mod installs it for its players the same way, without PowerShell: it fetches
+the project and python.org's Python, checks the hash and the signature, and runs `installer.py
+--quiet --no-claude`, drawing the progress inside the game from `setup-status.json`
+([api.md](api.md#for-a-game)). The old `ClaudeVoiceSetup.exe` is retired: Smart App Control
+refuses it.
 
 ## When it does not work
 
-Silence has no error message. **[When it goes quiet →](troubleshooting.md)** is the page for
-that, and it starts with the two questions worth asking first.
+Silence has no error message. **[When it goes quiet →](troubleshooting.md)** starts with the two
+questions worth asking first. The install's own log is `%LOCALAPPDATA%\claude-voice\setup.log`.

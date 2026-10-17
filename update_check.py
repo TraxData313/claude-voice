@@ -49,15 +49,15 @@ CACHE_PATH = os.path.join(voice_lib.LOG_DIR, "update-check.json")
 CONTACT_LOG = os.path.join(voice_lib.LOG_DIR, "update.log")
 
 # Files a `git pull` brings in but does not install. The slash command and the
-# hooks were copied out of here into .claude at setup time, so a release that
-# changes any of them needs setup.ps1 run again before the change reaches
-# anything.
+# hooks were copied out of here into .claude at setup time, so in a checkout a
+# release that changes any of them needs `voice_cli.py hooks install` (or the
+# installer) run again before the change reaches anything. An installed copy's
+# update runs its installer, so this list is a checkout's concern only.
 #
-# speaking-notes.md used to be on this list and no longer is: voice_lib.sync_notes
-# puts it back into ~\.claude\CLAUDE.md after a pull. It was the worst one to
-# leave to a hand-run installer, because a session quietly following last
-# month's rules looks exactly like a session.
-INSTALLED_FROM = ("commands/", "install.ps1", "setup.ps1", "make_shortcut.ps1")
+# speaking-notes.md is not on this list: nothing copies it anywhere any more.
+# The SessionStart hook reads it from here, so a pull reaches the next session
+# by itself.
+INSTALLED_FROM = ("commands/", "templates/", "install.ps1", "installer.py", "make_shortcut.ps1")
 
 
 # --------------------------------------------------------------------------
@@ -396,7 +396,7 @@ def _by_hand(say):
     say("Taking it by hand instead:")
     say(f"  1. Download {ZIP_URL}")
     say("  2. Unpack it and copy the contents over this folder, replacing what is there.")
-    say("  3. Run setup.ps1 again, then: voice_cli.py kill, then start.")
+    say("  3. Run voice_cli.py hooks install, then: voice_cli.py kill, then start.")
     say("")
     say("Nothing you own is in that zip, so this does not touch your settings,")
     say("your logs, or any voice you made yourself.")
@@ -411,6 +411,9 @@ def apply_update(state=None, say=print):
     appears to have done nothing.
     """
     state = state or voice_lib.load_state()
+
+    if voice_lib.INSTALL:
+        return _apply_installed(say)
 
     if not os.path.isdir(os.path.join(voice_lib.ROOT, ".git")):
         say("This copy was not cloned -- there is no .git folder to pull into.")
@@ -486,13 +489,6 @@ def apply_update(state=None, say=print):
         for line in notes.splitlines():
             say(("  " + plain(line)).rstrip())     # blank lines are blank, not two spaces
 
-    # The note is the one installed file that can reinstall itself. Done here as
-    # well as on engine start, so it still happens for somebody whose engine was
-    # not running when they updated.
-    if voice_lib.sync_notes(state=state):
-        say("")
-        say("Refreshed the speaking notes in ~\\.claude\\CLAUDE.md. Restart Claude")
-        say("Code to pick them up -- that file is read once, at session start.")
 
     # --- and now the part everyone forgets --------------------------------
     say("")
@@ -516,8 +512,79 @@ def apply_update(state=None, say=print):
     if needs_setup:
         say("")
         say("This one changed a part that is installed rather than just read:")
-        say("run setup.ps1 again, then restart Claude Code -- hooks and the")
+        say("run 'voice_cli.py hooks install', then restart Claude Code -- hooks and the")
         say("slash command are read once, at session start.")
+    return True
+
+
+class _Said:
+    """What installer.download wants to report to, said through `say`."""
+
+    def __init__(self, say):
+        self.say = say
+
+    def line(self, label, text):
+        self.say(f"  {label}: {text}")
+
+    def status(self, **_):
+        pass
+
+    def check_cancel(self):
+        pass
+
+
+def _apply_installed(say):
+    """An installed copy has no .git to pull into. It takes the release zip, and
+    hands it to that release's own installer.py, which stages the new app\\
+    beside this one, swaps the two, re-registers, and restarts the engine if it
+    was running -- with the settings, logs and voices in the data folder never
+    touched. Returns True if a newer version went in.
+    """
+    import installer
+
+    root = os.path.dirname(voice_lib.ROOT)
+    before = local_version()
+    say("Fetching the newest release from GitHub...")
+    try:
+        source = installer.fetch_source(ZIP_URL, _Said(say))
+    except Exception as exc:
+        say(f"Could not fetch it: {exc}")
+        return False
+    theirs = (installer.read_json(os.path.join(source, "version.json")).get("version") or "").strip()
+    if not is_newer(theirs, before):
+        say(f"The release on GitHub is {theirs or 'unnumbered'}; you have {before}. Nothing to do.")
+        return False
+
+    # Out of app\ first: a process standing in a folder stops it being renamed,
+    # and this one may be the panel, which stays open through the update.
+    os.chdir(voice_lib.DATA_DIR)
+    pythonw = os.path.join(root, "runtime", "pythonw.exe")
+    say(f"Installing {theirs} over {before}...")
+    proc = subprocess.Popen(
+        [pythonw, os.path.join(source, "installer.py"), "update", "--root", root, "--source", source],
+        cwd=voice_lib.DATA_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
+    for line in proc.stdout:
+        if line.strip():
+            say("  " + plain(line.rstrip()))
+    if proc.wait() != 0:
+        say("The update stopped; what is installed is what was there before.")
+        return False
+    say(f"Updated to {shown_version()}.")
+    notes = changelog_section(local_version())
+    if notes:
+        say("")
+        for line in notes.splitlines():
+            say(("  " + plain(line)).rstrip())
+    # Only the folder fetch_source made (<PRODUCT>-update-<pid>): two levels up
+    # from `source` is that folder only when the zip had one top folder, and
+    # anything else up there may be %TEMP% itself.
+    work = source
+    while work and not os.path.basename(work).startswith(f"{installer.PRODUCT}-update-"):
+        up = os.path.dirname(work)
+        work = None if up == work else up
+    if work:
+        shutil.rmtree(work, ignore_errors=True)
     return True
 
 

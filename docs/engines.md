@@ -4,17 +4,27 @@ There are three ways to make sound here, and they are not a fast one and a good
 one. They are a heavy one that reads any alphabet, a light one that reads six
 languages and starts in a fifth of the time, and an optional one that laughs.
 
-```powershell
-python voice_cli.py engine            # which one is speaking
-python voice_cli.py engine pocket     # switch
-python voice_cli.py install breeze    # check this machine for the third, and offer it
+```
+/voice engine            # which one is speaking
+/voice engine pocket     # switch
+/voice install breeze    # check this machine for the third, and offer it
 ```
 
 Or the top dropdown in the panel, above the voice.
 
+**Pocket is the default for a new install** (since 2.0). Windows 11's Smart App
+Control, on by default on a clean install, refuses to load Qwen's unsigned
+`qwen3_tts.dll`. The engine asks Windows before it touches Studio — the registry says
+whether Smart App Control is enforcing — and loads nothing when it is, because even a
+refused load puts a notice on your screen. It switches to Pocket (or Breeze when there
+is no Pocket), writes that into the config, and the panel says *"Windows Smart App
+Control blocked the Qwen engine; switched to Pocket TTS."* Picking Qwen again is
+refused the same way for as long as Smart App Control is on.
+**[When Windows says "part of this app has been blocked" →](troubleshooting.md#5-part-of-this-app-has-been-blocked)**
+
 | | **Qwen** | **Pocket TTS** | **Breeze TTS 2** |
 |---|---|---|---|
-| install | Studio, a GPU, and `qwen_engine.py` | `pip install pocket-tts`, or `setup.ps1 -Engine pocket` from scratch | a separate download of about 11 GB, [only when asked](#breeze-tts-2-the-one-that-laughs) |
+| install | `install.ps1 -Engine qwen`: Studio and the 2.2 GB model, a GPU, Smart App Control off | the default: pinned into the program's own Python by the installer | a separate download of about 11 GB, [only when asked](#breeze-tts-2-the-one-that-laughs) |
 | runs on | GPU, 3.3 GB | CPU, two cores | GPU, 13 GB free to start and 9 GB after — a 16 GB card |
 | first audio | 812 ms | **181 ms** | **180–370 ms** |
 | throughput | 3.7–4.0× realtime | 4.0–4.5× realtime | 1.6–2.1× realtime |

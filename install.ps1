@@ -1,389 +1,220 @@
 <#
-    Wires Claude Code up to speak.
+    Installs claude-voice on this computer as a program: per-user, no administrator.
 
-    Writes config.json (paths for this machine), installs the speech hooks into a
-    project's .claude\settings.json, drops the /voice slash command next to it,
-    puts the note about writing to be heard into ~\.claude\CLAUDE.md, and puts a
-    shortcut to the panel on the Desktop.
+    From a copy of the project (a git clone, or the zip GitHub offers):
 
-    No administrator rights, by design: every path it writes to belongs to the
-    user already, and Program Files is only ever read from, looking for Studio.
-    Keep the repo somewhere you own -- config.json lives beside the code.
+        powershell -ExecutionPolicy Bypass -File .\install.ps1
 
-        .\install.ps1                                  # this repo's own folder as the project
-        .\install.ps1 -ProjectDir C:\code\my-project   # speak in that project
-        .\install.ps1 -StudioDir "D:\qwen-tts-studio"  # if it is not auto-found
-        .\install.ps1 -Engine pocket                   # Pocket TTS on the CPU: no Studio needed
-        .\install.ps1 -NoShortcut                      # skip the Desktop icon
-        .\install.ps1 -NoNote                          # leave CLAUDE.md alone
-        .\install.ps1 -UpdateChecks                    # allow one look a week for a new version
-        .\install.ps1 -WhatIf                          # show, do not write
+    Or straight from GitHub, with nothing downloaded first:
 
-    Hooks are read at session start: restart Claude Code afterwards.
+        powershell -c "irm https://raw.githubusercontent.com/TraxData313/claude-voice/main/install.ps1 | iex"
+
+    Why the first one names an execution policy: Windows ships with running
+    script files switched off, and a script from the internet is refused even
+    where they are on. -ExecutionPolicy Bypass on the command line is
+    Microsoft's documented way to run one script you chose; it lasts for that
+    one PowerShell and changes no setting. The second form needs no flag,
+    because a policy is about script files and that pipe never makes one. This
+    script itself starts nothing hidden and nothing with that flag.
+
+    What it does, and nothing else:
+      1. finds the project: the folder it is in, or GitHub's zip of main
+      2. fetches python.org's own Python 3.12 for Windows (about 30 MB, a plain zip),
+         checks it against the SHA-256 written below and checks that python.exe
+         and pythonw.exe are signed by the Python Software Foundation -- the
+         signature Smart App Control lets run -- and unpacks it into
+         <program>\runtime. It never touches any other Python on this machine.
+      3. hands over to installer.py on that Python, which says every step as it
+         goes: the app into <program>\app, the speech engine's packages into
+         the private Python, Settings > Apps, the Start menu, the registry key
+         games find it by, and Claude Code's hooks.
+
+    Options:
+        -Engine pocket|qwen|breeze   which voice engine (default: pocket, on the CPU)
+        -NoClaude                    for a game or a program only: nothing of Claude Code's
+        -Desktop                     a Desktop shortcut as well as the Start menu one
+        -StartWithWindows            open the panel when you log in
+        -BigData D:\voices           one folder for the big engine files (Qwen, Breeze)
+        -Root <folder>               where the program goes (default %LOCALAPPDATA%\Programs\claude-voice)
+        -NoPanel                     do not open the panel at the end
+        -WhatIf                      say what it would do, change nothing
+
+    Arguments with the GitHub form:
+        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/TraxData313/claude-voice/main/install.ps1))) -Engine qwen
+
+    Running it again updates the program in place and keeps your settings.
+    Removing it: Settings > Apps > claude-voice > Uninstall. docs/install.md has the rest.
 #>
 
 param(
-    # 'qwen' needs Studio and refuses to go on without it; 'pocket' needs only
-    # the pocket-tts package. Left out, whatever config.json already says.
-    [ValidateSet("qwen", "pocket", "breeze")]
+    [ValidateSet("pocket", "qwen", "breeze")]
     [string]$Engine,
-    [string]$ProjectDir,
-    [string]$StudioDir,
-    # Where the Qwen model files are. Left out, Studio's own folder in the user's home.
-    [string]$ModelDir,
-    [string]$PythonExe,
-    [switch]$NoShortcut,
-    [switch]$NoNote,
-    # Nothing of Claude Code's: no hooks, no /voice command, no note. For a
-    # program that speaks through the HTTP API and nothing else -- see setup.ps1.
+    [string]$Root = (Join-Path $env:LOCALAPPDATA "Programs\claude-voice"),
+    [string]$Source,
     [switch]$NoClaude,
-    [switch]$UpdateChecks,
-    [switch]$WhatIf
+    [switch]$Desktop,
+    [switch]$StartWithWindows,
+    [string]$BigData,
+    [switch]$NoPanel,
+    [switch]$NoStart,
+    [switch]$Quiet,
+    [switch]$WhatIf,
+    # For a throwaway install a test makes: its own registry names, data folder,
+    # Claude Code folder, shortcut folder and port, so it touches nothing real.
+    [string]$Product,
+    [string]$DataDir,
+    [string]$ClaudeDir,
+    [string]$ShortcutDir,
+    [int]$Port
 )
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"      # Invoke-WebRequest is many times slower drawing a bar
 
-# There is no script file when this is piped into Invoke-Expression, so
-# $PSScriptRoot is empty -- and that pipe is the documented way past an
-# execution policy that refuses to run script files at all. Stand where the
-# user is standing instead.
-$repo = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
-if (-not $ProjectDir) { $ProjectDir = $repo }
+# --- the Python it runs on, pinned -------------------------------------------
+# python.org's package for its own install manager: the full Python, tkinter
+# included, as a zip. The hash is the one python.org publishes for it
+# (https://www.python.org/ftp/python/index-windows.json). runtime.json in the
+# project says the same three things, and test_installer.py checks they agree.
+$PythonVersion = "3.12.10"
+$PythonUrl     = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.zip"
+$PythonSha256  = "8649692de846c56a7189d6dae5c322ab20deb1b5908b6f39426b62a36f39415d"
+$PythonSigner  = "Python Software Foundation"
+$ZipUrl        = "https://github.com/TraxData313/claude-voice/archive/refs/heads/main.zip"
 
-function Say($msg, $colour = "Gray") { Write-Host $msg -ForegroundColor $colour }
-
-# Out-File -Encoding utf8 writes a BOM in PowerShell 5.1, and a BOM at the top
-# of settings.json makes a strict JSON parser reject the whole file -- which
-# looks exactly like "hooks silently do nothing". Write it clean.
-function Write-Utf8($path, $text) {
-    [System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))
+function Say($label, $text, $colour = "Gray") {
+    Write-Host ("{0,-14}: {1}" -f $label, $text) -ForegroundColor $colour
 }
 
-# The mirror of it, and the same bug from the other end: Get-Content -Raw in
-# PowerShell 5.1 decodes a file with no BOM as the system ANSI codepage, so an
-# em dash read out of a UTF-8 file and written straight back comes out as three
-# characters of nonsense. Every file this script reads was written as UTF-8.
-function Read-Utf8($path) {
-    return [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
-}
+$Root = [System.IO.Path]::GetFullPath($Root)
+# installer.py refuses this too, but only after a Python would have been unpacked into it.
+if (Test-Path (Join-Path $Root ".git")) { throw "$Root is a git checkout; the program goes in a folder of its own (-Root)." }
+$runtime = Join-Path $Root "runtime"
+Write-Host ""
+Write-Host "claude-voice -- installing into $Root" -ForegroundColor Cyan
+Write-Host ""
 
-# --- python ---------------------------------------------------------------
-# The hook is spawned without a shell profile, so a bare "python" is not enough:
-# anything installed by conda or the Windows Store alias will not resolve there.
-# Record the absolute interpreter path instead.
-if (-not $PythonExe) {
-    $cmd = Get-Command python -ErrorAction SilentlyContinue
-    if ($cmd) { $PythonExe = $cmd.Source }
-}
-if (-not $PythonExe -or -not (Test-Path $PythonExe)) {
-    throw "Could not find python.exe. Pass -PythonExe C:\path\to\python.exe"
-}
-if ($PythonExe -match 'WindowsApps') {
-    throw "That python ($PythonExe) is the Microsoft Store alias, which will not run from a hook. Install real Python or pass -PythonExe."
-}
-Say "python        : $PythonExe" "Green"
-
-# --- which engine ---------------------------------------------------------
-# A re-run with no -Engine keeps the one already chosen, so that installing
-# again on a machine with no graphics card does not quietly demand Studio.
-$configPath = Join-Path $repo "config.json"
-if (-not $Engine) {
-    $Engine = "qwen"
-    if (Test-Path $configPath) {
-        try {
-            $had = (Read-Utf8 $configPath | ConvertFrom-Json).engine
-            if ($had -in "qwen", "pocket", "breeze") { $Engine = $had }
-        } catch { }
-    }
-}
-Say "engine        : $Engine" "Green"
-
-if ($Engine -eq "pocket") {
-    & $PythonExe -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('pocket_tts') else 1)"
-    if ($LASTEXITCODE -eq 0) {
-        Say "pocket-tts    : installed" "Green"
+# --- 1. the project ----------------------------------------------------------
+$work = $null      # piped into iex this shares the caller's scope; never delete their $work
+if (-not $Source) {
+    if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "installer.py"))) {
+        $Source = $PSScriptRoot
     } elseif ($WhatIf) {
-        Say "pocket-tts    : not installed yet -- setup.ps1 -Engine pocket fetches it" "Yellow"
+        Say "would fetch" $ZipUrl "Yellow"
     } else {
-        # Refused here rather than discovered at the first answer, where the
-        # only symptom would be silence.
-        throw "pocket-tts is not installed for $PythonExe. Run: & `"$PythonExe`" -m pip install pocket-tts"
+        $work = Join-Path $env:TEMP ("claude-voice-source-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+        New-Item -ItemType Directory -Force -Path $work | Out-Null
+        Say "project" "downloading $ZipUrl"
+        Invoke-WebRequest -Uri $ZipUrl -OutFile (Join-Path $work "source.zip") -UseBasicParsing
+        Expand-Archive -Path (Join-Path $work "source.zip") -DestinationPath (Join-Path $work "src")
+        $found = Get-ChildItem -Path (Join-Path $work "src") -Filter "installer.py" -Recurse | Select-Object -First 1
+        if (-not $found) { throw "the download from GitHub holds no installer.py" }
+        $Source = $found.DirectoryName
     }
 }
-
-# --- Qwen-TTS Studio ------------------------------------------------------
-if (-not $StudioDir) {
-    # Downloads comes last on purpose. Storage Sense is on by default and
-    # deletes anything there left untouched for 30 days, so a path recorded
-    # from it works now and is gone in a month. Any real install beats it;
-    # if it is genuinely the only copy we still use it, but say so.
-    $guesses = @(
-        "$env:LOCALAPPDATA\Programs\qwen-tts-studio",
-        "$env:ProgramFiles\qwen-tts-studio",
-        "C:\qwen-tts-studio",
-        "$env:USERPROFILE\Downloads\qwen-tts-studio"
-    )
-    $StudioDir = $guesses | Where-Object { Test-Path (Join-Path $_ "runtime\bin\server\jvm.dll") } | Select-Object -First 1
-}
-$hasStudio = $StudioDir -and (Test-Path (Join-Path $StudioDir "runtime\bin\server\jvm.dll"))
-if (-not $hasStudio -and $Engine -eq "qwen") {
-    throw "Qwen-TTS Studio not found. Pass -StudioDir pointing at the folder containing app\ and runtime\, or -Engine pocket to use the CPU engine instead."
+if ($Source) {
+    $Source = [System.IO.Path]::GetFullPath($Source)
+    if (-not (Test-Path (Join-Path $Source "installer.py"))) { throw "$Source is not a copy of claude-voice (no installer.py in it)" }
+    Say "project" $Source "Green"
 }
 
-# A Studio that happens to be here is still recorded on the Pocket road, so
-# switching engine later from the panel just works.
-if ($hasStudio) {
-    Say "studio        : $StudioDir" "Green"
-    if ($StudioDir.StartsWith("$env:USERPROFILE\Downloads\", [StringComparison]::OrdinalIgnoreCase)) {
-        Say "              ^ that is inside Downloads, which Windows Storage Sense empties" "Yellow"
-        Say "                after 30 days. Move it and re-run, or run setup.ps1 to move it." "Yellow"
+# --- 2. the runtime ----------------------------------------------------------
+$marker = Join-Path $runtime "claude-voice-runtime.json"
+$haveRuntime = $false
+if ((Test-Path (Join-Path $runtime "python.exe")) -and (Test-Path $marker)) {
+    try { $haveRuntime = ((Get-Content $marker -Raw | ConvertFrom-Json).sha256 -eq $PythonSha256) } catch { }
+}
+
+if ($haveRuntime) {
+    Say "python" "$PythonVersion, already in $runtime" "Green"
+} elseif ($WhatIf) {
+    Say "would fetch" "Python $PythonVersion from python.org into $runtime (about 30 MB, SHA-256 checked)" "Yellow"
+} else {
+    $cache = Join-Path $env:TEMP "claude-voice-download"
+    New-Item -ItemType Directory -Force -Path $cache | Out-Null
+    $zip = Join-Path $cache ([System.IO.Path]::GetFileName($PythonUrl))
+    if (-not ((Test-Path $zip) -and ((Get-FileHash $zip -Algorithm SHA256).Hash -eq $PythonSha256))) {
+        Say "python" "downloading $PythonVersion from python.org (about 30 MB)"
+        Invoke-WebRequest -Uri $PythonUrl -OutFile $zip -UseBasicParsing
     }
-
-    $modelDir = if ($ModelDir) { $ModelDir } else { Join-Path $env:USERPROFILE ".qwen-tts-studio\models" }
-    $talker = "qwen-talker-1.7b-base-Q8_0.gguf"
-    if (Test-Path $modelDir) {
-        $found = Get-ChildItem $modelDir -Filter "*talker*.gguf" -ErrorAction SilentlyContinue
-        if ($found -and -not ($found.Name -contains $talker)) { $talker = $found[0].Name }
-        Say "talker model  : $talker" "Green"
-    } else {
-        Say "talker model  : $modelDir not found -- download a model in Studio first" "Yellow"
+    $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+    if ($hash -ne $PythonSha256) {
+        Remove-Item $zip -Force
+        throw "the Python download does not match the pinned SHA-256 (got $hash). Nothing was installed."
     }
-} else {
-    Say "studio        : none, and none needed -- Pocket TTS runs without it" "Green"
-}
+    Say "checked" "SHA-256 matches what python.org publishes" "Green"
 
-# --- config.json ----------------------------------------------------------
-# voice_cli writes config.json back holding only what differs from its own
-# defaults, so a path we wrote last time is simply absent the next time if it
-# happened to match. Assigning to a property that is not there throws, which
-# turned a second run of the installer into an error. Set it either way.
-function Set-Prop($obj, $name, $value) {
-    if ($null -ne $obj.PSObject.Properties[$name]) { $obj.$name = $value }
-    else { $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value }
-}
-
-$freshConfig = -not (Test-Path $configPath)
-if (Test-Path $configPath) {
-    $cfg = Read-Utf8 $configPath | ConvertFrom-Json
-    Say "config.json   : updating paths, keeping your settings"
-} else {
-    $cfg = Read-Utf8 (Join-Path $repo "config.example.json") | ConvertFrom-Json
-    $cfg.PSObject.Properties.Remove("_comment")
-    $cfg.PSObject.Properties.Remove("_extraVoicesDirs")
-    Say "config.json   : creating"
-}
-if ($hasStudio) {
-    Set-Prop $cfg "studioDir" $StudioDir
-    Set-Prop $cfg "modelDir" $modelDir
-    Set-Prop $cfg "talker" $talker
-} elseif (-not ($cfg.studioDir -and (Test-Path (Join-Path $cfg.studioDir "runtime\bin\server\jvm.dll")))) {
-    # The example's C:\Users\you placeholders would otherwise be kept as real
-    # paths. Without them the tool falls back to where setup.ps1 would put
-    # Studio, which is the right place to look if one is ever fetched. A path
-    # that does point at a real Studio is kept, wherever it is.
-    foreach ($k in "studioDir", "modelDir", "talker") { $cfg.PSObject.Properties.Remove($k) }
-}
-# Not Breeze, though: setup.ps1 fetches it after this script and names it the engine only once it
-# is really there. Named here, a Breeze install stopped halfway left the app pointing at an engine
-# that did not exist, and the next line anything spoke tried to load it (2026-09-25).
-if ($Engine -ne "breeze") { Set-Prop $cfg "engine" $Engine }
-# Installed for a program, not for Claude Code: nothing here should start
-# reading Claude Code's or Codex's transcripts aloud just because the switch
-# is on. The HTTP API speaks whatever the switch says; only the watcher is off.
-# On a FRESH install only: somebody who already hears Claude Code through this
-# and then adds an engine from a game has said nothing about their sessions,
-# and switching their narration off behind their back would be a theft.
-if ($NoClaude -and $freshConfig) {
-    Set-Prop $cfg "watch" $false
-    Set-Prop $cfg "watchCodex" $false
-}
-
-# Whether it may look for a newer version of itself. Off unless asked, because
-# everything else here runs on this machine and tells nobody about it, and that
-# is a promise worth more than the convenience. Said out loud either way: this
-# is the moment the user is deciding what this thing gets to do.
-if ($UpdateChecks) {
-    Set-Prop $cfg "updateCheck" $true
-    Say "update checks : on -- one look a week at GitHub, logged in logs\update.log" "Green"
-} else {
-    Say "update checks : off -- nothing is contacted. '/voice update' looks when asked" "Green"
-}
-
-if (-not $WhatIf) {
-    Write-Utf8 $configPath ($cfg | ConvertTo-Json -Depth 10)
-}
-
-# --- the speech hooks ------------------------------------------------------
-if ($NoClaude) {
-    Say "claude code   : left alone -- no hooks, no /voice, no note (-NoClaude)" "Green"
-    $NoNote = $true
-} else {
-$claudeDir = Join-Path $ProjectDir ".claude"
-$settingsPath = Join-Path $claudeDir "settings.json"
-$hookScript = Join-Path $repo "speak_hook.py"
-
-# Forward slashes, because Claude Code runs a hook's command through bash on
-# Windows, and bash reads a backslash as an escape: C:\Users\x\python.exe
-# arrives as C:Usersxpython.exe, "command not found", on every call. It says so
-# only in the transcript, as a non-blocking error, while the watcher goes on
-# speaking -- so this was broken from the day it was written and sounded fine.
-# Windows takes forward slashes in a path as readily as its own, and so does
-# cmd.exe. Quoted when a path holds anything bash would read as syntax -- a
-# space, a bracket, an apostrophe -- and then the way bash quotes, since bash is
-# what reads it.
-#
-# And never a bare "python speak_hook.py". Python exits with 2 when the script
-# it is handed is not there, and 2 is the one exit code Claude Code reads as
-# "block": every prompt refused, every tool call refused, and a Stop hook that
-# will not let an answer end -- all because this folder was moved, renamed or
-# deleted by hand, which is exactly when nobody is thinking about hooks. It
-# locked a whole session out on 2026-09-25, when the folder was set aside to
-# try a fresh install. So the hook is a line of Python that runs speak_hook.py
-# the way "python speak_hook.py" would -- the same argv, its own folder first
-# on the path and never the project's -- and exits 0 without a word when the
-# file is gone. python.exe itself gone is bash's 127, which Claude Code shrugs at.
-function Bash-Word([string]$path) {
-    if ($path -notmatch '[^A-Za-z0-9_./:+,=@-]') { return $path }
-    return '"' + $path.Replace('$', '\$').Replace('`', '\`') + '"'
-}
-$guard = 'import os,runpy,sys;h=sys.argv[1];os.path.isfile(h) or sys.exit(0);' +
-         'sys.argv=[h];sys.path[:]=[os.path.dirname(h)]+[p for p in sys.path if p];' +
-         'runpy.run_path(h,run_name=''__main__'')'
-$pyFwd = $PythonExe.Replace('\', '/')
-$hookFwd = $hookScript.Replace('\', '/')
-$command = "$(Bash-Word $pyFwd) -c `"$guard`" $(Bash-Word $hookFwd)"
-
-# On an object with no properties at all, PSObject.Properties.Name is null in
-# PowerShell 5.1 and calling .Contains() on it throws -- which is precisely the
-# fresh-install case. Ask the property bag directly instead.
-function Has-Prop($obj, $name) { return $null -ne $obj.PSObject.Properties[$name] }
-
-if (Test-Path $settingsPath) {
-    $settings = Read-Utf8 $settingsPath | ConvertFrom-Json
-} else {
-    $settings = [PSCustomObject]@{}
-}
-if (-not (Has-Prop $settings "hooks")) {
-    $settings | Add-Member -NotePropertyName hooks -NotePropertyValue ([PSCustomObject]@{})
-}
-
-# SessionStart and UserPromptSubmit tell a session what the voice can do right
-# now -- whether it takes a mood, whether it can laugh -- which CLAUDE.md cannot,
-# being read once while the engine can change under a conversation.
-# Notification catches the moments the session stops and waits for you, which
-# reach no transcript at all and so can be heard no other way. Stop and
-# PreToolUse speak the answer and the lines said mid-work, but only when the
-# transcript watcher is off; with it on, it speaks them. See speak_hook.py.
-foreach ($event in @("Stop", "PreToolUse", "Notification", "SessionStart", "UserPromptSubmit")) {
-    # The two that tell hold up the prompt, and the start of a session, for as
-    # long as they run. They take a few hundredths of a second; the timeout is
-    # only what a hang could cost, so it is kept short.
-    $timeout = if ($event -in @("SessionStart", "UserPromptSubmit")) { 5 } else { 15 }
-    # PreToolUse entries are matched against the tool name and want a "matcher";
-    # the others take none -- and Notification wants none in particular, since
-    # its matcher is a regex over the notification kind and the "*" that means
-    # "everything" for a tool name is not a valid one. SessionStart's would be
-    # a regex over why it started, and every reason wants telling. An entry
-    # missing the field its event expects can invalidate the whole hooks block,
-    # silencing all of them.
-    if ($event -eq "PreToolUse") {
-        $entry = [PSCustomObject]@{
-            matcher = "*"
-            hooks = @([PSCustomObject]@{ type = "command"; command = $command; timeout = $timeout })
-        }
+    # Unpacked beside the live runtime and only then swapped in, so a failure
+    # here leaves whatever was working before. The docs (62 MB) are left out.
+    $staged = Join-Path $Root "runtime.new"
+    if (Test-Path $staged) { Remove-Item $staged -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $staged | Out-Null
+    $tar = Join-Path $env:SystemRoot "System32\tar.exe"
+    if (Test-Path $tar) {
+        & $tar -xf $zip -C $staged --exclude "Doc"
+        if ($LASTEXITCODE -ne 0) { throw "tar could not unpack $zip" }
     } else {
-        $entry = [PSCustomObject]@{
-            hooks = @([PSCustomObject]@{ type = "command"; command = $command; timeout = $timeout })
+        Expand-Archive -Path $zip -DestinationPath $staged
+    }
+    foreach ($exe in "python.exe", "pythonw.exe") {
+        $sig = Get-AuthenticodeSignature (Join-Path $staged $exe)
+        if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch [regex]::Escape("CN=$PythonSigner")) {
+            Remove-Item $staged -Recurse -Force
+            throw "$exe in the download is not signed by the $PythonSigner ($($sig.Status)). Nothing was installed."
         }
     }
+    Say "checked" "python.exe and pythonw.exe are signed by the $PythonSigner" "Green"
 
-    # Keep any hooks on this event that are not ours; replace ours if present.
-    $existing = @()
-    if (Has-Prop $settings.hooks $event) {
-        $existing = @($settings.hooks.$event | Where-Object {
-            -not ($_.hooks | Where-Object { $_.command -like "*speak_hook.py*" })
-        })
+    if (Test-Path $runtime) {
+        # An older Python under a running install: stop that install's processes first.
+        $oldInstaller = Join-Path $Root "app\installer.py"
+        if ((Test-Path (Join-Path $runtime "python.exe")) -and (Test-Path $oldInstaller)) {
+            & (Join-Path $runtime "python.exe") $oldInstaller stop --root $Root
+        }
+        $old = Join-Path $Root "runtime.old"
+        if (Test-Path $old) { Remove-Item $old -Recurse -Force }
+        Rename-Item $runtime "runtime.old"
+        Remove-Item $old -Recurse -Force -ErrorAction SilentlyContinue
     }
-    $merged = @($existing) + @($entry)
-
-    if (Has-Prop $settings.hooks $event) {
-        $settings.hooks.$event = $merged
-    } else {
-        $settings.hooks | Add-Member -NotePropertyName $event -NotePropertyValue $merged
-    }
+    Rename-Item $staged "runtime"
+    [System.IO.File]::WriteAllText($marker,
+        (@{ version = $PythonVersion; url = $PythonUrl; sha256 = $PythonSha256 } | ConvertTo-Json),
+        (New-Object System.Text.UTF8Encoding $false))
+    Say "python" "$PythonVersion in $runtime" "Green"
 }
 
-Say "hook command  : $command" "Green"
-Say "hook events   : SessionStart, UserPromptSubmit (what the voice can do), Notification (prompts waiting on you), Stop, PreToolUse (answers, when the watcher is off)" "Green"
-Say "settings      : $settingsPath"
-
-if (-not $WhatIf) {
-    New-Item -ItemType Directory -Force -Path $claudeDir | Out-Null
-    Write-Utf8 $settingsPath ($settings | ConvertTo-Json -Depth 10)
-
-    $cmdDir = Join-Path $claudeDir "commands"
-    New-Item -ItemType Directory -Force -Path $cmdDir | Out-Null
-    # templates\, not commands\: Claude Code reads a plugin's commands\ folder as
-    # real commands, and this file still carries its __PYTHON__ placeholders --
-    # left there, installing the plugin would hand the user a broken /voice.
-    $template = (Read-Utf8 (Join-Path $repo "templates\voice.md")).Replace("__PYTHON__", $PythonExe).Replace("__REPO__", $repo.Replace('\','/'))
-    Write-Utf8 (Join-Path $cmdDir "voice.md") $template
-    Say "slash command : $(Join-Path $cmdDir 'voice.md')" "Green"
-}
-}   # -NoClaude
-
-# --- the note every session reads -----------------------------------------
-# Without this the whole TL;DR contract is a secret: a session has no way to
-# know it is being listened to, so it writes for the screen and the listener
-# gets a wall of paths read out at them. This is the part that makes an answer
-# worth hearing, so it is installed rather than left in the documentation.
-#
-# Always the user-level file, whichever project the hooks went into: the voice
-# is one setting shared by every session, and voice_lib.announce_voice keeps
-# the current voice's name up to date in this same block from now on.
-if (-not $NoNote) {
-    $notePath = Join-Path $env:USERPROFILE ".claude\CLAUDE.md"
-    $note = (Read-Utf8 (Join-Path $repo "speaking-notes.md")).TrimEnd() + "`n"
-    $open, $close = "<!-- claude-voice -->", "<!-- /claude-voice -->"
-
-    $existing = if (Test-Path $notePath) { Read-Utf8 $notePath } else { "" }
-    $start, $end = $existing.IndexOf($open), $existing.IndexOf($close)
-    if ($start -ge 0 -and $end -gt $start) {
-        # Replace our block and leave every word around it alone.
-        $merged = $existing.Substring(0, $start) + $note + $existing.Substring($end + $close.Length)
-        $what = "updated"
-    } else {
-        $merged = if ($existing.Trim()) { $existing.TrimEnd() + "`n`n" + $note } else { $note }
-        $what = "added to"
-    }
-
-    Say "spoken-answer : $what $notePath" "Green"
-    if (-not $WhatIf) {
-        New-Item -ItemType Directory -Force -Path (Split-Path $notePath) | Out-Null
-        Write-Utf8 $notePath $merged
-        # Fills in the current-voice line inside the block just written, using
-        # the same path the CLI and the panel take, so the three cannot drift.
-        $voice = if (Has-Prop $cfg "voice") { $cfg.voice } else { "abby" }
-        & $PythonExe (Join-Path $repo "voice_cli.py") set $voice | Out-Null
-    }
+if ($WhatIf -and (-not $haveRuntime -or -not $Source)) {
+    Write-Host ""
+    Write-Host "-WhatIf: nothing was written. With the Python in place, installer.py would then" -ForegroundColor Yellow
+    Write-Host "copy the app, install the engine's packages and register it." -ForegroundColor Yellow
+    return
 }
 
-# --- something to double click --------------------------------------------
-# The panel is the only part of this with a window, and until now the only way
-# to open one was to type a command -- which is a poor answer to "I closed it,
-# how do I get it back".
-if (-not $NoShortcut) {
-    & (Join-Path $repo "make_shortcut.ps1") -PythonExe $PythonExe -WhatIf:$WhatIf
+# --- 3. the rest, on that Python ---------------------------------------------
+$argv = @((Join-Path $Source "installer.py"), "install", "--root", $Root, "--source", $Source)
+if ($Engine)           { $argv += @("--engine", $Engine) }
+if ($NoClaude)         { $argv += "--no-claude" }
+if ($Desktop)          { $argv += "--desktop" }
+if ($StartWithWindows) { $argv += "--startup" }
+if ($BigData)          { $argv += @("--big-data", $BigData) }
+if ($NoPanel)          { $argv += "--no-panel" }
+if ($NoStart)          { $argv += "--no-start" }
+if ($Quiet)            { $argv += "--quiet" }
+if ($WhatIf)           { $argv += "--dry-run" }
+if ($Product)          { $argv += @("--product", $Product) }
+if ($DataDir)          { $argv += @("--data", $DataDir) }
+if ($ClaudeDir)        { $argv += @("--claude-dir", $ClaudeDir) }
+if ($ShortcutDir)      { $argv += @("--shortcut-dir", $ShortcutDir) }
+if ($Port)             { $argv += @("--port", $Port) }
+Write-Host ""
+& (Join-Path $runtime "python.exe") @argv
+$code = $LASTEXITCODE
+# The downloads are spent once app\ and runtime\ hold them. Python's zip is kept
+# after a failure, so running this again skips that download.
+if ($work) { Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue }
+if ($code -eq 0 -and -not $WhatIf) {
+    Remove-Item (Join-Path $env:TEMP "claude-voice-download") -Recurse -Force -ErrorAction SilentlyContinue
 }
-
-Say ""
-if ($WhatIf) {
-    Say "-WhatIf: nothing was written." "Yellow"
-} else {
-    if ($NoClaude) {
-        Say "Done." "Green"
-    } else {
-        Say "Done. Restart Claude Code -- hooks are read at session start." "Green"
-        Say "Then: /voice on" "Green"
-    }
-}
+# Its exit code for a caller of the script file; not when piped into iex, where
+# exit would close the window the person is reading.
+if ($PSCommandPath) { exit $code }

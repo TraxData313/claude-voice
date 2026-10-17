@@ -5,37 +5,24 @@
 </p>
 
 <p align="center">
-  <em>Your terminal grew a voice. It runs on your own machine and tells nobody about it.</em>
+  <em>Your terminal grew a voice. It runs on your own machine and tells nobody about it.</em><br>
+  <a href="https://traxdata313.github.io/claude-voice/"><strong>▶&nbsp; Demo — hear Abby, Neya and Max</strong></a>
 </p>
 
 <p align="center">
-  <a href="https://traxdata313.github.io/claude-voice/"><strong>▶&nbsp; Demo — hear the voices</strong></a>
-  <br>
-  <sub>Abby, Neya and Max, a few seconds each</sub>
-</p>
-
-<p align="center">
-  <a href="https://traxdata313.github.io/claude-voice/" title="Hear her speak">
-    <img src="docs/art/abby.jpg" width="620" alt="Abby">
-  </a>
-</p>
-
-<p align="center">
-  <em><strong>Abby</strong>, as claude-voice — click her to hear her speak.</em>
-  <br>
-  <sub><img src="docs/flags/us.png" height="15" alt="US"> English and
-  <img src="docs/flags/ru.png" height="15" alt="RU"> Russian are tested and both sound right —
-  and 🌐 most widely used languages should read normally.</sub>
+  <a href="https://traxdata313.github.io/claude-voice/" title="Hear her speak"><img src="docs/art/abby.jpg" width="620" alt="Abby"></a><br>
+  <em><strong>Abby</strong>, as claude-voice — click her to hear her speak.</em><br>
+  <sub><img src="docs/flags/us.png" height="15" alt="US"> English and <img src="docs/flags/ru.png" height="15" alt="RU"> Russian
+  are tested on Qwen; 🌐 most widely used languages should read normally. <a href="docs/languages.md">More →</a></sub>
 </p>
 
 ---
 
-**Abby narrates Claude Code and Codex answers** through a local Qwen-TTS model. Your machine only —
+**Abby narrates Claude Code and [Codex](docs/codex.md) answers** through a speech model on your own machine —
 totally free: no cloud, no API key, no account, no audio ever leaving the computer. Unplug
 the network and she carries on talking.
 
-She speaks the short lines *while* it works, and reads a long answer as its `## TL;DR`
-rather than in full — and the installer teaches Claude to write one.
+She reads a long answer as its `## TL;DR` rather than in full, and Claude is told to write one.
 **[How she decides what to say →](docs/writing-for-the-ear.md)**
 
 ## Easy install
@@ -47,96 +34,42 @@ Clone https://github.com/TraxData313/claude-voice here, then follow docs/tour.md
 in it: set it up, turn it on, and give me the spoken tour.
 ```
 
-That is the whole of it. Claude fetches Python if you lack it, then the engine and its
-model, installs, opens the panel and switches it on — then tells you *out loud* how to
-drive it. Ten minutes, nearly all of it download — about 3 GB of engine and model, which
-resumes where it stopped if the connection drops.
+Or in PowerShell, no clone:
 
-**No administrator rights anywhere**, so it goes on a locked-down work laptop as easily as
-your own. **[By hand, other builds, every-project install →](docs/install.md)**
-
-Never opened a terminal? **[ClaudeVoiceSetup.exe](https://github.com/TraxData313/claude-voice/releases/latest/download/ClaudeVoiceSetup.exe)** does all of it in one window.
-
-## Or let Claude Code install it
-
-```
-/plugin marketplace add TraxData313/claude-voice
-/plugin install claude-voice@claude-voice
-/claude-voice:setup
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/TraxData313/claude-voice/main/install.ps1 | iex"
 ```
 
-The first two install the command; the third fetches the engine and the model, which a
-plugin download cannot carry. Then `/claude-voice:voice on` and she talks. Afterwards
-`/plugin update` keeps the command current without touching your settings.
+Either way it becomes a program: **Abby for Claude** in the Start menu, an Uninstall in
+Settings → Apps, no admin rights, fine with Smart App Control. Also as a Claude Code plugin.
+**[What it does →](docs/install.md)**
 
 ## What it needs
 
 | | |
 |---|---|
-| **Windows** | the engine is a Windows build; there is no macOS or Linux one |
-| **An NVIDIA card** | for Qwen. None? [`setup.ps1 -Engine pocket`](docs/install.md#no-graphics-card) runs on the CPU and skips the 3 GB |
-| **~4 GB of video memory** | **an estimate, not a measurement.** The models are 2.2 GB of weights and want room to work in. Only a 16 GB card has actually been run, so if you try it on a small one, say how it went |
-| **~3 GB of disk** | 0.8 GB of engine, 2.2 GB of models |
-| **Python** | fetched for you if you have none. Standard library only — no pip, no virtual environment |
-| **No admin rights** | at any point |
+| **Windows** | there is no macOS or Linux build. Python comes with it: a private, signed python.org copy |
+| **Nothing else, for Pocket** | the default engine: the CPU, a few hundred MB, Abby in English |
+| **An NVIDIA card, for Qwen** | ~4 GB of video memory (an estimate) and 3 GB of disk; reads every alphabet. Not with Smart App Control on |
 
-While it runs, the engine holds about 350 MB of ordinary memory and does not grow with use.
-The first model load takes 40–60 seconds; after that she stays warm and the first words of
-an answer arrive in about a second.
+**[Three engines, and what each costs →](docs/engines.md)**
 
 ## Usage cheatsheet
 
-`/voice <thing>` in Claude Code, or `python voice_cli.py <thing>` in a terminal — the same
-tool either way. Mind the space: `/voice on`, never `/voice_on`.
+`/voice <thing>` in Claude Code. Mind the space: `/voice on`, never `/voice_on`.
 
 | | |
 |---|---|
 | `on` / `off` | the switch. `off` leaves the engine warm, so `on` is instant |
 | `set abby` | change voice. Any unambiguous substring: `set ab` works |
-| `engine pocket` | no GPU, no Studio? [Pocket TTS →](docs/engines.md) runs on the CPU |
-| `install breeze` | the voice that laughs, sighs and whispers. [Breeze 2 →](docs/engines.md#breeze-tts-2-the-one-that-laughs) checks your card, then asks |
+| `engine pocket` | which engine speaks: `qwen`, `pocket` or `breeze`. [Engines →](docs/engines.md) |
 | `repeat` | say the last answer again. `repeat-all` for the whole thing |
-| `stop` | cut off what is playing, and empty the queue (`break` works too) |
-| `pause` / `play` | hold her mid-word and carry on from there. Nothing is dropped |
+| `stop` / `pause` / `play` | cut it off and empty the queue · hold her mid-word · carry on |
 | `volume 40` | how loud, 0 to 100 — audible mid-sentence |
-| `playback auto` | breaking up on a busy machine? This works out the wait per message. Default |
-| `alerts off` | stop her saying so when a permission prompt is waiting on you. On by default |
-| `thinking off` | some models write their narration into a thinking block. This is her reading it. On by default |
-| `list` | every voice available |
-| `panel` | the window below |
-| `update` | is there a newer claude-voice? It only ever looks when you ask |
-| `help` | every command, grouped |
-
-**[Full command list →](docs/commands.md)** — generated from the tool itself, so it cannot
-go stale.
-
-### The panel
-
-<p align="center">
-  <img src="docs/panel.png" width="390"
-       alt="The Abby for Claude panel: a settings cog in the top corner, Abby's portrait and the voice picker beside the line she is speaking, a chip for the engine, pause, skip line and skip all, a volume slider, a queue, a clickable history, a tick per session, and Abby herself along the bottom">
-</p>
-
-**`/voice panel`**, or the **Abby for Claude** icon the installer leaves on your Desktop —
-no terminal needed. It owns nothing, and asks the engine what is happening
-twice a second:
-
-- **who is speaking**, what they are saying, and which project it came from — click her
-  portrait to hear one known line, right-click to swap voice
-- **a chip to load the engine or hand its memory back**, and a **⏸ pause / ▶ play**
-  switch — both green while working, red while not; then **⏩ skip line · ⏭ skip all** and a
-  **volume** slider that bites mid-sentence. Rest on any of them and it says what it does
-- **pause really pauses.** It stops mid-word and carries on from that word, and while it
-  is held nothing is lost — the queue goes on filling and the engine keeps its model. The
-  **play/pause key** on your keyboard or your headphones works it too, and is left alone
-  the moment she has nothing to say, so it goes back to whatever you were listening to
-- **+ on the queue** — type any text and it is read out, behind whatever is already waiting
-- **history — click any line to hear it again**, from the audio you already heard
-- **a tick per session** — untick one and it stops being read aloud
-- **a cog in the corner** — settings, each tick with a line saying what it does: **start
-  with Windows** opens the panel when you log in, **auto start engine** loads it and
-  turns the voice on as the panel opens, and both together mean you press nothing at all
-- voice, portrait size, **dark**, **on top** (off by default), and Abby herself along the bottom
+| `narrate transcript on` | also hear the short lines between tool calls; then `hooks install`. Off by default |
+| `panel` | the window: who speaks, pause, skip, volume, history. **[All of it →](docs/panel.md)** |
+| `update` | is there a newer one? It only ever looks when you ask |
+| `help` | every command, grouped. **[All of them →](docs/commands.md)** |
 
 ## The voices
 
@@ -149,43 +82,20 @@ Three ship with it, all the author's own — original characters, borrowed from 
 | <img src="docs/art/max.jpg" width="300" alt="Max"> | **Max** | Brave and driving, a trainer's energy. Punchy lines, counts off what is done, pushes for one more — for grinding through a long list. |
 
 ▶ **[Hear all three](https://traxdata313.github.io/claude-voice/)** — GitHub will not play
-audio inside a README, so the samples live on a page of their own.
+audio inside a README. **[Cloning your own, and whose voice you may publish →](docs/voices.md)**
 
 > *With thanks to **Genndy Tartakovsky**, whose* Samurai Jack *is why they look the way they
 > do. The characters are ours; the debt is to the style, and to the spirit of the thing.*
-
-**[Cloning your own, and whose voice you may publish →](docs/voices.md)** — a speaker
-embedding is a clone of a real person, so that folder has rules.
-
-### Languages
-
-| | |
-|---|---|
-| <img src="docs/flags/us.png" height="20" alt="US"> **English** | tested — the voices were cloned from it |
-| <img src="docs/flags/ru.png" height="20" alt="RU"> **Russian** | tested — Abby reads it genuinely well |
-| <img src="docs/flags/bg.png" height="20" alt="BG"> **Bulgarian** | reads, but in a **Russian accent** |
-| 🌐 **most others** | should read normally — untested, so try one |
-
-**[What to expect, and what is still unwalked →](docs/languages.md)**
 
 ## Where the detail lives
 
 | | |
 |---|---|
-| **[Install →](docs/install.md)** | doing it by hand, builds, options, and why no admin rights are needed |
-| **[Setup and tour →](docs/tour.md)** | what Claude follows when you ask it to set this up for you |
-| **[Commands →](docs/commands.md)** | all of them, grouped |
-| **[Updating →](docs/updating.md)** | getting a newer one, and exactly what the version check does and does not send |
-| **[The panel →](docs/panel-plan.md)** | how the window was built, and what changed on the way |
-| **[How it works →](docs/how-it-works.md)** | the engine, the watcher, the JNI bridge — and the things that cost real time to find |
-| **[Engine notes →](docs/engine-notes.md)** | why she sometimes stops early, changes voice, or buzzes — three different causes |
-| **[Three engines →](docs/engines.md)** | Qwen, Pocket TTS or Breeze: what each costs, what each can read, how to switch — and telling them how to say it |
-| **[Talking to her from a program →](docs/api.md)** | the HTTP API: a line, a mood, a laugh written into the text, asking first what the engine can do — and [what a game needs](docs/api.md#for-a-game) |
-| **[Writing for the ear →](docs/writing-for-the-ear.md)** | the TL;DR contract, why captions sound wrong aloud, how much of a voice's character Claude is told to wear — and the moods and laughs it may write, when the engine has them |
-| **[Codex →](docs/codex.md)** | hearing Codex tasks through the same local voice, panel, and TL;DR contract |
-| **[Languages →](docs/languages.md)** | what is tested, and how it fails when it fails |
-| **[Hearing the voice →](docs/test-button.md)** | the line behind her portrait, for checking she sounds right and is awake |
-| **[Voices →](docs/voices.md)** | what may go in that folder, and what may not |
+| **[Install →](docs/install.md)** | what the installer does, where it puts things, Smart App Control, removing it |
+| **[Updating →](docs/updating.md)** | getting a newer one, and exactly what the version check sends |
+| **[How it works →](docs/how-it-works.md)** | the engine, the hooks, the JNI bridge — and the things that cost real time to find |
+| **[How a game finds it →](docs/discovery.md)** | the registry key, where.json, and the order a program looks in |
+| **[Talking to her from a program →](docs/api.md)** | the HTTP API — and [what a game needs](docs/api.md#for-a-game) |
 | **[When it goes quiet →](docs/troubleshooting.md)** | silence has no error message. Start here |
 
 <!-- ─────────────────────────────────────────────────────────────────────────

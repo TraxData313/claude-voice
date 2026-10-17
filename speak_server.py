@@ -56,7 +56,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import voice_lib
 import win_volume
-from qwen_engine import SAMPLE_RATE, write_wav
+from qwen_engine import ERROR_BLOCKED_BY_POLICY, SAMPLE_RATE, BlockedByPolicy, write_wav
 
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "claude-voice")
 # Played wavs move here instead of being deleted, so hearing something again
@@ -245,6 +245,39 @@ def build_engine(state, progress=None):
     return which, eng
 
 
+# Where to go when Windows will not let Qwen load, best first. Pocket runs on
+# the CPU from a pip package whose DLLs (torch's) carry reputation SAC accepts;
+# Breeze is a GPU and a separate eleven-gigabyte install, so it is only ever
+# the answer on a machine that already has it.
+FALLBACK_ORDER = ("pocket", "breeze")
+
+
+def fallback_engine(failed, state):
+    """The engine to switch to when `failed` cannot load at all, or None."""
+    for name in FALLBACK_ORDER:
+        if name != failed and _engine_ready(name, state):
+            return name
+    return None
+
+
+def _blocked_by_policy(exc):
+    """Whether an engine failed because Windows code integrity refused a DLL --
+    Smart App Control, or an organisation's WDAC policy. Not something a retry
+    or a restart changes."""
+    if isinstance(exc, BlockedByPolicy):
+        return True
+    if getattr(exc, "winerror", None) in ERROR_BLOCKED_BY_POLICY:
+        return True
+    return "Application Control policy" in str(exc)
+
+
+def _sentence(exc):
+    """An exception as the start of a sentence for the panel: the detail in
+    brackets stays in the log."""
+    text = str(exc).split(" (")[0].strip() or type(exc).__name__
+    return text[0].upper() + text[1:]
+
+
 class Job:
     """One utterance: the chunks it was split into, and where it came from.
 
@@ -270,7 +303,7 @@ class Job:
         # The name the instruction was expanded from, when it came by name --
         # "whisper" -- which is what the panel's narrow column can show.
         self.mood = mood or None
-        # What was said, without the session name the watcher may have prefixed
+        # What was said, without the session name SessionBook may have prefixed
         # -- the label is shown in its own column rather than read as the line.
         self.text = text if text is not None else " ".join(self.chunks)
         self.session = session
@@ -318,6 +351,10 @@ class Speaker:
         # and a line sitting under a play mark for that long with no word on
         # why reads as a hang (2026-09-30).
         self.loading = None
+        # A plain sentence for the panel when the engine had to do something
+        # nobody asked for -- today only "Windows blocked Qwen, so this is
+        # Pocket". None otherwise. Cleared by the next start that needed no help.
+        self.notice = None
         # Set when an engine is picked while none is running, so the engine
         # thread loads it at once instead of waiting for something to be said.
         self.nudge = threading.Event()
@@ -327,7 +364,7 @@ class Speaker:
         # and the panel draws the difference rather than pretending a switch
         # that has not happened yet did.
         self.engine_name = None
-        # Held, not off. The model stays loaded, the watcher goes on queueing,
+        # Held, not off. The model stays loaded, the hooks go on queueing,
         # and the piece in the air is cut where it got to so it can be picked
         # up from there. Set means playing: an engine that came back from a
         # restart already silent would read as a fault rather than as a
@@ -364,7 +401,7 @@ class Speaker:
         Barging in was right when one hook spoke one finished answer: a newer
         answer replaced an older one. It is wrong for a running commentary,
         where each line is a different thing worth hearing -- there, cutting off
-        the previous line mid-word is just losing it. So the watcher queues,
+        the previous line mid-word is just losing it. So a session's lines queue,
         and only a deliberate 'say this now' (replay, say) interrupts.
 
         **Nothing barges past a line that is being held.** Cutting the current
@@ -441,7 +478,7 @@ class Speaker:
         """Hold what is being said, or pick it up where it stopped.
 
         Not the master switch and not a skip: nothing is turned off and nothing
-        is thrown away. The engine keeps its model, the watcher goes on
+        is thrown away. The engine keeps its model, the hooks go on
         queueing, and the piece in the air is cut at the sample it reached so
         the same words can carry on from there.
 
@@ -541,6 +578,7 @@ class Speaker:
             "seam": round(self.seam_typical(), 3),
             "engineLoaded": self.engine_name,
             "loading": self._loading_now(),
+            "notice": getattr(self, "notice", None),
             "pid": os.getpid(),
         }
 
@@ -566,6 +604,41 @@ class Speaker:
             return build_engine(state, progress)
         finally:
             self.loading = None
+
+    def _start(self, state):
+        """_build, and when Windows refuses Qwen, the next engine that works.
+
+        Smart App Control blocking qwen3_tts.dll is not a fault that goes away
+        on the next message: it is the same answer every time, until somebody
+        turns SAC off (which needs a Windows reinstall to undo). Sitting in an
+        error state over it left the voice silent with "java exception during
+        CallLongMethod" as the only explanation (2026-10-17). So the switch is
+        made, written to the config so the panel and the next start agree with
+        it, and said in a sentence -- and picking Qwen again simply tries again.
+        """
+        try:
+            got = self._build(state)
+        except Exception as exc:
+            if not _blocked_by_policy(exc):
+                raise
+            want = voice_lib.engine_of(state)
+            to = fallback_engine(want, state)
+            if to is None:
+                self.notice = f"{_sentence(exc)}. No other engine is installed to switch to."
+                raise
+            log(f"{exc}; switching to {to}")
+            try:
+                voice_lib.set_engine(to)
+                state = self._live()
+            except Exception as why:              # a config we cannot write: still speak
+                log(f"  could not write the switch to the config: {why}")
+                state = {**state, "engine": to}
+            got = self._build(state)
+            self.notice = f"{_sentence(exc)}; switched to {voice_lib.engine_name(to)}."
+            log(f"  {self.notice}")
+            return got
+        self.notice = None
+        return got
 
     # -- internals ---------------------------------------------------------
     @staticmethod
@@ -769,7 +842,7 @@ class Speaker:
     def _engine_loop(self):
         eng = None
         try:
-            self.engine_name, eng = self._build(self.state)
+            self.engine_name, eng = self._start(self.state)
             log(f"engine ready ({self.engine_name})")
         except Exception as exc:
             # The thread carries on without an engine rather than ending here.
@@ -830,7 +903,7 @@ class Speaker:
                     log(f"  unloaded {self.engine_name}: "
                         f"{before:.0f} MB -> {freed:.0f} MB")
                 try:
-                    self.engine_name, eng = self._build(self._live())
+                    self.engine_name, eng = self._start(self._live())
                     self.error = None
                     now = rss_mb()
                     log(f"engine ready ({self.engine_name})"
@@ -1079,7 +1152,9 @@ class Speaker:
         began, made, curve = time.monotonic(), [0], []
 
         def on_piece(samples, _chunk):
-            buf.extend(samples)
+            # as_floats, because array.extend() walks anything but another 'f'
+            # array one Python float at a time -- Pocket hands over numpy.
+            buf.extend(voice_lib.as_floats(samples))
             made[0] += len(samples)
             curve.append((int((time.monotonic() - began) * 1000),
                           round(made[0] / SAMPLE_RATE, 3)))
@@ -1389,7 +1464,7 @@ def _tidy_label(label, words=6):
 class _LastSpeaker:
     """Who was heard last -- one record, for every path into the speakers.
 
-    A single voice says the lot: the sessions the watcher follows, and anything
+    A single voice says the lot: the sessions that speak through hooks, and anything
     posted to /speak by the panel or the CLI. So the note of which name was
     last announced has to be single too. Kept per-path it only ever compared
     sessions against sessions, and stepping from a session to a line typed by
@@ -1398,7 +1473,7 @@ class _LastSpeaker:
     """
 
     def __init__(self):
-        self.lock = threading.Lock()      # the watcher thread and HTTP workers
+        self.lock = threading.Lock()      # HTTP workers, all of them
         self.name = None
 
     def prefix(self, project, state):
@@ -1470,482 +1545,227 @@ def _empty_dir(path):
         pass
 
 
-# How a transcript says that nobody is sitting in front of it. Claude Code
-# stamps every user entry with the entrypoint that wrote it: an interactive
-# session says 'cli' or 'claude-desktop', while a run started headless --
-# `claude -p`, or anything driving the SDK -- says 'sdk-cli'. Read off real
-# transcripts against Claude Code 2.1.229; if a future version spells it
-# differently the worst that happens is those runs speak again. The list lives
-# in voice_lib, because the hook asks the same question of its environment.
+# How a session says that nobody is sitting in front of it. Claude Code puts
+# its entrypoint in the hook's environment: an interactive session says 'cli'
+# or 'claude-desktop', while a run started headless -- `claude -p`, or anything
+# driving the SDK -- says 'sdk-cli'. The hook passes it on; see voice_lib.
 HEADLESS_ENTRYPOINTS = voice_lib.HEADLESS_ENTRYPOINTS
 
 
-class TranscriptWatcher(threading.Thread):
-    """Speak new assistant messages by watching the session files on disk.
+class SessionBook:
+    """The sessions that have spoken to us through their hooks, and what they say.
 
-    Hooks are the tidy way to do this, but they only fire if the client
-    actually runs them, and there is no way to tell from in here whether it
-    does. Claude Code writes every turn to a JSONL transcript regardless, so
-    watching those needs no cooperation from the client at all: it works in any
-    session, in any project, without a restart, and it keeps working if the
-    hooks are never wired up.
+    This is what replaced the transcript watcher. That thread read every
+    Claude Code transcript on the machine every 0.7 s and parsed a file format
+    nobody had promised to keep; now Claude Code calls us (speak_hook.py ->
+    POST /hook) with what it has, and nothing here opens a file of Claude's.
 
-    Starts at the end of each file it finds, so launching this does not replay
-    the entire history of a conversation at you.
+    A session is keyed by its transcript path, because that is what a hook is
+    given, what the panel mutes by, and what mutedSessions in the config has
+    always held. A Codex task, which has no such path, is "codex:<thread>".
+    Kept in memory: after a restart a session reappears at its next prompt.
     """
 
-    PROJECTS = os.path.expanduser(os.path.join("~", ".claude", "projects"))
-    CODEX_SESSIONS = os.path.join(
-        os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "sessions")
-    FRESH_SECONDS = 15 * 60      # ignore transcripts nobody has touched lately
-    OFFSETS = os.path.join(voice_lib.LOG_DIR, "watch-offsets.json")
+    FRESH_SECONDS = 15 * 60      # the panel lists sessions heard from lately
 
-    def __init__(self, speaker, interval=0.7):
-        super().__init__(name="watcher", daemon=True)
+    def __init__(self, speaker):
         self.speaker = speaker
-        self.interval = interval
-        # Remembered across restarts. Without this, an engine that dies takes
-        # every message written while it was gone with it -- the watcher would
-        # resume at the end of the file and never mention them, which is
-        # indistinguishable from the voice quietly breaking again.
-        self.offsets = self._load_offsets()
-        self.dirty = False
-        self.labels = {}        # transcript -> what to call that session aloud
-        self.projects = {}      # transcript -> the folder it is being run in
-        self.headless = {}      # transcript -> was it started with nobody there
-        self.codex_sizes = {}   # Codex preserves a task's original mtime
-        self.activity = {}      # transcript -> when its size last changed
-        self.hushed = set()     # headless ones already said to be skipped
-        # Sessions the panel has silenced. Kept in config too, so muting one and
-        # restarting the engine does not un-mute it behind your back.
+        self.lock = threading.Lock()
+        self.rows = {}           # key -> {label, project, when, headless}
+        # Sessions the panel has silenced. Kept in config too, so muting one
+        # and restarting the engine does not un-mute it behind your back.
         self.muted = set(voice_lib.load_state().get("mutedSessions") or [])
-        # transcript -> a thinking line waiting to find out whether the response
-        # it came from went on to say anything else. See _flush_thinking.
-        self.held = {}
 
-    def _load_offsets(self):
-        try:
-            with open(self.OFFSETS, encoding="utf-8") as fh:
-                return json.load(fh)
-        except (OSError, ValueError):
-            return {}
+    @staticmethod
+    def key_of(body):
+        return body.get("transcript_path") or (
+            f"session:{body['session_id']}" if body.get("session_id") else None)
 
-    def _save_offsets(self):
-        if not self.dirty:
-            return
-        try:
-            os.makedirs(voice_lib.LOG_DIR, exist_ok=True)
-            with open(self.OFFSETS, "w", encoding="utf-8") as fh:
-                json.dump(self.offsets, fh)
-            self.dirty = False
-        except OSError:
-            pass
+    def note(self, body):
+        """Remember the session a hook call came from. Returns its key."""
+        key = self.key_of(body)
+        if not key:
+            return None
+        cwd = body.get("cwd")
+        project = os.path.basename(os.path.normpath(cwd)) if cwd else None
+        with self.lock:
+            row = self.rows.get(key)
+            if row is None:
+                row = self.rows[key] = {"label": None, "project": project,
+                                        "headless": False}
+            row["when"] = time.time()
+            row["project"] = project or row["project"]
+            row["headless"] = body.get("entrypoint") in HEADLESS_ENTRYPOINTS
+            # Named by what it was first asked: a title is Claude Code's to
+            # give and no hook is handed one, but the first prompt says what
+            # the session is about in the user's own words.
+            if not row["label"]:
+                prompt = (body.get("prompt") or "").strip()
+                if body.get("client") == "codex" and not prompt:
+                    prompt = "Codex " + (project or "task")
+                row["label"] = _tidy_label(prompt.splitlines()[0] if prompt else None)
+        return key
 
-    def run(self):
-        log("watcher: following session transcripts")
-        while True:
-            try:
-                self._sweep()
-            except Exception as exc:
-                log(f"watcher error: {exc}")
-            time.sleep(self.interval)
-
-    def _transcripts(self):
-        now = time.time()
-        cutoff = now - self.FRESH_SECONDS
-        for proj in os.scandir(self.PROJECTS) if os.path.isdir(self.PROJECTS) else []:
-            if not proj.is_dir():
-                continue
-            for f in os.scandir(proj.path):
-                if not f.name.endswith(".jsonl"):
-                    continue
-                st = f.stat()
-                if st.st_mtime > cutoff:
-                    yield f.path, st.st_size, st.st_mtime
-        if voice_lib.load_state().get("watchCodex", False):
-            # Rollouts live under year/month/day, including older tasks that
-            # have been resumed today. Codex preserves a rollout's original
-            # modification time while appending, so size is the only reliable
-            # sign that an older task has become active again.
-            import glob
-            for path in glob.iglob(os.path.join(self.CODEX_SESSIONS, "*", "*", "*", "*.jsonl")):
-                st = os.stat(path)
-                previous = self.codex_sizes.get(path)
-                self.codex_sizes[path] = st.st_size
-                seen = self.offsets.get(path)
-                changed = ((previous is not None and st.st_size != previous)
-                           or (seen is not None and st.st_size != seen))
-                active = now - self.activity.get(path, 0) < self.FRESH_SECONDS
-                if changed and seen is None:
-                    # The first pass merely took a baseline for this old task.
-                    # Start at that baseline now, so its first new words survive.
-                    self.offsets[path] = previous
-                    self.dirty = True
-                if st.st_mtime > cutoff or changed or active:
-                    yield path, st.st_size, st.st_mtime
-
-    def sessions(self, limit=10):
-        """Who is talking at the moment, newest first, and who is muted.
-
-        Called from HTTP handler threads, so it only reads. Labels are already
-        cached by the sweep; a session first seen here is read once and then
-        remembered like any other.
-        """
-        try:
-            rows = sorted(self._transcripts(), key=lambda r: r[2], reverse=True)
-        except OSError:
-            return []
-        state = voice_lib.load_state()
+    def sessions(self, limit=10, state=None):
+        """Who has spoken lately, newest first, and who is muted. Never the
+        unattended ones: offering to un-mute a run that is silent for a reason
+        of its own would be a lie."""
+        state = state if state is not None else voice_lib.load_state()
+        cutoff = time.time() - self.FRESH_SECONDS
+        with self.lock:
+            rows = sorted(self.rows.items(), key=lambda kv: kv[1]["when"], reverse=True)
         out = []
-        for path, _size, mtime in rows:
-            if len(out) >= limit:
+        for key, row in rows:
+            if len(out) >= limit or row["when"] < cutoff:
                 break
-            label = self.labels[path] if path in self.labels else self._ensure_label(path)
-            # A row you cannot usefully tick: it is silent for a reason of its
-            # own, and offering to un-mute it would be a lie.
-            if self._unattended(path, state):
+            if self._unattended(row, state):
                 continue
             out.append({
-                "path": path,
-                "label": label or f"session {os.path.basename(path)[:8]}",
-                "project": self.projects.get(path),
-                "muted": path in self.muted,
-                "when": time.strftime("%H:%M", time.localtime(mtime)),
+                "path": key,
+                "label": row["label"] or row["project"] or f"session {os.path.basename(key)[:8]}",
+                "project": row["project"],
+                "muted": key in self.muted,
+                "when": time.strftime("%H:%M", time.localtime(row["when"])),
             })
         return out
 
-    def set_muted(self, path, muted):
-        """Silence one session, or let it speak again."""
-        if muted:
-            self.muted.add(path)
-        else:
-            self.muted.discard(path)
-        voice_lib.patch_state(mutedSessions=sorted(self.muted))
-        log(f"watcher: {'muted' if muted else 'unmuted'} "
-            f"{self.labels.get(path) or os.path.basename(path)}")
+    def set_muted(self, key, muted):
+        """Silence one session, or let it speak again.
 
-    def _sweep(self):
-        state = voice_lib.load_state()
-        # Adopt the config's list each sweep, so editing it by hand works too.
-        self.muted = set(state.get("mutedSessions") or [])
-        for path, size, _mtime in self._transcripts():
-            seen = self.offsets.get(path)
-            if seen is None:
-                # Never seen this file: start at its end rather than reading a
-                # whole conversation aloud. A remembered offset, by contrast, is
-                # resumed from -- that is the point of remembering it.
-                self.offsets[path] = size
-                self.dirty = True
-                continue
-            if size <= seen:
-                self.offsets[path] = min(seen, size)   # truncated or rewritten
-                continue
-            self.activity[path] = time.time()
-            if path in self.codex_sizes:
-                self._ensure_label(path)
-                if path not in self.headless:
-                    # The panel can notice a new file before Codex finishes its
-                    # first metadata record. Do not consume anything until we
-                    # know whether this is the user's task or an internal agent.
-                    continue
-            with open(path, "rb") as fh:
-                fh.seek(seen)
-                chunk = fh.read()
-                # A writer may be midway through a JSON record or UTF-8
-                # character. Leave that suffix for the next sweep.
-                complete = chunk.rfind(b"\n") + 1
-                self.offsets[path] = seen + complete
-                self.dirty = True
-            # Config is re-read every sweep so 'voice off' takes effect at once.
-            if not state.get("enabled") or not state.get("watch", True):
-                continue
-            self._ensure_label(path)
-            if self._unattended(path, state):
-                continue
-            for line in chunk[:complete].decode("utf-8", errors="replace").splitlines():
-                self._consider(line, state, path)
-        self._flush_stale(state)
-        self._save_offsets()
-
-    def _unattended(self, path, state):
-        """A run with nobody in front of it, which we have been told to skip.
-
-        The offset has already moved on by the time this is asked, so turning
-        the setting on later starts speaking the *next* thing such a run says
-        rather than reciting everything it said while unheard.
-        """
-        if state.get("watchHeadless", False) or not self.headless.get(path):
-            return False
-        # Once per session rather than once per sweep: silence with no trace
-        # reads as the voice having broken again, which is the one failure this
-        # project keeps re-learning -- but a line every 0.7 seconds is its own
-        # kind of nothing.
-        if path not in self.hushed:
-            self.hushed.add(path)
-            log(f"watcher: headless run <{self.labels.get(path)}>, staying quiet")
-        return True
-
-    def _ensure_label(self, path):
-        """What to call this session out loud, once its identity is complete.
-
-        A title the user set wins over the one Claude generated; failing both,
-        the project folder. Titles arrive as their own entries and can appear
-        before we start following a file, so the whole file is scanned once.
-        """
-        if path in self.labels:
-            return self.labels[path]
-        custom = ai = cwd = entrypoint = None
-        try:
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    try:
-                        e = json.loads(line)
-                    except ValueError:
-                        continue
-                    cwd = cwd or e.get("cwd")
-                    entrypoint = entrypoint or e.get("entrypoint")
-                    if e.get("type") == "session_meta":
-                        meta = e.get("payload") or {}
-                        cwd = cwd or meta.get("cwd")
-                        source = meta.get("source")
-                        # Background agents should not compete with the task
-                        # the user is actually talking to.
-                        if (isinstance(source, dict) or source == "exec"
-                                or meta.get("thread_source") not in (None, "user")):
-                            entrypoint = "codex-background"
-                        ai = "Codex " + (os.path.basename(cwd) if cwd else "task")
-                    if e.get("type") == "custom-title":
-                        custom = e.get("customTitle") or custom
-                    elif e.get("type") == "ai-title":
-                        ai = e.get("aiTitle") or ai
-        except OSError:
-            pass
-        if not any((custom, ai, cwd, entrypoint)):
-            # A twice-a-second panel poll can land between file creation and
-            # the first complete JSON record. Caching that empty answer made a
-            # guardian review look like a user session forever.
-            return None
-        # Which project this session is in. Two sessions can carry near-enough
-        # the same title in different repos, and then the title alone tells you
-        # nothing about which one is talking.
-        # Decided here because this is the one place the whole file is read,
-        # and the answer never changes for a given session.
-        self.headless[path] = entrypoint in HEADLESS_ENTRYPOINTS or entrypoint == "codex-background"
-        self.projects[path] = os.path.basename(cwd) if cwd else None
-        label = custom or ai or self.projects[path]
-        self.labels[path] = _tidy_label(label)
-        return self.labels[path]
+        Edited from the config as it is now, under its lock, rather than from
+        self.muted: a hook adopting an older copy of the list at the same
+        moment would otherwise have this write drop the change."""
+        with voice_lib._ConfigLock():
+            state = voice_lib.load_state()
+            fresh = set(state.get("mutedSessions") or [])
+            if muted:
+                fresh.add(key)
+            else:
+                fresh.discard(key)
+            state["mutedSessions"] = sorted(fresh)
+            voice_lib.save_state(state)
+        with self.lock:
+            self.muted = fresh
+        row = self.rows.get(key) or {}
+        log(f"sessions: {'muted' if muted else 'unmuted'} "
+            f"{row.get('label') or os.path.basename(key)}")
 
     @staticmethod
-    def _too_old(entry, state):
-        """Skip a backlog. Catching up after a crash is worth it; reciting what
-        was said while the machine was off overnight is not."""
-        stamp = entry.get("timestamp")
-        if not stamp:
-            return False
-        try:
-            from datetime import datetime, timezone
-            when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-            age = (datetime.now(timezone.utc) - when).total_seconds()
-        except ValueError:
-            return False
-        return age > state.get("catchupSeconds", 300)
+    def _unattended(row, state):
+        return bool(row.get("headless")) and not state.get("watchHeadless", False)
 
-    # How long a thinking line waits for proof that nothing else is coming.
-    # Almost always resolved in well under a second, by the tool call that
-    # follows it; this only covers the response that says one line and then
-    # ends the turn, where there is no tool call to wait for.
-    HOLD_SECONDS = 5.0
+    def hook(self, body, state):
+        """One hook call: what, if anything, to say for it. Returns the reply.
 
-    def _flush_thinking(self, path, state, why):
-        """Say a held thinking line: the response it came from said nothing else."""
-        held = self.held.pop(path, None)
-        if not held:
-            return
-        if held["mid_work"] and not state.get("narrate", True):
-            return log(f"watcher: narration off, not saying {held['speech'][:40]}...")
-        # No log line of its own: _say already writes one for everything it
-        # queues, and one per narration line here doubled the log for nothing.
-        self._say(held["speech"], "thinking", state, path)
-
-    def _flush_stale(self, state):
-        """Release anything still waiting past HOLD_SECONDS.
-
-        A response that says one thinking line and then ends the turn never
-        makes a tool call, so nothing would ever prove it had finished and the
-        line would sit here until the next response arrived -- which, at the end
-        of a session, is never.
+        Every decision the old hook and the old watcher each made for
+        themselves, made once, here.
         """
-        now = time.time()
-        for path, held in list(self.held.items()):
-            if now - held["when"] >= self.HOLD_SECONDS:
-                self._flush_thinking(path, state, "nothing else arrived")
+        event = body.get("event")
+        # Adopt the config's list each call, so editing it by hand works too.
+        muted = set(state.get("mutedSessions") or [])
+        with self.lock:
+            self.muted = muted
+        key = self.note(body)
+        row = self.rows.get(key) or {}
+        if event in ("SessionStart", "UserPromptSubmit"):
+            return {"noted": key is not None}
+        if not state.get("enabled"):
+            return {"why": "the voice is off"}
+        if self._unattended(row, state):
+            return {"why": "headless run"}
+        # Checked before the dedupe, not after: a muted session must not use up
+        # the record of what was said and silence another that says the same.
+        # Normalised, because a path typed into the config by hand may differ.
+        if key and any(os.path.normcase(os.path.normpath(m)) ==
+                       os.path.normcase(os.path.normpath(key)) for m in muted):
+            log(f"sessions: muted <{row.get('label')}>")
+            return {"why": "this session is muted"}
 
-    # Not _handle: threading.Thread keeps a _handle attribute of its own on the
-    # instance, and it shadows any method of that name.
-    def _consider(self, line, state, path):
-        line = line.strip()
-        if not line:
-            return
-        try:
-            entry = json.loads(line)
-        except ValueError:
-            return                                  # a half-written final line
-        if entry.get("type") == "response_item":
-            # Codex also records event notifications for the same message.
-            # Only completed response items carry the text we want to read.
-            msg = entry.get("payload") or {}
-            if (msg.get("type") != "message" or msg.get("role") != "assistant"
-                    or msg.get("phase") not in (None, "commentary", "final_answer")
-                    or msg.get("channel") not in (None, "commentary", "final")
-                    or msg.get("recipient") not in (None, "all")
-                    or self._too_old(entry, state)):
-                return
-            if msg.get("phase") == "commentary" and not state.get("narrate", True):
-                return
-            text = "\n".join(b.get("text", "") for b in msg.get("content", [])
-                             if isinstance(b, dict) and b.get("type") == "output_text")
+        if event == "Notification":
+            # Above the narration switch: a session stopped and waiting on you
+            # is not chatter. Its own switch is 'alerts'.
+            if not state.get("alerts", True):
+                return {"why": "alerts are off"}
+            speech = voice_lib.notification_speech(
+                body.get("message"), "", state.get("narrateMaxChars", 240))
+            if not speech:
+                return {"why": "nothing speakable"}
+            if not voice_lib.notification_due(speech):
+                return {"why": "just said that"}
+            return self.say(speech, "notification", state, key, dedupe=False)
+
+        if event == "PreToolUse" and body.get("tool_name") == "AskUserQuestion":
+            # A question halts the turn until it is answered, so somebody with
+            # the chatter off needs it more than ever, not less.
+            speech = voice_lib.question_speech(body.get("tool_input"),
+                                               state.get("maxChars", 4000))
+            return self.say(speech, "question", state, key)
+
+        text = body.get("text") or ""
+        if not text.strip():
+            return {"why": "no text"}
+        if event == "PreToolUse":
+            if not state.get("narrate", True):
+                return {"why": "narration is off"}
             speech, what = voice_lib.speech_for(text, state)
-            self._say(speech, what, state, path)
-            return
-        # A session can be renamed mid-flight; keep up with it.
-        if entry.get("type") in ("custom-title", "ai-title"):
-            new = _tidy_label(entry.get("customTitle") or entry.get("aiTitle"))
-            if new:
-                self.labels[path] = new
-            return
-        if entry.get("type") != "assistant" or self._too_old(entry, state):
-            return
-        msg = entry.get("message") or {}
-        if msg.get("role") != "assistant":
-            return
-        content = msg.get("content")
-        blocks = content if isinstance(content, list) else []
-        text = content if isinstance(content, str) else "\n".join(
-            b.get("text", "") for b in blocks
-            if isinstance(b, dict) and b.get("type") == "text")
+            return self.say(speech, what, state, key)
+        if event == "Stop":
+            speech, what = voice_lib.speech_for(text, state)
+            if what != "summary":
+                # A finished answer with no TL;DR is short enough to hear in full.
+                speech, what = voice_lib.clean_text(text, state.get("maxChars", 600)), \
+                    "whole answer"
+            return self.say(speech, what, state, key)
+        return {"why": f"nothing to do for {event}"}
 
-        # One API response reaches the transcript as several lines -- the
-        # thinking on one, the answer on the next, every tool call on its own --
-        # and all of them carry the same message id. That id is the only thing
-        # that can tell a held thinking line whether the response it belongs to
-        # went on to say anything else. See voice_lib.thinking_speech.
-        response = msg.get("id")
-        held = self.held.get(path)
-        if held and held["id"] != response:
-            self._flush_thinking(path, state, "a new response began")
-
-        # 'narrate' covers the short lines said while work is going on, and the
-        # watcher is handed no events to tell those from a finished answer. It
-        # used to read that off the blocks -- text sitting beside a tool call is
-        # a line said before doing something, text alone ends the turn -- but
-        # Claude Code now writes one block per transcript line, so the two never
-        # share an entry any more and that test was false for every message on
-        # every recent model. The switch had quietly stopped doing anything at
-        # all: measured across this machine's transcripts, 4 entries out of some
-        # 20,000 had text beside a tool call. The response's own stop_reason
-        # says it outright instead -- 'tool_use' means it broke off to go and do
-        # something, 'end_turn' means it had finished -- and the old test stays
-        # underneath for a transcript too old to carry one.
-        stop = msg.get("stop_reason")
-        if stop:
-            mid_work = stop == "tool_use"
-        else:
-            mid_work = any(isinstance(b, dict) and b.get("type") == "tool_use"
-                           for b in blocks)
-
-        if text.strip():
-            # The response spoke for itself, so whatever it was thinking on the
-            # way there is working-out, and stays on the screen where it belongs.
-            if held and held["id"] == response and self.held.pop(path, None):
-                log(f"watcher: said it out loud, dropping the thinking behind it")
-            if mid_work and not state.get("narrate", True):
-                log(f"watcher: narration off, not saying {text.strip()[:40]}...")
-            else:
-                speech, what = voice_lib.speech_for(text, state)
-                self._say(speech, what, state, path)
-        else:
-            # Held rather than said, because a text block may still be coming in
-            # this same response and would be the better line. Thinking always
-            # precedes text within a response, so waiting is the only way to
-            # find out.
-            for b in blocks:
-                if isinstance(b, dict) and b.get("type") == "thinking":
-                    speech = voice_lib.thinking_speech(b.get("thinking"), state)
-                    if speech:
-                        self.held[path] = {"id": response, "speech": speech,
-                                           "mid_work": mid_work, "when": time.time()}
-
-        # Every tool call in a response comes after everything that response
-        # said, without exception in 10,361 measured. So a tool call is the
-        # proof that nothing else is coming, and the held line goes out now --
-        # before the tool runs, which is the entire point of narration.
-        held = self.held.get(path)
-        if held and held["id"] == response and any(
-                isinstance(b, dict) and b.get("type") == "tool_use" for b in blocks):
-            self._flush_thinking(path, state, "it went on to a tool")
-
-        # A question is spoken as its own utterance rather than as a tail on the
-        # line before it, so that it matches what the PreToolUse hook says word
-        # for word and the dedupe can drop whichever of the two arrives second.
-        # Glued onto the narration it would match neither, and be heard twice.
-        for b in blocks:
-            if (isinstance(b, dict) and b.get("type") == "tool_use"
-                    and b.get("name") == "AskUserQuestion"):
-                self._say(voice_lib.question_speech(b.get("input"),
-                                                    state.get("maxChars", 4000)),
-                          "question", state, path)
-
-    def _say(self, speech, what, state, path):
+    def say(self, speech, what, state, key, dedupe=True):
         """Queue one utterance from one session, if it is worth saying at all."""
         if not speech:
-            return
-        # Checked before the dedupe, not after: a muted session should not be
-        # able to use up the record of what was said and silence another
-        # session that happens to say the same thing.
-        if path in self.muted:
-            # Say so in the log. Silence with no trace is indistinguishable
-            # from the voice having broken again, and that is the one failure
-            # this project keeps having to re-learn.
-            return log(f"watcher: muted <{self.labels.get(path)}> {speech[:40]}...")
+            return {"why": "nothing speakable"}
         # Dedupe on the words themselves, before any session name is added, so
         # the same message is not said twice just because it was announced.
-        if voice_lib.already_spoken(speech):
-            return
+        if dedupe and voice_lib.already_spoken(speech):
+            return {"why": f"{what} already spoken"}
         # A session has no field to put a mood in, so it writes one into the
         # line: "(whisper) I found it." Taken out here whatever the engine, and
         # sent beside the words as the whole instruction that name stands for --
         # which the engine thread drops again if what is loaded takes none.
         mood, speech = voice_lib.direction(speech)
         if not speech:
-            return
+            return {"why": "only a direction"}
         mood, instruction = voice_lib.mood_instruction(mood)
         try:
             voice, kwargs = voice_lib.resolve(state.get("voice"), state.get("source"), state)
         except LookupError as exc:
-            return log(f"watcher: {exc}")
-
-        # Two projects talking through one voice are impossible to tell
-        # apart, so say which one. Whether it is a change from the last one is
-        # not the watcher's to judge -- see _LastSpeaker, which the API path
-        # asks as well.
-        label = self.labels.get(path)
-        announced = _last_speaker.prefix(self.projects.get(path), state)
-
+            log(f"sessions: {exc}")
+            return {"why": str(exc)}
+        row = self.rows.get(key) or {}
+        # Two projects talking through one voice are impossible to tell apart,
+        # so say which one -- when it is a change; see _LastSpeaker.
+        announced = _last_speaker.prefix(row.get("project"), state)
         # After the project name, before the words: the name says who is
         # speaking and the notice says what they are about to leave out.
         speech, dropped = voice_lib.speakable(speech, state=state)
         if dropped:
-            log(f"watcher: {dropped}")
+            log(f"sessions: {dropped}")
         pieces = voice_lib.chunks(announced + speech)
-        if pieces:
-            job = Job(pieces, voice["id"], kwargs, text=speech, session=label,
-                      project=self.projects.get(path), instruction=instruction,
-                      mood=mood)
-            self.speaker.submit(job)                                # queued, never barging
-            log(f"watcher: {what} [{voice['id']}] {len(pieces)} chunk(s) "
-                f"{'(' + mood + ') ' if mood else ''}"
-                f"{'<' + announced.strip() + '> ' if announced else ''}{speech[:40]}...")
+        if not pieces:
+            return {"why": "nothing speakable"}
+        job = Job(pieces, voice["id"], kwargs, text=speech, session=row.get("label"),
+                  project=row.get("project"), instruction=instruction, mood=mood)
+        self.speaker.submit(job)                                    # queued, never barging
+        log(f"sessions: {what} [{voice['id']}] {len(pieces)} chunk(s) "
+            f"{'(' + mood + ') ' if mood else ''}"
+            f"{'<' + announced.strip() + '> ' if announced else ''}{speech[:40]}...")
+        return {"said": what, "queued": len(pieces)}
+
+    def catch_up(self, state):
+        """Say what hooks left in the spool while the engine was down."""
+        for body in voice_lib.take_spool(state.get("catchupSeconds", 300)):
+            try:
+                self.hook(body, voice_lib.load_state())
+            except Exception as exc:
+                log(f"sessions: catching up failed: {exc}")
 
 
 _VOICES = {"when": 0.0, "rows": [], "engine": None}
@@ -1976,7 +1796,7 @@ INSTRUCTED_ENGINES = tuple(e for e in voice_lib.ENGINES
 MAX_INSTRUCTION = 200
 
 
-def _takes_instruction():
+def _takes_instruction(state=None):
     """Whether a mood sent with the next line would be used.
 
     The configured engine rather than the loaded one, because the engine
@@ -1986,19 +1806,104 @@ def _takes_instruction():
     reason anybody could see.
     """
     try:
-        return voice_lib.engine_of(voice_lib.load_state()) in INSTRUCTED_ENGINES
+        state = state if state is not None else voice_lib.load_state()
+        return voice_lib.engine_of(state) in INSTRUCTED_ENGINES
     except Exception:
         return False
 
 
-def _events_performed():
+def _events_performed(state=None):
     """The sounds the next line could make, if written into it -- the same
     question as _takes_instruction, asked of the same configured engine."""
     try:
-        return list(voice_lib.engine_can(voice_lib.engine_of(voice_lib.load_state()),
-                                         "events"))
+        state = state if state is not None else voice_lib.load_state()
+        return list(voice_lib.engine_can(voice_lib.engine_of(state), "events"))
     except Exception:
         return []
+
+
+# --------------------------------------------------------------------------
+# keeping the polled routes cheap
+# --------------------------------------------------------------------------
+#
+# The panel asks for /state twice a second and the game for /health every few,
+# with a two- and three-second timeout. Each /state used to read config.json
+# three times, walk every Claude transcript folder, and read version.json --
+# while the engine thread held the GIL in per-sample loops -- and 31 replies in
+# one log were still being written when the caller had given up. The loops
+# went to numpy; what is left here is making the routes themselves cost almost
+# nothing when nothing has changed.
+
+_CONFIG = {"hit": None}
+
+
+def _config_now():
+    """The config, re-read only when the file has changed since last time.
+
+    Keyed on the file's modification time and size: every writer replaces the
+    file whole (voice_lib.save_state), so a change always moves at least one.
+    Read-only -- the dict is shared between threads, so nothing may edit it.
+    """
+    path = voice_lib.CONFIG_PATH
+    try:
+        st = os.stat(path)
+        key = (path, st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = None
+    hit = _CONFIG["hit"]
+    if key is not None and hit is not None and hit[0] == key:
+        return hit[1]
+    state = voice_lib.load_state()
+    _CONFIG["hit"] = (key, state)
+    return state
+
+
+# What this process is running, read once. version.json changes on an update,
+# but the code in memory does not until a restart, and the version a caller
+# wants is the one that is answering.
+_VERSION = {"v": None}
+
+
+def _own_version():
+    if _VERSION["v"] is None:
+        _VERSION["v"] = voice_lib.own_version()
+    return _VERSION["v"]
+
+
+# The whole /state reply, kept for a moment. Two panels and a game polling
+# together then cost one build between them. Anything that changes what it
+# would say -- a button, a config write -- throws it away (see do_POST), so
+# the only staleness left is the speaker's own progress, by a quarter second.
+STATE_TTL = 0.25
+_STATE = {"hit": None}
+
+# Who is talking. Cheap now (a dict in memory), but still cached: every hook
+# call is a non-read-only route and throws it away, so a new session shows at
+# once and the panel's twice-a-second polls in between cost nothing.
+SESSIONS_TTL = 2.0
+_SESSIONS = {"hit": None}
+
+# Routes that only read. Any other route may change what /state says.
+READ_ONLY_ROUTES = frozenset(("/health", "/state", "/voices", "/storage",
+                              "/capabilities"))
+
+
+def _sessions(book, state):
+    if book is None:
+        return []
+    now = time.monotonic()
+    hit = _SESSIONS["hit"]
+    if hit is not None and now - hit[0] < SESSIONS_TTL:
+        return hit[1]
+    rows = book.sessions(state=state)
+    _SESSIONS["hit"] = (now, rows)
+    return rows
+
+
+def _forget_polled():
+    """Something changed: the next /state is built fresh."""
+    _STATE["hit"] = None
+    _SESSIONS["hit"] = None
 
 
 _SIZES = {}
@@ -2141,22 +2046,45 @@ def _voice_list(state, ttl=15.0):
 
 class Handler(BaseHTTPRequestHandler):
     speaker = None
-    watcher = None
-    watching = False
+    book = None                   # the sessions that speak through hooks
+    port_note = None              # a sentence when the engine is not on the port it wanted
     server_version = "ClaudeVoice/1.0"
 
     def log_message(self, fmt, *args):        # the default logger spams stderr
         pass
 
     def _reply(self, code, payload):
-        body = json.dumps(payload).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        return self._reply_body(code, json.dumps(payload).encode("utf-8"))
+
+    def _reply_body(self, code, body):
+        # A caller that stopped waiting is not a fault of ours, and each one
+        # used to leave a twenty-line traceback in the log (31 of them in one
+        # day). The reply is simply not needed any more.
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            self.close_connection = True
 
     def do_POST(self):
+        """Every route, with a failure to write the config (another process
+        holding it past save_state's retries) answered 500 rather than left to
+        drop the connection with nothing said."""
+        try:
+            return self._post()
+        except ConnectionError:
+            return None                   # the caller has gone; nobody to answer
+        except OSError as exc:
+            log(f"POST {self.path}: {exc.__class__.__name__}: {exc}")
+            try:
+                return self._reply(500, {"error": f"could not save the settings: {exc}"})
+            except OSError:
+                return None
+
+    def _post(self):
         try:
             n = int(self.headers.get("Content-Length") or 0)
             payload = json.loads(self.rfile.read(n) or b"{}") if n else {}
@@ -2166,11 +2094,23 @@ class Handler(BaseHTTPRequestHandler):
         route = self.path.split("?")[0].rstrip("/") or "/"
         sp = Handler.speaker
 
+        if route not in READ_ONLY_ROUTES:
+            _forget_polled()
+
         if route == "/health":
-            return self._reply(200, {**sp.status(), "watching": Handler.watching,
-                                     "version": voice_lib.own_version(),
-                                     "instruction": _takes_instruction(),
-                                     "events": _events_performed()})
+            # Asked by everything that wants to know whether we are here, on a
+            # short timeout. No disk unless the config changed, no locks beyond
+            # the speaker's own.
+            state = _config_now()
+            return self._reply(200, {**sp.status(),
+                                     "version": _own_version(),
+                                     # Which copy this is: an installer stopping its own
+                                     # engine must not stop a checkout's on the same port.
+                                     "root": voice_lib.ROOT,
+                                     "port": self.server.server_address[1],
+                                     "portNote": Handler.port_note,
+                                     "instruction": _takes_instruction(state),
+                                     "events": _events_performed(state)})
 
         if route == "/voices":
             # The whole catalogue for the engine that is speaking, read fresh.
@@ -2226,11 +2166,15 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/state":
             # Everything the panel draws, in one round trip. It owns no state
             # of its own; this is the whole of what it knows.
-            state = voice_lib.load_state()
-            return self._reply(200, {
+            state = _config_now()
+            key = _CONFIG["hit"][0] if _CONFIG["hit"] else None
+            now = time.monotonic()
+            hit = _STATE["hit"]
+            if hit is not None and hit[1] == key and now - hit[0] < STATE_TTL:
+                return self._reply_body(200, hit[2])
+            body = json.dumps({
                 **sp.status(), **sp.snapshot(),
-                "watching": Handler.watching,
-                "sessions": Handler.watcher.sessions() if Handler.watcher else [],
+                "sessions": _sessions(Handler.book, state),
                 "voices": _voice_list(state),
                 "voice": state.get("voice"),
                 "source": state.get("source"),
@@ -2244,12 +2188,16 @@ class Handler(BaseHTTPRequestHandler):
                 # config's engine and the loaded engine differ for as long as
                 # a swap takes, and a caller deciding whether to offer moods
                 # wants the one that is really going to speak.
-                "instruction": _takes_instruction(),
-                "events": _events_performed(),
+                "instruction": _takes_instruction(state),
+                "events": _events_performed(state),
                 "volume": win_volume.clamp(state.get("volume", 1.0)),
                 "enabled": bool(state.get("enabled")),
-                "version": voice_lib.own_version(),
-            })
+                "version": _own_version(),
+                "port": self.server.server_address[1],
+                "portNote": Handler.port_note,
+            }).encode("utf-8")
+            _STATE["hit"] = (now, key, body)
+            return self._reply_body(200, body)
 
         if route == "/stop":
             sp.cancel()
@@ -2266,8 +2214,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "/enabled":
             # The master switch, same as 'voice on' and 'voice off': the setting
-            # itself, and silence now if it is going off. The watcher re-reads
-            # the config every sweep, so it takes effect within the second.
+            # itself, and silence now if it is going off. Every hook call is
+            # judged against the config as it is then, so it takes effect at once.
             on = bool(payload.get("on"))
             voice_lib.patch_state(enabled=on)
             if not on:
@@ -2300,14 +2248,21 @@ class Handler(BaseHTTPRequestHandler):
             log(f"replay {jid}: {job.text[:60]}...")
             return self._reply(200, {"playing": job.as_dict()})
 
+        if route == "/hook":
+            # What a Claude Code hook (or Codex's notify) was handed, passed on
+            # by speak_hook.py. Answered at once: synthesis happens on the
+            # engine thread, and the hook is waiting on nothing but this reply.
+            # Requests that land mid-load are kept, like /speak's.
+            if not isinstance(payload, dict) or not payload.get("event"):
+                return self._reply(400, {"error": "no event"})
+            return self._reply(200, Handler.book.hook(payload, _config_now()))
+
         if route == "/mute-session":
-            if not Handler.watcher:
-                return self._reply(409, {"error": "not following sessions"})
             path = payload.get("path") or ""
             if not path:
                 return self._reply(400, {"error": "no path"})
             muted = bool(payload.get("muted"))
-            Handler.watcher.set_muted(path, muted)
+            Handler.book.set_muted(path, muted)
             return self._reply(200, {"path": path, "muted": muted})
 
         if route == "/set-voice":
@@ -2342,7 +2297,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "/quit":
             sp.cancel()
-            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            server = self.server
+
+            # Shut down *and close*. shutdown() only stops the accept loop; the
+            # listening socket stayed open until the process itself was gone,
+            # which with a model loaded can be seconds. Every poll in that gap
+            # was accepted by the kernel and then never answered, so the panel
+            # sat out its whole timeout instead of being refused at once.
+            def stop():
+                server.shutdown()
+                server.server_close()
+
+            threading.Thread(target=stop, daemon=True).start()
             return self._reply(200, {"quitting": True})
 
         if route == "/speak":
@@ -2384,7 +2350,7 @@ class Handler(BaseHTTPRequestHandler):
                     "error": "the engine speaking now cannot read this alphabet",
                     "unreadable": True, "engine": voice_lib.engine_of(sp._live())})
 
-            # The same guard the watcher applies, and for the same reason: a
+            # The same guard the hooks' lines get, and for the same reason: a
             # line typed into the panel in Cyrillic would otherwise be handed
             # to an engine that cannot read it.
             text, dropped = voice_lib.speakable(text, state=sp._live())
@@ -2395,8 +2361,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._reply(400, {"error": "nothing speakable"})
             # Out of the same speakers as everything else, so it wears the same
             # name in front when the speaker has changed. Judged against the
-            # setting as it stands now, not as it stood at startup: the watcher
-            # reads it fresh every sweep, and one shared record cannot honour
+            # setting as it stands now, not as it stood at startup: hook calls
+            # read it fresh every time, and one shared record cannot honour
             # two different answers to whether labelling is on.
             announced = _last_speaker.prefix(payload.get("project"), sp._live())
             # "announce": false keeps the record and says nothing. A game has
@@ -2407,7 +2373,7 @@ class Handler(BaseHTTPRequestHandler):
             if payload.get("announce") is False:
                 announced = ""
             if announced:
-                # Chunked with the name attached, exactly as the watcher does
+                # Chunked with the name attached, exactly as SessionBook.say does
                 # it, so the name rides the first piece and no other.
                 pieces = voice_lib.chunks(announced + text) or pieces
             # An explicit request through the API is the user asking for this
@@ -2464,47 +2430,150 @@ class SingleServer(ThreadingHTTPServer):
     daemon_threads = True
 
 
+# How many ports past the wanted one to try when another program holds it.
+PORT_TRIES = 10
+
+
+class PortsTaken(RuntimeError):
+    """Neither the wanted port nor any of the next PORT_TRIES could be had."""
+
+
+def bind_port(home, asked=None, make=None, probe=None, owner=None, tries=PORT_TRIES):
+    """Bind the engine's port. Returns (server, port, note) or (None, port, None).
+
+    (None, port, None) means an engine of ours already answers on `port`, and
+    this one should leave. `note` is a sentence when the engine is not where it
+    was asked to be, else None.
+
+    The old answer to a taken port was "cannot bind; another engine is probably
+    up", and exit. On 2026-10-15 it was FaceLab's dev server, not an engine, and
+    every Claude prompt then spawned a new engine that said the same thing and
+    went away (six in the log), while the game showed "port in use". So: a port
+    held by something that is ours means leave; held by a stranger means say
+    who, and take the next free one -- the config then names it, which is where
+    the panel, the hooks and the CLI look, and where.json carries it for
+    anything outside this folder. A port that takes the connection and never
+    answers is only routed around when what holds it is not a Python: a
+    Python there may be our own engine, stuck, and a second engine beside it
+    would load a second model and say everything twice.
+    """
+    make = make or (lambda port: SingleServer(("127.0.0.1", port), Handler))
+    probe = probe or voice_lib.port_probe
+    owner = owner or voice_lib.port_owner
+    order = [home] + ([asked] if asked and asked != home else [])
+    order += [home + i for i in range(1, tries + 1) if home + i not in order]
+    held = []
+    for port in order:
+        if port <= 0 or port > 65535:
+            continue
+        try:
+            return make(port), port, (None if port == home else
+                                      _moved_note(home, port, held))
+        except OSError as exc:
+            kind, _health = probe(port)
+            if kind == "ours":
+                return None, port, None
+            if kind == "free":
+                # Nobody listening, and still refused: Windows reserves port
+                # ranges for Hyper-V and WSL ('netsh int ipv4 show
+                # excludedportrange protocol=tcp'), and a reserved one fails
+                # exactly like this.
+                log(f"port {port} cannot be used ({exc}); Windows may have "
+                    f"reserved it. Trying the next one")
+                held.append((port, "a Windows reservation"))
+                continue
+            who = owner(port)
+            if kind == "silent" and (not who or who.lower().startswith("python")):
+                # Possibly us, stuck. Leaving is the safe answer.
+                log(f"port {port} is held by {who or 'something'} that does not "
+                    f"answer; if that is an engine of ours it is stuck -- "
+                    f"'python voice_cli.py kill' ends it. Not starting a second one.")
+                return None, port, None
+            log(f"port {port} is in use by {who or 'another program'} ({exc}); "
+                f"trying the next one")
+            held.append((port, who))
+    raise PortsTaken(
+        f"ports {order[0]}-{order[-1]} are all in use by other programs "
+        f"({', '.join(w or str(p) for p, w in held[:3])}...). "
+        f"Set \"port\" in config.json to a free one.")
+
+
+def _moved_note(home, port, held):
+    who = next((w for p, w in held if p == home and w), "another program")
+    return f"Port {home} is in use by {who}, so the engine is on {port}."
+
+
 def main():
+    try:
+        if voice_lib.old_default_engine(voice_lib._read_config(voice_lib.CONFIG_PATH)):
+            voice_lib.patch_state(engine="qwen")
+            log("config: no engine named and Qwen's Studio is here -- kept on qwen, the default before 2.0")
+    except (OSError, ValueError):
+        pass
     state = voice_lib.load_state()
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", type=int, default=state["port"])
     args = ap.parse_args()
 
-    if voice_lib.server_alive(args.port):
-        log(f"another engine already owns port {args.port}; exiting")
-        return
+    # The HTTP threads and the engine thread share one GIL. The default switch
+    # interval, 5 ms, is paid by a request every time it gives the GIL up for
+    # I/O and wants it back while synthesis is running -- dozens of times per
+    # /state. 1 ms costs the engine nothing measurable and the requests a lot.
+    sys.setswitchinterval(0.001)
+
+    # The port this copy wants when nothing is in the way: the one it was
+    # moved off, if it was moved, else the one it was asked for.
+    home = state.get("portHome") or args.port
+    for port in dict.fromkeys((args.port, home)):
+        if voice_lib.server_alive(port):
+            log(f"another engine already owns port {port}; exiting")
+            return
 
     try:
-        httpd = SingleServer(("127.0.0.1", args.port), Handler)
-    except OSError as exc:
-        log(f"cannot bind port {args.port} ({exc}); another engine is probably up")
+        httpd, port, moved = bind_port(home, args.port)
+    except PortsTaken as exc:
+        log(f"cannot start: {exc}")
+        voice_lib.write_where(state, error=str(exc))
+        return
+    if httpd is None:
+        log(f"another engine already owns port {port}; exiting")
         return
 
-    # A pull brings in a new speaking-notes.md and installs nothing, so the note
-    # a session reads at startup would go on teaching last month's rules until
-    # somebody ran setup.ps1 by hand. An update restarts the engine anyway, so
-    # this is the one place that reliably runs after a pull and before the next
-    # session begins. Costs two small reads when there is nothing to do.
-    if voice_lib.sync_notes(state=state):
-        log("speaking notes in CLAUDE.md were out of date; refreshed")
+    # Written where every client of this folder looks, before anything slow,
+    # so a program looking for this copy finds it even while the model is
+    # still loading. Back home again once the port is free: portHome cleared.
+    if moved:
+        log(moved)
+    want = {"port": port, "portHome": home if port != home else None}
+    if any(state.get(k) != v for k, v in want.items()):
+        try:
+            state = voice_lib.patch_state(**want)
+        except OSError as exc:
+            log(f"could not write the port into the config: {exc}")
+            state = {**state, **want}
+    Handler.port_note = moved
 
-    # Before anything slow, so a program looking for this copy finds it even
-    # while the model is still loading.
     voice_lib.write_where(state)
+    # And the registry key a game reads first -- only if it already names this
+    # folder (installed, or a dev checkout that ran `voice_cli register`).
+    if voice_lib.refresh_registration(state):
+        log(f"registration: port {port} written to HKCU\\{voice_lib.REG_KEY}")
     Handler.speaker = Speaker(state)
     # Started whatever the setting says: it reads it itself, every couple of
     # seconds, so turning it on does not need the engine restarting.
     MediaKey(Handler.speaker).start()
-    if state.get("watch", True):
-        Handler.watcher = TranscriptWatcher(Handler.speaker)
-        Handler.watcher.start()
-        Handler.watching = True
-    log(f"listening on http://127.0.0.1:{args.port} (pid {os.getpid()})")
+    # Sessions reach us only through their hooks (POST /hook). Anything a
+    # hook left while we were down is said now, if it is still fresh.
+    Handler.book = SessionBook(Handler.speaker)
+    threading.Thread(target=Handler.book.catch_up, args=(state,), name="catch-up",
+                     daemon=True).start()
+    log(f"listening on http://127.0.0.1:{port} (pid {os.getpid()})")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        httpd.server_close()        # refuse new connections from here on
         log("shutting down")
 
 

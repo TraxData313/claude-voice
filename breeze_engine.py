@@ -178,6 +178,15 @@ def pcm_to_float(data):
     sample makes the round trip unchanged. Windows is little-endian, which is
     what lets array's native 'h' read the bytes as they come.
     """
+    try:
+        import numpy
+
+        scaled = numpy.frombuffer(data, dtype="<i2") / 32767.0
+        out = array.array("f")
+        out.frombytes(scaled.astype(numpy.float32).tobytes())
+        return out
+    except ImportError:
+        pass
     pcm = array.array("h")
     pcm.frombytes(data)
     return array.array("f", [s / 32767.0 for s in pcm])

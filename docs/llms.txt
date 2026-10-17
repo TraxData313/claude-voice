@@ -1,33 +1,39 @@
 # claude-voice
 
-> Claude Code reads its answers aloud, locally, in a voice you choose. A local
-> Qwen-TTS model does the speaking: no cloud, no API key, no account, and no
-> audio leaving the machine. Windows only, Python standard library only.
+> Claude Code and Codex read their answers aloud, locally, in a voice you choose.
+> A speech model on your own machine does the speaking: no cloud, no API key, no
+> account, and no audio leaving the machine. Windows only.
 
-How it works: an engine process keeps one talker model warm behind a small HTTP
-API on localhost. It follows Claude Code's own session transcripts on disk, so it
-needs no hooks and no cooperation from the client. A long answer is read as its
-TL;DR; a short one is read in full. Two voices ship with it, Abby and Max, and
-new ones are cloned from a 20-40 second recording of one person talking.
+How it works: an engine process keeps one model warm behind a small HTTP API on
+localhost. Claude Code's hooks hand it each finished answer; a long answer is read
+as its TL;DR, a short one in full. It installs as a program of its own on a
+private, signed copy of python.org's Python, with an Uninstall in Settings, no
+administrator rights, and works with Smart App Control on. Three engines: Pocket
+TTS on the CPU (the default), Qwen-TTS on an NVIDIA card, and Breeze, which
+laughs. Three voices ship with it, Abby, Neya and Max, and new ones are cloned
+from a 20-40 second recording of one person talking.
 
 Languages: English and Russian are tested and both sound right, including
 Russian read by a voice cloned from English. The model is multilingual and the
 text pipeline is script-agnostic, so most other languages are expected to work.
 A less widely spoken language may be mistaken for the bigger one it shares an
-alphabet with: Bulgarian reads fluently but in a Russian accent.
+alphabet with: Bulgarian reads fluently but in a Russian accent. All of that is
+Qwen; Pocket reads six Latin-script languages, and Breeze English and Chinese.
 
 ## Pages
 
-- [Hear the voices](https://traxdata313.github.io/claude-voice/): samples of Abby and Max, playable, and the one line that installs the whole thing.
+- [Hear the voices](https://traxdata313.github.io/claude-voice/): samples of Abby, Neya and Max, playable, and the one line that installs the whole thing.
 - [Repository](https://github.com/TraxData313/claude-voice): the code, and the README.
 
 ## Documentation
 
-- [Install](https://github.com/TraxData313/claude-voice/blob/main/docs/install.md): one command, and why none of it needs administrator rights.
+- [Install](https://github.com/TraxData313/claude-voice/blob/main/docs/install.md): one command, where everything goes, Smart App Control, and removing it.
 - [Commands](https://github.com/TraxData313/claude-voice/blob/main/docs/commands.md): every command, generated from the tool itself.
-- [How it works](https://github.com/TraxData313/claude-voice/blob/main/docs/how-it-works.md): the engine, the transcript watcher, and the JNI bridge into an app with no CLI.
-- [The panel](https://github.com/TraxData313/claude-voice/blob/main/docs/panel-plan.md): the floating window that shows what is being said, and what changed while building it.
+- [How it works](https://github.com/TraxData313/claude-voice/blob/main/docs/how-it-works.md): the engine, the hooks, and the JNI bridge into an app with no CLI.
+- [The panel](https://github.com/TraxData313/claude-voice/blob/main/docs/panel.md): the window that shows what is being said, with pause, skip, volume and history.
 - [Writing for the ear](https://github.com/TraxData313/claude-voice/blob/main/docs/writing-for-the-ear.md): the TL;DR contract, and why captions sound wrong read aloud.
 - [When it goes quiet](https://github.com/TraxData313/claude-voice/blob/main/docs/troubleshooting.md): silence has no error message, so start here.
 - [Voices](https://github.com/TraxData313/claude-voice/blob/main/docs/voices.md): what may be published, and what may only be kept.
-- [Updating](https://github.com/TraxData313/claude-voice/blob/main/docs/updating.md): pulling a newer version and restarting the engine, and exactly what the optional version check sends. It is off by default: this project makes no network request until asked.
+- [Updating](https://github.com/TraxData313/claude-voice/blob/main/docs/updating.md): taking a newer version and restarting the engine, and exactly what the optional version check sends. It is off by default: this project makes no network request until asked.
+- [How a program finds it](https://github.com/TraxData313/claude-voice/blob/main/docs/discovery.md): the registry key, where.json, and the order to look in.
+- [HTTP API](https://github.com/TraxData313/claude-voice/blob/main/docs/api.md): speaking from another program, moods, and what a game needs.

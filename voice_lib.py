@@ -12,10 +12,42 @@ import math
 import os
 import re
 import textwrap
+import time
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(ROOT, "config.json")
-LOG_DIR = os.path.join(ROOT, "logs")
+# realpath, not abspath: a short name (SOMEON~1) in how this file was reached
+# would otherwise be written into hooks and the registry, and compared later
+# against the same folder spelt in full.
+ROOT = os.path.dirname(os.path.realpath(__file__))
+
+
+def _install_record():
+    """install.json beside this folder, when installer.py put it here.
+
+    An installed copy is <program>/app/ with the record one level up; its
+    settings, logs and the voices you make live in a data folder of their own
+    (%LOCALAPPDATA%/claude-voice), so an update can replace this folder whole.
+    A checkout -- or any copy not laid out that way -- keeps everything beside
+    the code, as it always has. See installer.py.
+    """
+    if os.path.basename(ROOT).lower() != "app":
+        return {}
+    try:
+        with open(os.path.join(os.path.dirname(ROOT), "install.json"), encoding="utf-8-sig") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) and doc.get("layout") == 1 else {}
+
+
+INSTALL = _install_record()
+# What the registry key, the Run value and the notes folder are called. Always
+# "claude-voice" but for a throwaway install a test makes, which must not touch
+# the real one's.
+PRODUCT = INSTALL.get("product") or "claude-voice"
+NOTES_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), PRODUCT)
+DATA_DIR = (INSTALL.get("data") or NOTES_DIR) if INSTALL else ROOT
+CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
+LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 
 def _unlogged(msg):
@@ -233,11 +265,25 @@ DEFAULTS = {
     # the mixer keeps under our name -- so it is applied to the engine process
     # rather than mixed into the audio, and takes effect mid-sentence.
     "volume": 1.0,
+    # The port the engine listens on, and every local client finds it here.
+    # When another program holds it, the engine takes the next free one and
+    # writes that here instead, keeping the one it wanted in portHome so it
+    # moves back as soon as that is free again (speak_server.bind_port).
     "port": 8765,
+    "portHome": None,
     "autostart": True,
     # Speak the short lines said mid-work, not just the final answer. The Stop
     # hook only fires when a turn ends, so this rides PreToolUse instead.
     "narrate": True,
+    # Where those mid-work lines come from. No Claude Code hook carries them:
+    # Stop is handed the final answer (last_assistant_message), PreToolUse only
+    # the tool and its input. The one way to hear them is for the PreToolUse
+    # hook to read the end of the session's transcript -- the file Claude Code
+    # names in that same hook call, read once, at that moment. Off, because
+    # the line Anton drew (2026-10-17) was "hooks only, no scraping": with this
+    # off a session hears its answers and alerts and nothing in between. See
+    # speak_hook.py.
+    "narrateFromTranscript": False,
     # Only a label boundary now: below this a message reads as a passing remark,
     # above it as a spoken answer. Both are read in full.
     "narrateMaxChars": 240,
@@ -256,18 +302,12 @@ DEFAULTS = {
     "speakThinking": True,
     # The ceiling on a message with no TL;DR. Roughly five minutes of speech.
     "fullMaxChars": 4000,
-    # Follow the session transcripts directly instead of waiting to be called.
-    # Hooks need the client to run them; this needs nothing but the files.
-    "watch": True,
-    # Codex writes a different local transcript format under ~/.codex. Opt in:
-    # existing Claude-only installations must not suddenly hear another app.
-    "watchCodex": False,
     # Speak the runs nobody is sitting in front of. A headless run -- `claude
-    # -p`, an SDK call, an errand one of your own programs sends off -- writes
-    # a transcript like every other session, and the watcher needs no hook to
-    # find it. But its report is addressed to the program that asked for it,
-    # not to the room, and hearing one read out in full is how this was found.
-    # Off, so they pass in silence; on if you would rather hear yours come home.
+    # -p`, an SDK call, an errand one of your own programs sends off -- runs
+    # the same hooks as every other session. But its report is addressed to the
+    # program that asked for it, not to the room, and hearing one read out in
+    # full is how this was found. Off, so they pass in silence; on if you would
+    # rather hear yours come home. (The name is older than the hooks-only design.)
     "watchHeadless": False,
     # Pause between one message and the next, so the seam is audible.
     "gapSeconds": 0.45,
@@ -277,8 +317,9 @@ DEFAULTS = {
     # same project are still that project, and switching between them passes
     # without a word.
     "sessionLabel": "project",
-    # After a restart the watcher resumes where it left off, but will not read
-    # anything older than this -- catching up after a crash, not after a night.
+    # An answer that finds the engine down is kept (see spool) and said once it
+    # is up -- but not if it is older than this. Catching up after a crash or a
+    # cold start, not after a night.
     "catchupSeconds": 300,
 
     # --- looking for a newer version --------------------------------------
@@ -296,7 +337,8 @@ DEFAULTS = {
     # How many past utterances keep their audio, so replaying one is instant
     # and costs no synthesis at all.
     "historyKeep": 40,
-    # Transcripts the panel has muted, as the watcher spells their paths.
+    # Sessions the panel has muted: a Claude session by its transcript path, as
+    # its hooks name it, a Codex task as "codex:<thread id>".
     "mutedSessions": [],
     # Where the panel last sat, written when it closes.
     "panelGeometry": "",
@@ -320,13 +362,61 @@ DEFAULTS = {
 }
 
 
-def load_state():
-    state = dict(DEFAULTS)
+# The last config each path was read as in full, so a read that lands on a
+# file another process is half way through replacing has something better to
+# fall back on than the defaults. See load_state.
+_LAST_GOOD = {}
+
+
+def _read_config(path):
+    """The file's settings, None when it is not there, or raise if unreadable."""
     try:
-        with open(CONFIG_PATH, encoding="utf-8-sig") as fh:
-            state.update(json.load(fh))
-    except (OSError, ValueError):
-        pass
+        with open(path, encoding="utf-8-sig") as fh:
+            raw = fh.read()
+    except FileNotFoundError:
+        return None
+    return json.loads(raw) if raw.strip() else {}
+
+
+def load_state():
+    """The config, merged over the defaults.
+
+    Five processes read and write this file -- panel, engine, hook, CLI and the
+    game's -- and falling back to the defaults on any failure meant a read
+    landing mid-write came back as a *different config*: the default engine,
+    the default voice, the voice off. The panel drew that for half a second
+    (the dropdown, the portrait and the switch all flicked), and a patch_state
+    that read it wrote the defaults back over everyone's settings.
+
+    Writes are atomic now (save_state), so a torn file should not be seen at
+    all. A sharing violation can still be, on Windows, for the instant a
+    replace is under way: so a failed read is tried again briefly, and if it
+    still fails the last good copy is used. Only a file that is genuinely
+    missing means "the defaults".
+    """
+    import time
+
+    path = CONFIG_PATH
+    state = dict(DEFAULTS)
+    for attempt in range(5):
+        try:
+            got = _read_config(path)
+        except (OSError, ValueError):
+            if attempt < 4:
+                time.sleep(0.02 * (attempt + 1))
+                continue
+            got = _LAST_GOOD.get(path)
+            if got is None:
+                return state
+            state.update(got)
+            return state
+        if got is None:
+            _LAST_GOOD.pop(path, None)
+            return state
+        if isinstance(got, dict):
+            _LAST_GOOD[path] = dict(got)
+            state.update(got)
+        return state
     return state
 
 
@@ -338,11 +428,84 @@ def save_state(state):
     default later never reaches anyone who has already run the tool. That is
     exactly how 'sessionLabel' went on announcing the session title after the
     default had moved to the project name.
+
+    Written beside the file and swapped in with os.replace, the way write_where
+    already did it, so nobody can ever read half of it. The swap is retried for
+    a moment because Windows refuses it while another process has the old file
+    open for reading.
     """
+    import time
+
     lean = {k: v for k, v in state.items() if k not in DEFAULTS or DEFAULTS[k] != v}
-    with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
+    tmp = f"{CONFIG_PATH}.{os.getpid()}.new"
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(lean, fh, indent=2)
         fh.write("\n")
+    for attempt in range(10):
+        try:
+            os.replace(tmp, CONFIG_PATH)
+            break
+        except PermissionError:
+            if attempt == 9:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+            time.sleep(0.02 * (attempt + 1))
+    _LAST_GOOD[CONFIG_PATH] = dict(lean)
+
+
+class _ConfigLock:
+    """One read-edit-write at a time, across processes.
+
+    Without it two patch_state calls that overlap -- the panel ticking a box
+    while the engine records a voice change -- each read the old file and the
+    second write undoes the first. A byte-range lock on a file beside the
+    config, which Windows drops by itself if the holder dies, so a crash can
+    never leave it stuck. If it cannot be had within a couple of seconds the
+    write goes ahead anyway: a rare lost update is better than a hang.
+    """
+
+    def __enter__(self):
+        import time
+
+        self.fh = None
+        try:
+            self.fh = open(CONFIG_PATH + ".lock", "a+b")
+        except OSError:
+            return self
+        deadline = time.monotonic() + 2.0
+        while True:
+            try:
+                _lock_byte(self.fh, True)
+                return self
+            except OSError:
+                if time.monotonic() > deadline:
+                    self.fh.close()
+                    self.fh = None
+                    return self
+                time.sleep(0.01)
+
+    def __exit__(self, *_exc):
+        if self.fh is not None:
+            try:
+                _lock_byte(self.fh, False)
+            except OSError:
+                pass
+            self.fh.close()
+        return False
+
+
+def _lock_byte(fh, take):
+    """Take or drop a non-blocking lock on the first byte of an open file."""
+    fh.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK if take else msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.lockf(fh, (fcntl.LOCK_EX | fcntl.LOCK_NB) if take else fcntl.LOCK_UN)
 
 
 def patch_state(**changes):
@@ -351,11 +514,13 @@ def patch_state(**changes):
     Four processes now hold a config in memory -- the engine loaded one when it
     started, the panel polls, the CLI and the hook read one per run -- and
     saving any of those wholesale would quietly undo whatever the others
-    changed since. So re-read, edit, write.
+    changed since. So re-read, edit, write, under a lock so two of those cannot
+    interleave.
     """
-    state = load_state()
-    state.update(changes)
-    save_state(state)
+    with _ConfigLock():
+        state = load_state()
+        state.update(changes)
+        save_state(state)
     return state
 
 
@@ -368,7 +533,14 @@ def patch_state(**changes):
 # names the model fetches states for. So the engine decides what the catalogue
 # even contains, which is why every caller of catalog() gets it from here
 # rather than assuming.
-DEFAULT_ENGINE = "qwen"
+# Pocket since 2026-10-17. It runs on the CPU from a pip package, needs no
+# graphics card, and its DLLs (torch's) are signed -- where Qwen's
+# qwen3_tts.dll is not, and Windows 11's Smart App Control, on by default on a
+# clean install, refuses to load it. Qwen is still one pick away, and the
+# engine falls back to Pocket on its own when Windows blocks it (speak_server).
+# Only a config that names no engine at all is affected: install.ps1 has
+# always written the engine it installed.
+DEFAULT_ENGINE = "pocket"
 ENGINES = ("qwen", "pocket", "breeze")
 
 # What each engine is, in the few facts somebody choosing between them actually
@@ -470,6 +642,23 @@ def engine_name(name):
     return engine_info(name)["label"].split(" — ")[0]
 
 
+def old_default_engine(raw):
+    """"qwen" for a config written before 2.0 by someone who never chose an
+    engine, else None.
+
+    Qwen was the default then, and a config is saved lean -- an engine never
+    changed is not in the file. So when DEFAULT_ENGINE moved to Pocket, such a
+    config would have switched engine silently. `raw` is the file as written
+    (not merged over the defaults); Qwen only when its Studio is really there.
+    """
+    if not isinstance(raw, dict) or "engine" in raw:
+        return None
+    studio = raw.get("studioDir") or DEFAULTS.get("studioDir")
+    if studio and os.path.isfile(os.path.join(os.path.expandvars(studio), "runtime", "bin", "server", "jvm.dll")):
+        return "qwen"
+    return None
+
+
 def engine_of(state=None):
     """Which engine the config asks for, sanity-checked.
 
@@ -537,17 +726,24 @@ def own_version():
 # lives, so each start leaves the answer somewhere fixed: beside nothing of
 # ours, in the user's own application data, where the setup program writes it
 # too. Only paths and a version -- nothing of what was said.
-WHERE_PATH = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
-                          "claude-voice", "where.json")
+WHERE_PATH = os.path.join(NOTES_DIR, "where.json")
 
 
-def write_where(state=None):
-    """Leave the note saying where this copy is and which Python runs it."""
+def write_where(state=None, **extra):
+    """Leave the note saying where this copy is and which Python runs it.
+
+    `port` is the port the engine actually listens on, which is not always the
+    one asked for: see speak_server.bind_port. `portHome`, when present, is the
+    one it wanted and could not have. Anything in `extra` (an `error`) is added.
+    """
     import sys
 
     state = state or load_state()
     doc = {"root": ROOT, "python": sys.executable or "", "pythonw": _python(),
            "port": state.get("port", 8765), "version": own_version()}
+    if state.get("portHome") and state.get("portHome") != doc["port"]:
+        doc["portHome"] = state["portHome"]
+    doc.update({k: v for k, v in extra.items() if v is not None})
     try:
         os.makedirs(os.path.dirname(WHERE_PATH), exist_ok=True)
         tmp = WHERE_PATH + ".new"
@@ -559,9 +755,151 @@ def write_where(state=None):
     return doc
 
 
+# The registration: one fixed place in the user's registry that says where
+# claude-voice lives and how to start it, whether or not it has ever run.
+# where.json could not be that -- only a running engine writes it, so a fresh
+# install, a moved folder or an old copy was invisible to a game until the
+# engine had been started by hand at least once (complaint 2, October 2026).
+#
+# Written by the installer (Kind "installed") and by `voice_cli register` for
+# a developer's own checkout (Kind "dev", opt-in, so a git clone is never
+# announced to games by accident). The engine refreshes Port, PortHome and
+# Version on every start, but only when the key already names THIS folder: a
+# second copy started from somewhere else must not steal it. The contract is
+# docs/discovery.md; bump REG_CONTRACT when a value changes meaning.
+REG_KEY = "Software\\" + PRODUCT
+REG_CONTRACT = 1
+
+
+def _winreg():
+    try:
+        import winreg
+        return winreg
+    except ImportError:         # not Windows: there is no registry to be found in
+        return None
+
+
+def launcher_command(python=None):
+    """The exact command line that starts this copy's engine with no window.
+
+    The first token is the executable, always quoted, so a reader splits it
+    off without having to parse the rest. For now Python and voice_cli.py; a
+    packaged build will name its own exe here instead.
+    """
+    exe = python or _python()
+    return f'"{exe}" "{os.path.join(ROOT, "voice_cli.py")}" start'
+
+
+def registration(key=None):
+    """What the registry key says, as a dict of its values, or None."""
+    reg = _winreg()
+    if reg is None:
+        return None
+    try:
+        with reg.OpenKey(reg.HKEY_CURRENT_USER, key or REG_KEY) as k:
+            out, i = {}, 0
+            while True:
+                try:
+                    name, value, _kind = reg.EnumValue(k, i)
+                except OSError:
+                    return out
+                out[name] = value
+                i += 1
+    except OSError:
+        return None
+
+
+def registered_here(key=None):
+    """True when the key exists and names this folder."""
+    found = registration(key)
+    return bool(found and found.get("InstallDir")
+                and _same_path(found["InstallDir"], ROOT))
+
+
+def _write_values(values, key):
+    reg = _winreg()
+    if reg is None:
+        raise OSError("there is no Windows registry here")
+    with reg.CreateKeyEx(reg.HKEY_CURRENT_USER, key, 0, reg.KEY_SET_VALUE) as k:
+        for name, value in values.items():
+            if value is None:
+                try:
+                    reg.DeleteValue(k, name)
+                except OSError:
+                    pass
+            elif isinstance(value, int):
+                reg.SetValueEx(k, name, 0, reg.REG_DWORD, value)
+            else:
+                reg.SetValueEx(k, name, 0, reg.REG_SZ, str(value))
+
+
+def _port_values(state):
+    port = int(state.get("port") or 8765)
+    return {"Port": port, "PortHome": int(state.get("portHome") or port)}
+
+
+def register(kind=None, python=None, state=None, key=None):
+    """Write the key for this copy, replacing whatever copy it named before.
+
+    `kind` is "installed" or "dev"; left out, a folder with .git is "dev".
+    Returns the values written. Raises OSError when it cannot be written.
+    """
+    kind = kind or ("dev" if os.path.exists(os.path.join(ROOT, ".git")) else "installed")
+    if kind not in ("installed", "dev"):
+        raise ValueError(f"kind must be installed or dev, not {kind!r}")
+    state = state or load_state()
+    values = {"Contract": REG_CONTRACT, "InstallDir": ROOT, "Kind": kind,
+              "Version": own_version(), "Launcher": launcher_command(python),
+              **_port_values(state), "Updated": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    _write_values(values, key or REG_KEY)
+    return values
+
+
+def refresh_registration(state, key=None):
+    """On an engine start: the port it got, and the version, if the key is ours.
+
+    Never creates the key and never touches another copy's: True only when it
+    named this folder and was brought up to date.
+    """
+    if not registered_here(key):
+        return False
+    try:
+        _write_values({**_port_values(state), "Version": own_version(),
+                       "Updated": time.strftime("%Y-%m-%dT%H:%M:%S")}, key or REG_KEY)
+        return True
+    except OSError:
+        return False
+
+
+def unregister(force=False, key=None):
+    """Remove the key. Returns "removed", "absent" or "other" (it names
+    another folder, and `force` was not given -- that copy's, not ours)."""
+    found = registration(key)
+    if found is None:
+        return "absent"
+    if not force and not registered_here(key):
+        return "other"
+    reg = _winreg()
+    try:
+        reg.DeleteKey(reg.HKEY_CURRENT_USER, key or REG_KEY)
+    except FileNotFoundError:
+        return "absent"
+    return "removed"
+
+
+def own_voices_dir(state=None):
+    """Where a voice made on this machine goes. In an installed copy that is the
+    data folder, which an update never touches; in a checkout, its own voices folder."""
+    if INSTALL:
+        return os.path.join(DATA_DIR, "voices")
+    return voice_roots(state)[0]
+
+
 def voice_roots(state=None):
     state = state or load_state()
     roots = [state.get("voicesDir") or "voices"]
+    if INSTALL:
+        roots.append(os.path.join(DATA_DIR, "voices"))
     roots += list(state.get("extraVoicesDirs") or [])
     out = []
     for r in roots:
@@ -579,8 +917,10 @@ def is_added_voice(voice, state=None):
     roots = voice_roots(state)
     if not roots:
         return False
-    own = os.path.normcase(os.path.abspath(roots[0]))
-    return os.path.normcase(os.path.abspath(voice.get("root") or roots[0])) != own
+    state = state or load_state()
+    added = {os.path.normcase(os.path.abspath(r)) for r in (state.get("extraVoicesDirs") or [])}
+    own = {os.path.normcase(os.path.abspath(r)) for r in roots} - added
+    return os.path.normcase(os.path.abspath(voice.get("root") or roots[0])) not in own
 
 
 # --------------------------------------------------------------------------
@@ -1422,14 +1762,101 @@ QUIET_RATIO = 0.12         # how far under the local peak counts as a gap
 QUIET_FLOOR = 0.02         # and, with no peak to go by, the level silence sits under
 
 
+try:
+    import numpy as _np
+except ImportError:                     # a Qwen-only install need not have it
+    _np = None
+
+
 def _loudest(samples, start, stop):
-    """Peak absolute value in a block. The one inner loop of all of this."""
-    loudest = 0.0
-    for s in samples[start:stop]:
-        a = -s if s < 0 else s
-        if a > loudest:
-            loudest = a
-    return loudest
+    """Peak absolute value in a block.
+
+    max() and min() over a slice, not a loop over samples. This is the one
+    inner loop of all of this, and written as a Python loop it held the GIL
+    for long enough per streamed piece that the engine's own HTTP threads
+    starved: /health and /state replies were still being written when the
+    panel and the game had given up on them (2026-10, 31 aborted replies in
+    one log). The builtins walk the slice in C.
+    """
+    block = samples[start:stop]
+    if not len(block):
+        return 0.0
+    hi, lo = max(block), min(block)
+    return float(hi if hi >= -lo else -lo)
+
+
+def _window_peaks(samples, first, count, win):
+    """Peaks of `count` back-to-back windows of `win` samples from `first`.
+
+    One vectorised pass with numpy where it is installed; window by window
+    through _loudest where it is not. Same numbers either way.
+    """
+    if count <= 0:
+        return []
+    if _np is not None:
+        try:
+            block = _np.asarray(samples[first:first + count * win], dtype=_np.float32)
+            if block.size == count * win:
+                return _np.abs(block).reshape(count, win).max(axis=1).tolist()
+        except (TypeError, ValueError):
+            pass
+    return [_loudest(samples, first + i * win, first + (i + 1) * win)
+            for i in range(count)]
+
+
+def as_floats(samples):
+    """Mono float samples as an array('f'), without a Python loop where possible.
+
+    Engines hand back a numpy array (Pocket), a ctypes float array (Qwen) or an
+    array already. array.extend() with anything but another 'f' array walks it
+    one Python float at a time -- a minute of speech is 1.4 million of them --
+    so the conversion goes through bytes instead.
+    """
+    import array
+
+    if isinstance(samples, array.array) and samples.typecode == "f":
+        return samples
+    out = array.array("f")
+    if _np is not None:
+        try:
+            out.frombytes(_np.ascontiguousarray(samples, dtype=_np.float32).tobytes())
+            return out
+        except (TypeError, ValueError):
+            out = array.array("f")
+    try:
+        view = memoryview(samples)
+        if view.format in ("f", "<f") and view.itemsize == 4:
+            out.frombytes(view.cast("B").tobytes())
+            return out
+    except TypeError:
+        pass
+    out.extend(samples)
+    return out
+
+
+def pcm16(samples):
+    """Float samples to 16-bit little-endian PCM bytes, clipping-guarded.
+
+    The scale is exactly 1.0 for anything peaking at or under 1.0 -- a guard,
+    not a normaliser; see the note under quiet_span. Truncates toward zero, as
+    int() did when this was a loop.
+    """
+    if _np is not None:
+        a = _np.asarray(samples, dtype=_np.float32)
+        if a.size == 0:
+            return b""
+        peak = float(_np.abs(a).max())
+        scale = (0.99 / peak) if peak > 1.0 else 1.0
+        return (_np.clip(a.astype(_np.float64) * scale, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+    import array
+    import sys
+
+    peak = max(max(samples, default=0.0), -min(samples, default=0.0))
+    scale = (0.99 / peak) if peak > 1.0 else 1.0
+    pcm = array.array("h", (int(max(-1.0, min(1.0, s * scale)) * 32767) for s in samples))
+    if sys.byteorder != "little":
+        pcm.byteswap()
+    return pcm.tobytes()
 
 
 def trim_head(samples, rate=24000, window=QUIET_WINDOW, floor=QUIET_FLOOR):
@@ -1445,10 +1872,15 @@ def trim_head(samples, rate=24000, window=QUIET_WINDOW, floor=QUIET_FLOOR):
     be relative to.
     """
     win = max(1, int(window * rate))
-    at = 0
-    while at + win <= len(samples) and _loudest(samples, at, at + win) <= floor:
-        at += win
-    return at
+    total = len(samples) // win
+    # A block of windows at a time: the first word is usually within a second,
+    # and measuring a whole minute of buffer to find that out would be waste.
+    for first in range(0, total, 32):
+        peaks = _window_peaks(samples, first * win, min(32, total - first), win)
+        for i, loudest in enumerate(peaks):
+            if loudest > floor:
+                return (first + i) * win
+    return total * win
 
 
 def quiet_span(samples, rate=24000, search=QUIET_SEARCH, window=QUIET_WINDOW,
@@ -1485,13 +1917,17 @@ def quiet_span(samples, rate=24000, search=QUIET_SEARCH, window=QUIET_WINDOW,
     if back < win * 2:
         return 0, 0
 
-    best, best_at, peak = None, 0, 0.0
-    for start in range(n - back, n - win + 1, win):
-        loudest = _loudest(samples, start, start + win)
-        if loudest > peak:
-            peak = loudest
-        if best is None or loudest < best:
-            best, best_at = loudest, start
+    # Every window on the grid the search uses, extended both ways to the ends
+    # of the buffer, so the widening below reads the same peaks rather than
+    # measuring the same samples twice. Window i starts at base + i * win.
+    base = (n - back) % win
+    peaks = _window_peaks(samples, base, (n - base) // win, win)
+    first = (n - back - base) // win          # where the search starts
+    searched = peaks[first:]
+
+    peak = max(searched)
+    best = min(searched)
+    at = first + searched.index(best)         # the first quietest, as before
 
     if peak <= 0.0:
         return n, n                   # all silence: anywhere will do, take it all
@@ -1504,11 +1940,12 @@ def quiet_span(samples, rate=24000, search=QUIET_SEARCH, window=QUIET_WINDOW,
     # Widen from that window to the whole breath it sits in, so what gets
     # dropped is the entire pause rather than 40ms out of the middle of it.
     level = peak * ratio
-    lo, hi = best_at, best_at + win
-    while lo - win >= 0 and _loudest(samples, lo - win, lo) <= level:
-        lo -= win
-    while hi + win <= n and _loudest(samples, hi, hi + win) <= level:
-        hi += win
+    lo_i, hi_i = at, at
+    while lo_i - 1 >= 0 and peaks[lo_i - 1] <= level:
+        lo_i -= 1
+    while hi_i + 1 < len(peaks) and peaks[hi_i + 1] <= level:
+        hi_i += 1
+    lo, hi = base + lo_i * win, base + (hi_i + 1) * win
 
     keep = max(0, (hi - lo) - int(budget * rate))
     return lo + keep, hi
@@ -1785,6 +2222,20 @@ _NEEDS_PERMISSION = re.compile(r"needs\s+your\s+permission", re.I)
 _WAITING_FOR_YOU = re.compile(r"waiting\s+for\s+your\s+input", re.I)
 
 
+def _tool_phrase(name):
+    """A tool's name as somebody would say it, not as it is spelled.
+
+    'WebFetch' read letter-perfect comes out as one mashed word, and an MCP
+    tool is called mcp__Claude_Browser__navigate, which is unsayable. Keep the
+    last part, and put the spaces where a reader would.
+    """
+    if "__" in name:
+        name = name.rsplit("__", 1)[-1]
+    name = name.replace("_", " ")
+    name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
+    return re.sub(r"\s+", " ", name).strip()
+
+
 def notification_speech(message, subject="", max_chars=240):
     """What to say when Claude Code raises a notification.
 
@@ -1799,6 +2250,13 @@ def notification_speech(message, subject="", max_chars=240):
     screen, where it can be read as slowly as it takes.
     """
     message = (message or "").strip()
+    if not subject:
+        # Claude Code often names the tool itself: "Claude needs your permission
+        # to use Bash". That is the only place the hook can learn it from now --
+        # it used to dig the pending tool call out of the transcript.
+        named = re.search(r"permission\s+to\s+use\s+(.+?)\s*\.?$", message, re.I)
+        if named:
+            subject = _tool_phrase(named.group(1))
     if _NEEDS_PERMISSION.search(message):
         return "I need your permission" + (" to use " + subject + "." if subject else ".")
     if _WAITING_FOR_YOU.search(message):
@@ -1845,14 +2303,52 @@ def notification_due(speech, within=10.0):
 
 CLAUDE_MD = os.path.expanduser(os.path.join("~", ".claude", "CLAUDE.md"))
 NOTES_PATH = os.path.join(ROOT, "speaking-notes.md")
-_MARK_OPEN = "<!-- current-voice -->"
-_MARK_CLOSE = "<!-- /current-voice -->"
+# The markers versions before 2.0 wrapped their block in, inside the user's
+# own ~/.claude/CLAUDE.md. Kept only so remove_notes can find that block and
+# take it out again: nothing writes into CLAUDE.md any more.
 _NOTE_OPEN = "<!-- claude-voice -->"
 _NOTE_CLOSE = "<!-- /claude-voice -->"
 
 
-def _voice_block(voice):
-    """The text between the current-voice markers. See announce_voice."""
+def speaking_notes():
+    """The standing rules for writing to be heard, from speaking-notes.md.
+
+    Handed to every session by its SessionStart hook (see session_note) rather
+    than spliced into the user's CLAUDE.md. That file is the user's own; this
+    used to rewrite a block of it on every engine start and every voice change,
+    which is the kind of reaching into somebody else's files that made the whole
+    tool look like it was scraping Claude (Anton, 2026-10-17). The hook says the
+    same thing, and says it again after a compaction, without touching a file.
+    HTML comments are left out: they are notes for whoever edits the file.
+    """
+    try:
+        with open(NOTES_PATH, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return ""
+    return re.sub(r"<!--.*?-->\s*", "", text, flags=re.S).strip()
+
+
+def persona_note(voice):
+    """Who the session is heard as: the voice's name and, if it has one, its
+    persona.
+
+    It says more than the name on purpose. A session told only "the voice is
+    Abby" still writes as though handing finished text to a component further
+    down the line; one told the answers are *said* in that voice, to somebody
+    listening, has a reason to write differently. Given the situation instead
+    of a rule, it can judge.
+
+    What keeps it from going wrong is scope, not restraint, because personas
+    describe a voice and not a manner. Max's reads "brave, driving, motivating",
+    and a session that took that for a writing instruction would deliver a stack
+    trace as a pep talk. Hence: colour what is heard, leave the body alone.
+
+    No pronouns for the voice, deliberately -- this is generated for every voice
+    in the catalogue, including ones nobody here has met. Voices with no persona
+    get the first two paragraphs only: "let the character through" reads as an
+    instruction to invent one when there is nothing above it to point at.
+    """
     name = voice["name"]
     persona = (voice.get("persona") or "").rstrip(".")
     paras = [
@@ -1860,141 +2356,53 @@ def _voice_block(voice):
         f"Your lines are spoken out loud in that voice, so it is nice to play {name} a "
         f"little. Don't be caught out when the user calls you that — to them it is your "
         f"name, and answering to it costs nothing.",
-        f"The words are heard rather than read, so write them to be easy on the ear."
-        + (f" And they are heard as {name}, so let them sit in that spirit: take the manner "
-           f"from the description above and follow it without overdoing it. A calm voice can "
-           f"be calming. A bright one can be bright." if persona else ""),
     ]
     if persona:
         paras.append(
-            f"Where it belongs is the part that is actually heard: the `## TL;DR` and the "
-            f"short lines between tool calls. Not the body of an answer — a character "
-            f"reading somebody a stack trace helps nobody. None of this is a rule to "
-            f"follow; if the user would rather have plain Claude, that is the answer. It is "
-            f"what is happening, so that you can judge it yourself.")
-    return _MARK_OPEN + "\n" + "\n\n".join(textwrap.fill(p, 90) for p in paras) + "\n"
+            f"They are heard as {name}, so let them sit in that spirit: take the manner from "
+            f"the description above and follow it without overdoing it. A calm voice can be "
+            f"calming. A bright one can be bright. Where it belongs is the part that is "
+            f"actually heard, not the body of an answer — a character reading somebody a "
+            f"stack trace helps nobody. None of this is a rule; if the user would rather "
+            f"have plain Claude, that is the answer.")
+    return "\n\n".join(paras)
 
 
-def _spliced(text, open_mark, close_mark, body):
-    """text with everything between the markers replaced. None if no markers.
+def remove_notes(path=None):
+    """Take the block older versions spliced into CLAUDE.md back out.
 
-    The closing marker comes back off the original rather than out of `body`,
-    so a caller cannot lose it by forgetting to include it.
-    """
-    start, end = text.find(open_mark), text.find(close_mark)
-    if start == -1 or end == -1 or end < start:
-        return None
-    return text[:start] + body + text[end:]
-
-
-def sync_notes(path=None, state=None):
-    """Put the current speaking notes back into CLAUDE.md, voice block and all.
-
-    Everything else a release installs -- the slash command, the hooks, the
-    desktop shortcut -- needs the PowerShell installer run again. The note does
-    not: it is one marker-to-marker splice, which is already what announce_voice
-    does for the block inside it. So this is the one installed file that can put
-    itself right, and it is the one that matters most, because it is the whole
-    of what a session knows about being heard.
-
-    Which is the point. A release that changes how Claude is told to write used
-    to reach nobody until they read a line of output and went and ran setup.ps1
-    by hand, and the note is precisely the file whose staleness is invisible --
-    a session following last month's rules looks exactly like a session.
-
-    Two things it deliberately does not do. It will not create the block, only
-    refresh one that is already there: no markers, no edit, so deleting them is
-    still the whole of turning the note off and this will not undo that. And it
-    writes only when the result differs, so calling it on every engine start
-    costs two small reads and nothing else.
-
-    Note that this replaces the whole block, so hand edits inside the markers do
-    not survive an update. Put your own wording outside them; that has always
-    been the deal with install.ps1, and this only makes it happen sooner.
+    Everything between the claude-voice markers goes, markers included, and
+    every word around it stays exactly as it was. Nothing else in the file is
+    touched; no markers, no edit. Called by the installer (once, to move an old
+    install over to the hook) and by the uninstaller. Returns True if it cut.
     """
     path = path or CLAUDE_MD
     try:
-        with open(NOTES_PATH, encoding="utf-8") as fh:
-            template = fh.read().rstrip()
-        with open(path, encoding="utf-8") as fh:
+        # newline="": read and written as it is, so a file with LF line ends
+        # does not come back with CRLF ones (Windows' text mode) or the reverse.
+        with open(path, encoding="utf-8", newline="") as fh:
             text = fh.read()
-    except OSError:
+    except (OSError, ValueError):          # ValueError: not UTF-8 -- not ours to rewrite
         return False
-
     start, end = text.find(_NOTE_OPEN), text.find(_NOTE_CLOSE)
     if start == -1 or end == -1 or end < start:
         return False
-    # The template carries both of its own markers, so the tail resumes after
-    # the closing one -- and it is rstripped, so what follows the block is left
-    # exactly as it was. Anything else grows a blank line per call.
-    fresh = text[:start] + template + text[end + len(_NOTE_CLOSE):]
-
-    state = state or load_state()
+    nl = "\r\n" if "\r\n" in text else "\n"
+    before = text[:start].rstrip("\r\n")
+    after = text[end + len(_NOTE_CLOSE):].lstrip("\r\n")
+    fresh = before + (nl + nl if before and after else "") + after
+    if fresh and not fresh.endswith("\n"):
+        fresh += nl
+    temp = f"{path}.{os.getpid()}.new"
     try:
-        voice, _ = resolve(state["voice"], state.get("source"), state)
-    except LookupError:
-        voice = None                       # a voice that has since been deleted
-    if voice:
-        fresh = _spliced(fresh, _MARK_OPEN, _MARK_CLOSE, _voice_block(voice)) or fresh
-
-    if fresh == text:
-        return False
-    try:
-        with open(path, "w", encoding="utf-8") as fh:
+        with open(temp, "w", encoding="utf-8", newline="") as fh:
             fh.write(fresh)
+        os.replace(temp, path)
     except OSError:
-        return False
-    return True
-
-
-def announce_voice(voice, path=None):
-    """Write the current voice into the note every session loads at startup.
-
-    That file is read once when a session begins, so a session cannot discover
-    a voice chosen later without being asked to go and look. Keeping this block
-    up to date means it simply knows, with nothing to run.
-
-    It says more than the name on purpose. A session told only "the voice is
-    Abby" still writes as though handing finished text to a component further
-    down the line; one told the answers are *said* in that voice, to somebody
-    listening, has a reason to write differently -- which is the point of the
-    notes above it. Given the situation instead of a rule, it can judge.
-
-    Playing the part a little is the default: the voice is the face the user
-    actually meets, and a session that knows whose face it is wearing does the
-    job better than one performing to order. It is told to take the manner from
-    the persona string rather than from anything written here, because the whole
-    point is that the user can add voices nobody anticipated -- "a calm voice
-    can be calming" adapts; a list of adjectives would not.
-
-    What keeps it from going wrong is scope, not restraint, because personas
-    describe a voice and not a manner. Max's reads "brave, driving, motivating",
-    and a session that took that for a writing instruction would deliver a stack
-    trace as a pep talk. Abby's is mild enough to hide the problem; his is not.
-    Hence: colour what is heard, leave the body of an answer alone.
-
-    No pronouns for the voice, deliberately -- this text is generated for every
-    voice in the catalogue, including ones nobody here has met.
-
-    Voices with no persona get the first two paragraphs only. "Let the character
-    through" reads as an instruction to invent one when there is nothing above
-    it to point at.
-
-    Only the text between the markers is touched. No markers, no edit.
-    """
-    path = path or CLAUDE_MD
-    try:
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-    except OSError:
-        return False
-    fresh = _spliced(text, _MARK_OPEN, _MARK_CLOSE, _voice_block(voice))
-    if fresh is None:
-        return False
-    try:
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(fresh)
-    except OSError:
+        try:
+            os.remove(temp)
+        except OSError:
+            pass
         return False
     return True
 
@@ -2026,25 +2434,32 @@ HEADLESS_ENTRYPOINTS = ("sdk-cli",)
 def session_note(state=None):
     """(key, text): what a session should know about the voice right now.
 
-    The key is the state the text describes plus a checksum of the text
-    itself, so it moves whenever the words would: an engine swapped, or the
-    wording changed by an update. The hook tells a session once and then only
-    when the key has moved. The text is built from ENGINE_CAN rather than from
-    engine names, so an engine added later is described by what it can do
-    without anyone writing it a paragraph.
+    The whole of what a Claude session is told about being heard, delivered as
+    hook additionalContext: at SessionStart, and at the next UserPromptSubmit
+    whenever the key has moved. It used to be split -- the standing rules and
+    the current voice spliced into ~/.claude/CLAUDE.md, only the engine's
+    abilities here -- and the splice rewrote the user's file on every engine
+    start and voice change. Now nothing is written anywhere.
+
+    The key is the state the text describes plus a checksum of the text itself,
+    so it moves whenever the words would: an engine swapped, a voice changed,
+    the voice switched on, or the wording changed by an update. The abilities
+    are built from ENGINE_CAN rather than from engine names, so an engine added
+    later is described by what it can do without anyone writing it a paragraph.
 
     It encourages rather than rations. Anton, hearing the first of these:
     "dont shy playing with the mood". A session told that most lines want no
-    mood took it at its word and wrote almost none, which left the one engine
-    that can laugh reading like the ones that cannot.
+    mood took it at its word and wrote almost none.
     """
     import zlib
 
     state = state if state is not None else load_state()
     engine = engine_of(state)
     on = bool(state.get("enabled"))
+    voice = None
     try:
-        who = resolve(state.get("voice"), state.get("source"), state)[0]["name"]
+        voice = resolve(state.get("voice"), state.get("source"), state)[0]
+        who = voice["name"]
     except Exception:
         who = state.get("voice") or ""
     speaker = (f"speaking as {who} through {engine_name(engine)}" if who
@@ -2055,49 +2470,262 @@ def session_note(state=None):
     if not on:
         text = (f"{SESSION_NOTE_HEAD} the voice is off, so nothing written is heard until "
                 "it is switched on again. You will be told when it is.")
-    elif not moods and not sounds:
-        text = (f"{SESSION_NOTE_HEAD} the voice is on, {speaker}, which reads the words "
-                "exactly as written, with no moods and no sounds. A direction in brackets "
-                "such as (sad) or (laugh) is taken out rather than performed, so leave "
-                "them out.")
     else:
-        what = "acts as well as reads" if moods and sounds else (
-            "takes a mood but makes no sounds" if moods else "makes sounds but takes no mood")
-        lines = []
-        if moods:
-            lines.append("- A mood sets how a whole spoken message sounds. Put it in "
-                         "brackets as the first thing in the TL;DR, or at the front of a "
-                         "short line between tool calls: "
-                         + " ".join(f"({m})" for m in MOODS)
-                         + ". One per message; it is never read out.")
-        if sounds:
-            lines.append("- A sound goes in brackets exactly where it happens: "
-                         + " ".join(f"({s})" for s in sounds) + ".")
+        if not moods and not sounds:
+            text = (f"{SESSION_NOTE_HEAD} the voice is on, {speaker}, which reads the words "
+                    "exactly as written, with no moods and no sounds. A direction in brackets "
+                    "such as (sad) or (laugh) is taken out rather than performed, so leave "
+                    "them out.")
         else:
-            lines.append("- Sounds such as (laugh) are taken out on this engine rather "
-                         "than performed, so leave them out.")
-        if moods and sounds:
-            play = ("- Don't be shy with them. A laugh at something funny, a sigh at a "
-                    "long failure, a whisper for a secret, delight when it finally works: "
-                    "that is what this voice is for.")
-        elif moods:
-            play = ("- Don't be shy with it: delight when something works, calm for bad "
-                    "news, a whisper for a secret.")
+            what = "acts as well as reads" if moods and sounds else (
+                "takes a mood but makes no sounds" if moods else "makes sounds but takes no mood")
+            lines = []
+            if moods:
+                lines.append("- A mood sets how a whole spoken message sounds. Put it in "
+                             "brackets as the first thing in the TL;DR"
+                             + (", or at the front of a short line between tool calls: "
+                                if _lines_heard(state) else ": ")
+                             + " ".join(f"({m})" for m in MOODS)
+                             + ". One per message; it is never read out.")
+            if sounds:
+                lines.append("- A sound goes in brackets exactly where it happens: "
+                             + " ".join(f"({s})" for s in sounds) + ".")
+            else:
+                lines.append("- Sounds such as (laugh) are taken out on this engine rather "
+                             "than performed, so leave them out.")
+            if moods and sounds:
+                play = ("- Don't be shy with them. A laugh at something funny, a sigh at a "
+                        "long failure, a whisper for a secret, delight when it finally works: "
+                        "that is what this voice is for.")
+            elif moods:
+                play = ("- Don't be shy with it: delight when something works, calm for bad "
+                        "news, a whisper for a secret.")
+            else:
+                play = ("- Don't be shy with them: a laugh at something funny, a sigh at a "
+                        "long failure.")
+            noun = "a mood or a sound" if moods and sounds else ("a mood" if moods else "a sound")
+            lines.append(f"{play} The one way to spoil it is {noun} on every single line.")
+            text = (f"{SESSION_NOTE_HEAD} the voice is on, {speaker}, which {what}.\n\n"
+                    + "\n".join(lines))
+        if _lines_heard(state):
+            text += ("\n\nThe short lines you write between tool calls are spoken too, exactly "
+                     "as written, with nothing on screen to explain them. Give each one a verb: "
+                     "\"Now I'm writing the fix\", not \"Now the fix itself\".")
         else:
-            play = ("- Don't be shy with them: a laugh at something funny, a sigh at a "
-                    "long failure.")
-        noun = "a mood or a sound" if moods and sounds else ("a mood" if moods else "a sound")
-        lines.append(f"{play} The one way to spoil it is {noun} on every single line.")
-        text = (f"{SESSION_NOTE_HEAD} the voice is on, {speaker}, which {what}.\n\n"
-                + "\n".join(lines))
+            text += ("\n\nOnly the end of a turn is heard: its `## TL;DR`, or the whole final "
+                     "message when it has none. Lines between tool calls are not spoken.")
+        if voice:
+            text += "\n\n" + persona_note(voice)
+        notes = speaking_notes()
+        if notes:
+            text += "\n\n" + notes
 
     key = f"{'on' if on else 'off'}|{engine}|{who}|{zlib.crc32(text.encode('utf-8')):08x}"
     return key, text
 
 
-# The events install.ps1 registers speak_hook.py for. Its docstring says what
-# each one is for.
-HOOK_EVENTS = ("Stop", "PreToolUse", "Notification", "SessionStart", "UserPromptSubmit")
+def _lines_heard(state):
+    """Whether the lines between tool calls reach the voice at all. See
+    narrateFromTranscript in DEFAULTS."""
+    return bool(state.get("narrate", True) and state.get("narrateFromTranscript", False))
+
+
+# --------------------------------------------------------------------------
+# the hooks, as Claude Code's settings.json holds them
+# --------------------------------------------------------------------------
+#
+# The only way into Claude Code. Each one runs speak_hook.py, which hands what
+# Claude Code gave it to the engine over HTTP (POST /hook) and goes. Written,
+# checked and removed from here so the installer, the uninstaller and 'status'
+# cannot disagree about what "our hooks" are: any hook whose command names
+# speak_hook.py.
+
+# The events, and what each is for. Its docstring in speak_hook.py says more.
+HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "Notification", "PreToolUse")
+
+# Never a bare "python speak_hook.py". Python exits with 2 when the script it is
+# handed is not there, and 2 is the one exit code Claude Code reads as "block":
+# every prompt refused, every tool call refused -- all because this folder was
+# moved, which is exactly when nobody is thinking about hooks (2026-09-25). So
+# the hook is a line of Python that runs speak_hook.py the way "python
+# speak_hook.py" would -- same argv, its own folder first on the path and never
+# the project's -- and exits 0 without a word when the file is gone.
+HOOK_GUARD = ("import os,runpy,sys;h=sys.argv[1];os.path.isfile(h) or sys.exit(0);"
+              "sys.argv=sys.argv[1:];sys.path[:]=[os.path.dirname(h)]+[p for p in sys.path if p];"
+              "runpy.run_path(h,run_name='__main__')")
+HOOK_SCRIPT = os.path.join(ROOT, "speak_hook.py")
+CLAUDE_SETTINGS = os.path.expanduser(os.path.join("~", ".claude", "settings.json"))
+
+
+def bash_word(path):
+    """A path as bash reads it. Claude Code runs a hook's command through bash
+    on Windows, and bash reads a backslash as an escape: C:\\Users\\x arrives as
+    C:Usersx, "command not found", on every call -- which is how the hooks were
+    broken for five weeks without a sound. So forward slashes, and quoted the
+    way bash quotes when the path holds anything bash would read as syntax."""
+    path = path.replace("\\", "/")
+    if not re.search(r"[^A-Za-z0-9_./:+,=@-]", path):
+        return path
+    return '"' + path.replace("$", "\\$").replace("`", "\\`") + '"'
+
+
+def hook_command(python=None, hook=None):
+    """The one command line every one of our hooks runs."""
+    return (f'{bash_word(python or _python())} -c "{HOOK_GUARD}" '
+            f'{bash_word(hook or HOOK_SCRIPT)}')
+
+
+def hook_entries(command, narrate_lines=False):
+    """{event: [entry]} -- what install_hooks writes.
+
+    SessionStart and UserPromptSubmit print the session note, so Claude Code has
+    to wait for them; they take a few hundredths of a second, and the timeout is
+    only what a hang could cost. The rest print nothing and are "async": Claude
+    Code starts them and does not wait, so a slow or absent engine can never
+    hold up a turn ending or a tool starting.
+
+    PreToolUse is matched to AskUserQuestion alone -- the one tool whose input
+    is worth hearing -- unless the lines between tool calls are to be read off
+    the transcript, which needs it on every tool. Notification takes no matcher:
+    its matcher is a regex over the notification kind, and "*" is not a valid
+    one. An entry missing a field its event expects can invalidate the whole
+    hooks block, silencing all of them.
+    """
+    def hook(timeout, background):
+        h = {"type": "command", "command": command, "timeout": timeout}
+        if background:
+            h["async"] = True
+        return h
+
+    return {
+        "SessionStart": [{"hooks": [hook(5, False)]}],
+        "UserPromptSubmit": [{"hooks": [hook(5, False)]}],
+        "Stop": [{"hooks": [hook(15, True)]}],
+        "Notification": [{"hooks": [hook(15, True)]}],
+        "PreToolUse": [{"matcher": "*" if narrate_lines else "AskUserQuestion",
+                        "hooks": [hook(15, True)]}],
+    }
+
+
+def _ours(entry):
+    return any("speak_hook.py" in ((h or {}).get("command") or "")
+               for h in (entry or {}).get("hooks") or [] if isinstance(h, dict))
+
+
+def _read_settings(path):
+    try:
+        with open(path, encoding="utf-8-sig") as fh:
+            settings = json.load(fh)
+    except FileNotFoundError:
+        return {}
+    if not isinstance(settings, dict):
+        raise ValueError(f"{path} is not a JSON object; not touching it")
+    return settings
+
+
+def _write_settings(path, settings):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    temp = f"{path}.{os.getpid()}.new"
+    with open(temp, "w", encoding="utf-8") as fh:
+        json.dump(settings, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    # Retried as save_state does: Windows refuses the swap while another
+    # process (Claude Code itself, reading its settings) has the file open.
+    import time
+
+    for attempt in range(10):
+        try:
+            os.replace(temp, path)
+            return
+        except PermissionError:
+            if attempt == 9:
+                try:
+                    os.remove(temp)
+                except OSError:
+                    pass
+                raise
+            time.sleep(0.02 * (attempt + 1))
+
+
+def _strip_ours(hooks, only=None):
+    """hooks with every entry of ours taken out, and any event left empty by
+    that dropped. Entries that are not ours are kept exactly as they were.
+    With `only` (a speak_hook.py path), entries of other copies count as not ours."""
+    mark = only.replace("\\", "/").lower() if only else None
+
+    def theirs(entry):
+        return mark and not any(mark in ((h or {}).get("command") or "").replace('"', "").lower()
+                                for h in (entry or {}).get("hooks") or [] if isinstance(h, dict))
+
+    def ours_alone(h):
+        return isinstance(h, dict) and "speak_hook.py" in (h.get("command") or "") \
+            and (not mark or mark in (h.get("command") or "").replace('"', "").lower())
+
+    out = {}
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            out[event] = entries
+            continue
+        kept = []
+        for e in entries:
+            if not _ours(e) or theirs(e):
+                kept.append(e)
+                continue
+            # An entry somebody shares with one of their own hooks keeps theirs.
+            rest = [h for h in (e.get("hooks") or []) if not ours_alone(h)]
+            if rest:
+                kept.append({**e, "hooks": rest})
+        if kept or not entries:
+            out[event] = kept
+    return out
+
+
+def install_hooks(path=None, command=None, narrate_lines=None):
+    """Put our hooks into a Claude Code settings file. Returns the events.
+
+    Idempotent: ours are taken out first, wherever they were, and the current
+    set written, so running it twice changes nothing and an event dropped from
+    HOOK_EVENTS in a later version is cleaned up. Everybody else's hooks, and
+    everything else in the file, are left as they were. Written whole and moved
+    into place, so Claude Code never reads half a file.
+    """
+    path = path or CLAUDE_SETTINGS
+    if narrate_lines is None:
+        narrate_lines = _lines_heard(load_state())
+    settings = _read_settings(path)
+    hooks = settings.get("hooks")
+    hooks = _strip_ours(hooks if isinstance(hooks, dict) else {})
+    for event, entries in hook_entries(command or hook_command(), narrate_lines).items():
+        hooks[event] = list(hooks.get(event) or []) + entries
+    settings["hooks"] = hooks
+    _write_settings(path, settings)
+    return list(HOOK_EVENTS)
+
+
+def remove_hooks(path=None, only=None):
+    """Take our hooks out of a settings file. True if there were any.
+
+    No file, or none of ours in it, is no write at all. `only`: just the hooks
+    that run that speak_hook.py -- an uninstaller takes its own copy's hooks
+    and leaves a checkout's, which are somebody else's.
+    """
+    path = path or CLAUDE_SETTINGS
+    try:
+        settings = _read_settings(path)
+    except (OSError, ValueError):
+        return False
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    fresh = _strip_ours(hooks, only)
+    if fresh == hooks:
+        return False
+    if fresh:
+        settings["hooks"] = fresh
+    else:
+        settings.pop("hooks", None)
+    _write_settings(path, settings)
+    return True
 
 
 def hook_health(paths=None, log_path=None):
@@ -2106,16 +2734,12 @@ def hook_health(paths=None, log_path=None):
     Returns {"events": [...], "files": [...], "backslashed": bool,
     "unguarded": bool, "missing": [...], "last": "YYYY-MM-DD HH:MM:SS" or None}.
     Read off the settings files and the hook's own trace; nothing is run.
-    `backslashed` is the one that matters: Claude Code runs a hook's command
-    through bash on Windows, and bash takes the backslashes in C:\\Users\\...
-    for escapes, so such a hook fails on every single call without a word to
-    anybody. `unguarded` is the other: a bare "python speak_hook.py" works
-    today, but the day this folder moves python exits 2, which Claude Code reads
-    as "block", and every prompt and tool call is refused. install.ps1 has
-    written the guarded line, which runs the hook through runpy, since 1.15.1.
+    `backslashed` is the one that matters: bash takes the backslashes in
+    C:\\Users\\... for escapes, so such a hook fails on every single call
+    without a word. `unguarded` is the other: a bare "python speak_hook.py"
+    exits 2 the day this folder moves, which Claude Code reads as "block".
     """
-    paths = paths or [os.path.expanduser(os.path.join("~", ".claude", "settings.json")),
-                      os.path.join(ROOT, ".claude", "settings.json")]
+    paths = paths or [CLAUDE_SETTINGS, os.path.join(ROOT, ".claude", "settings.json")]
     found = {"events": [], "files": [], "backslashed": False, "unguarded": False,
              "missing": [], "last": None}
     for path in paths:
@@ -2152,14 +2776,75 @@ def hook_health(paths=None, log_path=None):
     return found
 
 
+# --------------------------------------------------------------------------
+# an answer that found nobody home
+# --------------------------------------------------------------------------
+#
+# A Stop hook that finds the engine down starts it, but cannot wait the half
+# minute a model takes to load -- it must never hold anything up. So it leaves
+# the answer here, in this tool's own log folder, and the engine says whatever
+# is still fresh (catchupSeconds) once it is up. This is what the transcript
+# watcher's remembered offsets used to do, without reading anybody's files.
+
+PENDING_PATH = os.path.join(LOG_DIR, "pending.jsonl")
+PENDING_MAX_BYTES = 256 * 1024
+
+
+def spool(body):
+    """Keep one /hook body for an engine that is not up yet."""
+    import time
+
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        try:
+            if os.path.getsize(PENDING_PATH) > PENDING_MAX_BYTES:
+                return False                  # nobody has started an engine in ages
+        except OSError:
+            pass
+        with open(PENDING_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({**body, "at": time.time()}) + "\n")
+        return True
+    except OSError:
+        return False
+
+
+def take_spool(max_age):
+    """Everything spooled in the last max_age seconds, oldest first, and the
+    file emptied. Older entries are dropped unread."""
+    import time
+
+    taken = PENDING_PATH + f".{os.getpid()}.taking"
+    try:
+        os.replace(PENDING_PATH, taken)
+    except OSError:
+        return []
+    out = []
+    try:
+        with open(taken, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    body = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(body, dict) and time.time() - (body.get("at") or 0) <= max_age:
+                    out.append(body)
+    except OSError:
+        pass
+    try:
+        os.remove(taken)
+    except OSError:
+        pass
+    return out
+
+
 def set_voice(voice_id, state=None):
-    """Switch voices: config, and the note every new session reads at startup.
+    """Switch voices, in the config and nowhere else.
 
     Both the CLI's 'set' and the panel's dropdown come through here, so the two
-    cannot drift into doing different halves of the job.
+    cannot drift into doing different halves of the job. Sessions learn of it
+    from their hooks (session_note), not from a rewritten CLAUDE.md.
 
-    Returns (voice, announced) -- announced is False when CLAUDE.md has no
-    markers to write between, which is not an error, just nothing to do.
+    Returns (voice, announced); announced is kept for the API's reply.
     """
     state = state or load_state()
     voice, _ = resolve(voice_id, state.get("source"), state)
@@ -2170,7 +2855,10 @@ def set_voice(voice_id, state=None):
     by_engine = dict(state.get("voiceByEngine") or {})
     by_engine[engine_of(state)] = voice["id"]
     patch_state(voice=voice["id"], voiceByEngine=by_engine)
-    return voice, announce_voice(voice)
+    # Nothing else is written. Every open session hears about the new voice at
+    # its next prompt (session_note's key carries the name), and a new one at
+    # its start, so `announced` is always True now.
+    return voice, True
 
 
 def set_engine(name, state=None):
@@ -2253,11 +2941,86 @@ def post(port, path, payload=None, timeout=5):
     return json.loads(body) if body.strip() else {}
 
 
+def is_ours(health):
+    """Whether a /health answer came from this engine rather than from some
+    other program that happens to hold the port -- the same test the game
+    makes (ClaudeVoiceClient.HealthAsync): our answer always carries "ready"."""
+    return isinstance(health, dict) and "ready" in health
+
+
 def server_alive(port, timeout=1.5):
+    """Our engine's /health on `port`, or None -- None too when the port is
+    held by a program that is not us (a dev server answering 404, say)."""
     try:
-        return post(port, "/health", timeout=timeout)
+        health = post(port, "/health", timeout=timeout)
     except Exception:
         return None
+    return health if is_ours(health) else None
+
+
+def port_probe(port, timeout=2.0):
+    """('free' | 'ours' | 'stranger' | 'silent', health) for a local port.
+
+    'silent' is a port that takes the connection and then says nothing within
+    the timeout -- which could be anybody, our own engine stuck in a load
+    included, so the caller should not treat it as a stranger to be routed
+    around without another clue (see speak_server.bind_port).
+    """
+    import http.client
+    import socket
+    import urllib.error
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            pass
+    except OSError:
+        return "free", None
+    try:
+        health = post(port, "/health", timeout=timeout)
+    except (socket.timeout, TimeoutError):
+        return "silent", None
+    except urllib.error.URLError as exc:
+        if isinstance(getattr(exc, "reason", None), (socket.timeout, TimeoutError)):
+            return "silent", None
+        return "stranger", None              # HTTPError is a URLError: an answer, not ours
+    except (http.client.HTTPException, ValueError, OSError):
+        return "stranger", None              # not HTTP, not JSON, or hung up on us
+    return ("ours", health) if is_ours(health) else ("stranger", None)
+
+
+def port_owner(port):
+    """'name.exe (pid N)' for whatever listens on a local TCP port, or ''.
+
+    netstat and tasklist rather than a new dependency. Only ever asked when a
+    port turns out to be taken, so the second it can cost does not matter, and
+    the answer is the difference between "port in use" and "FaceLab's dev
+    server has your port", which somebody can actually do something about.
+    """
+    import subprocess
+
+    no_window = 0x08000000
+    try:
+        out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True,
+                             text=True, timeout=5, creationflags=no_window).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    pid = None
+    for line in out.splitlines():
+        cols = line.split()
+        if (len(cols) >= 5 and cols[0].upper() == "TCP" and cols[3].upper() == "LISTENING"
+                and cols[1].rsplit(":", 1)[-1] == str(port)):
+            pid = cols[4]
+            break
+    if not pid:
+        return ""
+    try:
+        row = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                             capture_output=True, text=True, timeout=5,
+                             creationflags=no_window).stdout.strip()
+        name = row.split('","')[0].strip('"') if row.startswith('"') else ""
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    return f"{name} (pid {pid})" if name else f"pid {pid}"
 
 
 LOG_MAX_BYTES = 8 * 1024 * 1024
@@ -2281,13 +3044,49 @@ def _rolled(path, limit=LOG_MAX_BYTES):
     return path
 
 
-def start_server(state, wait=0):
-    """Launch the engine host detached. Returns True if it is (or came) up."""
+# A hook that finds no engine starts one -- once per SPAWN_GAP seconds, not
+# once per hook: an engine that dies while starting up would otherwise get a
+# fresh copy started by every prompt and every answer.
+SPAWN_STAMP = os.path.join(LOG_DIR, "engine-spawn.stamp")
+SPAWN_GAP = 30.0
+
+
+def _claim_spawn():
+    """True for the one caller allowed to start an engine now. The stamp is
+    created O_EXCL, so two hooks at the same moment cannot both win."""
+    import time
+
+    try:
+        if time.time() - os.path.getmtime(SPAWN_STAMP) < SPAWN_GAP:
+            return False
+        os.remove(SPAWN_STAMP)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        os.close(os.open(SPAWN_STAMP, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        return True
+    except OSError:
+        return False
+
+
+def start_server(state, wait=0, from_hook=False):
+    """Launch the engine host detached. Returns True if it is (or came) up.
+
+    from_hook: the caller has just failed to reach it, and Claude Code may be
+    waiting on the caller -- so no probe before or after (each can cost 1.5 s
+    against a hung port), and at most one start per SPAWN_GAP. Returns whether
+    it started one."""
     import subprocess
     import time
 
     port = state["port"]
-    if server_alive(port):
+    if from_hook:
+        if not _claim_spawn():
+            return False
+    elif server_alive(port):
         return True
 
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -2296,15 +3095,20 @@ def start_server(state, wait=0):
     subprocess.Popen(
         [_python(), "-u", os.path.join(ROOT, "speak_server.py"), "--port", str(port)],
         stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-        creationflags=DETACHED, close_fds=True, cwd=ROOT)
+        creationflags=DETACHED, close_fds=True, cwd=_workdir())
+    if from_hook:
+        return True
 
     deadline = time.time() + wait
     while time.time() < deadline:
+        # Read again each time: when another program holds the port, the
+        # engine binds the next free one and writes that into the config.
+        port = load_state().get("port") or port
         health = server_alive(port)
         if health and health.get("ready"):
             return True
         time.sleep(1.0)
-    return bool(server_alive(port))
+    return bool(server_alive(load_state().get("port") or port))
 
 
 def start_panel(state=None):
@@ -2324,8 +3128,86 @@ def start_panel(state=None):
     subprocess.Popen(
         [_python(), os.path.join(ROOT, "panel.py"), "--port", str(state["port"])],
         stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-        creationflags=DETACHED, close_fds=True, cwd=ROOT)
+        creationflags=DETACHED, close_fds=True, cwd=_workdir())
     return True
+
+
+def _workdir():
+    """Where a process of ours stands. Not inside an installed app folder: a
+    process standing in a folder stops it being renamed, and an update swaps
+    that folder for the new one (installer.swap_in)."""
+    return DATA_DIR if INSTALL and os.path.isdir(DATA_DIR) else ROOT
+
+
+# Opening the panel when you log in: one value under HKCU's Run key, named for
+# this product. Not a shortcut in the Startup folder any more -- writing a .lnk
+# took PowerShell, started hidden from a windowless process, which is exactly
+# the pattern antivirus heuristics watch for -- and a registry value is one
+# winreg call to write and one to take away, by the panel or the uninstaller.
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+STARTUP_LNK = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu",
+                           "Programs", "Startup", "Abby for Claude.lnk")
+
+
+def login_command():
+    return f'"{_python()}" "{os.path.join(ROOT, "panel.py")}"'
+
+
+def opens_at_login():
+    """Whether the panel opens at login: our Run value, or the Startup-folder
+    shortcut versions before 2.0 wrote (still honoured until it is switched)."""
+    reg = _winreg()
+    if reg is not None:
+        try:
+            with reg.OpenKey(reg.HKEY_CURRENT_USER, RUN_KEY) as k:
+                if reg.QueryValueEx(k, PRODUCT)[0]:
+                    return True
+        except OSError:
+            pass
+    return os.path.isfile(STARTUP_LNK)
+
+
+def _names_root(text):
+    """Whether a command line (or a shortcut's bytes, decoded) names this copy."""
+    text = (text or "").replace("/", "\\").replace('"', "").lower()
+    return any(f.lower().rstrip("\\") + "\\" in text
+               for f in {os.path.abspath(ROOT), os.path.realpath(ROOT)})
+
+
+def _lnk_names_root(path):
+    """A .lnk keeps its target as plain text inside it, UTF-16 or ANSI."""
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read(65536)
+    except OSError:
+        return False
+    return _names_root(raw.decode("utf-16-le", "ignore")) or _names_root(raw.decode("mbcs", "ignore"))
+
+
+def open_at_login(on):
+    """Switch it. Switched on, this copy's Run value replaces whatever was
+    there and the old Startup-folder shortcut goes, so there is one place this
+    is decided. Switched off, only what names this copy goes: a checkout's
+    panel must not take away the installed copy's. Returns what it is now."""
+    reg = _winreg()
+    if on or _lnk_names_root(STARTUP_LNK):
+        try:
+            os.remove(STARTUP_LNK)
+        except OSError:
+            pass
+    if reg is not None:
+        try:
+            if on:
+                with reg.CreateKeyEx(reg.HKEY_CURRENT_USER, RUN_KEY, 0, reg.KEY_SET_VALUE) as k:
+                    reg.SetValueEx(k, PRODUCT, 0, reg.REG_SZ, login_command())
+            else:
+                with reg.OpenKey(reg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                                 reg.KEY_SET_VALUE | reg.KEY_QUERY_VALUE) as k:
+                    if _names_root(reg.QueryValueEx(k, PRODUCT)[0]):
+                        reg.DeleteValue(k, PRODUCT)
+        except OSError:
+            pass
+    return opens_at_login()
 
 
 def _python():

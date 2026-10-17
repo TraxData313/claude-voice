@@ -13,7 +13,7 @@ command — it is `/voice on`, never `/voice_on`.
 | `on [--panel]` | Start speaking. Loads the engine if it is cold (40-60s the first time). |
 | `off` | Stop speaking. The engine stays warm, so 'on' is instant. |
 | `toggle` | Whichever of the two you are not. |
-| `status` | Voice, engine, and whether it is following your sessions. |
+| `status` | Voice, engine, and whether Claude Code's hooks are wired. |
 | `panel` | A small window on top: what is playing, the queue, and the switches. |
 
 ## Choosing a voice
@@ -45,10 +45,10 @@ command — it is `/voice on`, never `/voice_on`.
 | `history <count>` | Utterances kept for replay, and their wavs. Default 40. |
 | `playback <mode>` | auto, instant, buffered or whole: how much speech is ready before the first word. |
 | `playback report` | What the traces say this machine needed. Reads local files, sends nothing. |
-| `narrate on\|off` | Whether the short lines said mid-work are spoken. |
+| `narrate on\|off` | Whether the short lines said mid-work are spoken (needs 'narrate transcript on'). |
+| `narrate transcript on\|off` | Read those lines off the session's transcript, the one way a hook can get them. Off by default. |
 | `thinking on\|off` | Speak a thinking block when the response said nothing else. On by default. |
 | `alerts on\|off` | Say so when the session stops for you -- a permission prompt, a question left waiting. |
-| `watch on\|off` | Follow sessions directly. Off means relying on hooks alone. |
 | `headless on\|off` | Speak runs a program started -- `claude -p` and SDK callers. Off by default. |
 | `mediakey on\|off` | Let the play/pause key on a keyboard or headphones work the pause. On by default. |
 | `source embedding\|icl` | Which clone to use. 'icl' is closer, and heavier. |
@@ -59,6 +59,9 @@ command — it is `/voice on`, never `/voice_on`.
 |---|---|
 | `start` | Load the model without turning the voice on. |
 | `kill` | Unload it and give the memory back. |
+| `hooks [install\|remove]` | Wire Claude Code's hooks into ~/.claude/settings.json, or take them out. No argument says how they stand. |
+| `register [--kind installed\|dev]` | Tell games where this copy is (a key in the user's registry). The installer does it; a git checkout opts in here. |
+| `unregister [--force]` | Take that registration away again, if it names this copy. |
 | `install breeze [--check]` | Check this machine for Breeze TTS 2, the voice that laughs, then offer to download it (about 11 GB). Asks first. |
 
 ## Keeping it current
@@ -66,7 +69,7 @@ command — it is `/voice on`, never `/voice_on`.
 | command | does |
 |---|---|
 | `version` | What this copy is. Contacts nobody -- worth quoting in a bug report. |
-| `update [--apply]` | Is there a newer version? --apply pulls it and restarts the engine. |
+| `update [--apply]` | Is there a newer version? --apply takes it and restarts the engine. |
 | `update on\|off` | Allow one look a week. Off by default: nothing is contacted until you say so. |
 
 ## Also worth knowing

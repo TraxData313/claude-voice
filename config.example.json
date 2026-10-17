@@ -9,10 +9,8 @@
   "_extraVoicesDirs": "Extra folders searched for voices, same <sex>/<culture>/<id> layout. For voices you may keep but not publish -- they stay out of this repo entirely.",
   "extraVoicesDirs": [],
 
-  "_watch": "Follow session transcripts directly rather than waiting for Claude Code to call the hooks. Works in any client, no restart. Turn off to rely on hooks alone.",
-  "watch": true,
-  "_watchCodex": "Also narrate local Codex task transcripts with the same TL;DR rule and panel controls. Restart the engine after updating the code.",
-  "watchCodex": false,
+  "_narrateFromTranscript": "The lines written between tool calls reach no hook. On, the PreToolUse hook reads them off the end of that session's transcript; off, only answers and alerts are heard. Run 'voice_cli.py hooks install' after changing it.",
+  "narrateFromTranscript": false,
   "narrate": true,
   "narrateMaxChars": 240,
 

@@ -73,9 +73,41 @@ namespace ClaudeVoiceSetup
         public static string WherePath =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "claude-voice", "where.json");
 
-        /// <summary>A copy already on this machine, from the note every running engine leaves. Null if none.</summary>
+        /// <summary>The key a copy registers itself under (docs/discovery.md): InstallDir, Kind, Launcher, Port.</summary>
+        public const string RegistryKey = @"Software\claude-voice";
+
+        private static string Registered(string name)
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RegistryKey))
+                    return key?.GetValue(name) as string;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Somebody's own copy: a git checkout, or one registered as Kind "dev". A quiet install
+        /// never touches it (2026-10-16: a game ran one in Toni's clone, found through where.json).</summary>
+        public static bool IsDevCopy(string folder)
+        {
+            if (string.IsNullOrEmpty(folder)) return false;
+            if (Directory.Exists(Path.Combine(folder, ".git"))) return true;
+            var dir = Registered("InstallDir");
+            return dir != null && Registered("Kind") == "dev" && SamePath(dir, folder);
+        }
+
+        private static bool SamePath(string a, string b)
+        {
+            try { return string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase); }
+            catch { return false; }
+        }
+
+        /// <summary>A copy already on this machine: the registered one first, then the note every running
+        /// engine leaves. Null if none.</summary>
         public static string ExistingInstall()
         {
+            var registered = Registered("InstallDir");
+            if (registered != null && File.Exists(Path.Combine(registered, "voice_lib.py"))) return registered;
             try
             {
                 if (!File.Exists(WherePath)) return null;
@@ -145,6 +177,9 @@ namespace ClaudeVoiceSetup
 
         private async Task RunStepsAsync(InstallPlan plan, CancellationToken cancel)
         {
+            if (plan.Quiet && IsDevCopy(plan.Folder))
+                throw new InstallException("The claude-voice on this computer is a developer's own copy (" + plan.Folder +
+                                           "), so it is not installed into from here. Its owner adds engines with its own setup.ps1.");
             Say($"Installing claude-voice into {plan.Folder}, engine {plan.Engine.Id}.");
             Directory.CreateDirectory(plan.Folder);
             if (plan.DataDir.Length > 0) Directory.CreateDirectory(plan.DataDir);

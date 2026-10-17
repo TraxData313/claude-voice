@@ -287,5 +287,92 @@ class TheBreezeWindow(unittest.TestCase):
         self.assertEqual(one.setup_go.cget("text"), "try again")
 
 
+class EngineSwitch(unittest.TestCase):
+    """Unloading went OFF, ON, OFF: a poll asked before the click came back
+    with the engine still up and was drawn. These drive the switch's own
+    bookkeeping with stand-in widgets, so nothing here needs an engine."""
+
+    def window(self):
+        from unittest.mock import MagicMock
+        one = panel.Panel.__new__(panel.Panel)
+        one.port = 1
+        one.drawn = {"engine_up": True}
+        one.pending = {}
+        one.engine_gen = 0
+        one.misses = 0
+        one.transport = [MagicMock()]
+        for name in ("power", "engine_btn", "status", "now", "whose"):
+            setattr(one, name, MagicMock())
+        one.icons_ok = True
+        one.painted = []
+        one.paint_engine = one.painted.append
+        one.paint_power = lambda _playing: None
+        one.errands = []
+        one.errand = one.errands.append
+        return one
+
+    def test_unloading_voids_every_poll_already_asked(self):
+        one = self.window()
+        panel.Panel.unload_engine(one)
+        self.assertEqual(one.engine_gen, 1)
+        self.assertEqual(one.painted, [False])
+        self.assertEqual(len(one.errands), 1)        # off, then quit, in order
+
+    def test_an_engine_still_answering_on_its_way_out_is_not_drawn(self):
+        one = self.window()
+        panel.Panel.unload_engine(one)
+        panel.Panel.render(one, {"ready": True, "enabled": True})
+        self.assertEqual(one.painted, [False])       # no ON in between
+        panel.Panel.render_down(one)
+        self.assertNotIn("unloading", one.pending)
+        self.assertEqual(one.painted, [False, False])
+
+    def test_one_missed_poll_is_not_an_engine_gone(self):
+        one = self.window()
+        panel.Panel.render_down(one)
+        self.assertEqual(one.painted, [])
+        panel.Panel.render_down(one)
+        self.assertEqual(one.painted, [False])
+        panel.Panel.render_down(one)                 # already says so
+        self.assertEqual(one.painted, [False])
+
+
+class AtomicConfig(unittest.TestCase):
+    """A read landing mid-write used to come back as the defaults."""
+
+    def setUp(self):
+        import os
+        import tempfile
+        import voice_lib
+        self.voice_lib = voice_lib
+        self.dir = tempfile.mkdtemp()
+        self.was = voice_lib.CONFIG_PATH
+        voice_lib.CONFIG_PATH = os.path.join(self.dir, "config.json")
+
+    def tearDown(self):
+        import shutil
+        self.voice_lib.CONFIG_PATH = self.was
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_a_torn_file_reads_as_the_last_good_one(self):
+        vl = self.voice_lib
+        vl.patch_state(voice="max", enabled=True)
+        with open(vl.CONFIG_PATH, "w", encoding="utf-8") as fh:
+            fh.write('{"voice": "ma')                 # half of a write
+        self.assertEqual(vl.load_state()["voice"], "max")
+
+    def test_writes_from_many_threads_lose_nothing(self):
+        import threading
+        vl = self.voice_lib
+        keys = [f"k{i}" for i in range(16)]
+        threads = [threading.Thread(target=vl.patch_state, kwargs={k: True}) for k in keys]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        state = vl.load_state()
+        self.assertTrue(all(state.get(k) for k in keys))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -22,7 +22,9 @@ Also: the embedding extractor and the ICL prompt encoder cannot share a process.
 Loading the ICL encoder tears the talker model down underneath the engine.
 """
 
+import array
 import ctypes
+import json
 import os
 from ctypes import (CFUNCTYPE, POINTER, c_char_p, c_float, c_int, c_int64,
                     c_uint8, c_void_p)
@@ -353,6 +355,157 @@ def _existing_jvm_env(jvm):
     return env
 
 
+# --------------------------------------------------------------------------
+# Windows refusing Studio's DLLs
+# --------------------------------------------------------------------------
+#
+# Smart App Control -- on by default on a clean Windows 11 install -- refuses
+# to load an unsigned DLL with no reputation, and qwen3_tts.dll is one
+# (2026-10-17 on Toni's machine: Code Integrity event 3077). It never reached
+# us as that. The JVM's own loader printed "An Application Control policy has
+# blocked this file" to stdout, carried on, and the first native call then
+# failed as "java exception during CallLongMethod", which says nothing anybody
+# can act on.
+#
+# And asking by loading is no good either: every refused load -- a probe
+# included -- is a Code Integrity event and a Windows Security toast on the
+# user's screen, which is the very complaint (2026-10-17: three toasts in ten
+# minutes, all from probes). So the answer comes from what Windows already
+# says, never from trying:
+#
+#   1. Smart App Control enforcing (registry) -> refused, nothing loaded.
+#   2. A block noted on an earlier run, for this same DLL -> refused, nothing
+#      loaded. The note is dropped when the DLL changes, or when it was SAC's
+#      and SAC has since been turned off.
+#   3. Otherwise (SAC off or evaluating, nothing noted) the DLLs are mapped
+#      once without running anything, before the JVM. A refusal there is some
+#      other policy (an organisation's WDAC); it costs one event, is noted,
+#      and is never tried again.
+
+ERROR_BLOCKED_BY_POLICY = (4551, 4556)   # "An Application Control policy has blocked this file"
+_DONT_RESOLVE_DLL_REFERENCES = 0x1
+QWEN_DLL = "qwen3_tts.dll"
+
+# Where a block is remembered. Beside where.json, outside the repo, per user.
+BLOCK_NOTE = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+                          "claude-voice", "qwen-blocked.json")
+
+
+class BlockedByPolicy(RuntimeError):
+    """Windows code integrity refused (or would refuse) one of Studio's DLLs."""
+
+    def __init__(self, path, smart_app_control=None):
+        self.path = path
+        self.smart_app_control = smart_app_control
+        name = os.path.basename(path)
+        if smart_app_control in ("on", "evaluation"):
+            msg = (f"Windows Smart App Control blocked the Qwen engine "
+                   f"({name} is not signed)")
+        else:
+            msg = f"a Windows Application Control policy blocked the Qwen engine ({name})"
+        super().__init__(msg)
+
+
+def smart_app_control():
+    """'on', 'evaluation', 'off', or None where Windows does not say.
+
+    HKLM, SYSTEM/CurrentControlSet/Control/CI/Policy, value
+    VerifiedAndReputablePolicyState: 1 enforcing, 2 evaluating, 0 off. Readable
+    without administrator rights.
+    """
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\CurrentControlSet\Control\CI\Policy") as key:
+            value, _ = winreg.QueryValueEx(key, "VerifiedAndReputablePolicyState")
+    except (OSError, ImportError):
+        return None
+    return {0: "off", 1: "on", 2: "evaluation"}.get(value)
+
+
+def _stamp(path):
+    try:
+        st = os.stat(path)
+        return [st.st_size, st.st_mtime_ns]
+    except OSError:
+        return None
+
+
+def noted_block(sac=None):
+    """The DLL path a previous run found blocked, if that still holds; else None."""
+    try:
+        with open(BLOCK_NOTE, encoding="utf-8") as fh:
+            note = json.load(fh)
+        path = note["path"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if _stamp(path) != note.get("stamp"):
+        return None                     # a new build of the DLL: it gets its chance
+    if note.get("sac") in ("on", "evaluation") and sac == "off":
+        return None                     # SAC's block, and SAC is off now
+    return path
+
+
+def note_block(path, sac):
+    try:
+        os.makedirs(os.path.dirname(BLOCK_NOTE), exist_ok=True)
+        with open(BLOCK_NOTE, "w", encoding="utf-8") as fh:
+            json.dump({"path": path, "stamp": _stamp(path), "sac": sac}, fh)
+    except OSError:
+        pass
+
+
+def _map_without_running():
+    """LoadLibraryExW(DONT_RESOLVE_DLL_REFERENCES) and FreeLibrary, bound."""
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    load = k32.LoadLibraryExW
+    load.restype = wintypes.HMODULE
+    load.argtypes = [wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD]
+    free = k32.FreeLibrary
+    free.argtypes = [wintypes.HMODULE]
+
+    def probe(path):
+        handle = load(path, None, _DONT_RESOLVE_DLL_REFERENCES)
+        if handle:
+            free(handle)
+            return 0
+        return ctypes.get_last_error() or -1
+    return probe
+
+
+def refusal(studio_dir, probe=None):
+    """A BlockedByPolicy for Studio's DLLs if Windows refuses them, else None.
+
+    Decided from the registry and the note first; see the comment above. Only
+    reaches `probe` (which maps a DLL without running it, and returns its
+    Windows error or 0) when neither already says. Tests pass their own.
+    """
+    sac = smart_app_control()
+    main = os.path.join(studio_dir, QWEN_DLL)
+    if sac == "on":
+        return BlockedByPolicy(main, sac)
+    noted = noted_block(sac)
+    if noted:
+        return BlockedByPolicy(noted, sac)
+    try:
+        names = sorted(os.listdir(studio_dir))
+        probe = probe or _map_without_running()
+    except (OSError, AttributeError):
+        return None
+    # qwen3_tts.dll first: it is the one that is unsigned on every machine.
+    dlls = sorted((n for n in names if n.lower().endswith(".dll")),
+                  key=lambda n: (n.lower() != QWEN_DLL, n.lower()))
+    for name in dlls:
+        path = os.path.join(studio_dir, name)
+        if probe(path) in ERROR_BLOCKED_BY_POLICY:
+            note_block(path, sac)
+            return BlockedByPolicy(path, sac)
+    return None
+
+
 class Engine:
     """QwenEngine, minus the user interface.
 
@@ -371,6 +524,13 @@ class Engine:
                            (jvm_dll, "Studio's bundled JVM")):
             if not os.path.exists(path):
                 raise FileNotFoundError(f"{what} not found: {path}")
+
+        # Before anything of Studio's is loaded -- its JVM, which a process
+        # gets one of and cannot take down, included. Decided without trying a
+        # load whenever Windows already says; see refusal().
+        refused = refusal(studio_dir)
+        if refused:
+            raise refused
 
         # ggml / cuBLAS live next to qwen3_tts.dll and are found via PATH.
         os.environ["PATH"] = studio_dir + os.pathsep + os.environ.get("PATH", "")
@@ -576,7 +736,11 @@ class Engine:
                     return 1
                 state["samples"] += n
                 state["pieces"] += 1
-                if on_piece(c.audio[0:n], c) is False:
+                # Copied out as bytes, not sliced: c.audio[0:n] builds a list
+                # of n Python floats while holding the GIL.
+                piece = array.array("f")
+                piece.frombytes(ctypes.string_at(c.audio, n * 4))
+                if on_piece(piece, c) is False:
                     state["stopped"] = True
                     return 0
                 if state["samples"] > budget:
@@ -645,19 +809,19 @@ class Engine:
 
 
 def write_wav(path, samples, rate=SAMPLE_RATE):
+    """Mono 16-bit PCM. The conversion is voice_lib.pcm16, which does it in
+    numpy rather than a sample at a time: this runs once per played piece on
+    the engine thread, and as a Python loop it was a tenth of a second of GIL
+    per twelve seconds of audio that the HTTP threads spent waiting."""
     import wave
 
-    peak = max((abs(s) for s in samples), default=0.0)
-    scale = (0.99 / peak) if peak > 1.0 else 1.0
-    pcm = bytearray()
-    for s in samples:
-        v = int(max(-1.0, min(1.0, s * scale)) * 32767)
-        pcm += v.to_bytes(2, "little", signed=True)
+    import voice_lib
 
+    pcm = voice_lib.pcm16(samples)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with wave.open(path, "wb") as fh:
         fh.setnchannels(1)
         fh.setsampwidth(2)
         fh.setframerate(rate)
-        fh.writeframes(bytes(pcm))
+        fh.writeframes(pcm)
     return len(samples) / rate

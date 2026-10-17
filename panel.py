@@ -50,6 +50,15 @@ import voice_lib
 
 POLL_SECONDS = 0.5
 DRAIN_MS = 120
+# How long a burst of resize events is gathered before the picture is refitted
+# once for all of them. Short enough that a drag still feels live.
+SETTLE_MS = 30
+# How long the engine switch believes its own click over what the polls say.
+# Loading is ended early by the first answer from the new engine, and unloading
+# by the first poll that finds nobody there; these are only the give-up times
+# for an engine that never came up, or never went away.
+START_HOLD = 120
+UNLOAD_HOLD = 15
 # How long the volume slider waits, after you stop moving it, before saying so.
 SEND_MS = 160
 # Tall enough to open with a proper picture of her at the bottom rather than a
@@ -106,28 +115,11 @@ AUTHOR = "TraxData313"
 AUTHOR_URL = "https://github.com/TraxData313"
 REPO_URL = "https://github.com/TraxData313/claude-voice"
 
-# What Windows opens when you log in is whatever is in this folder, and it is
-# per-user -- which is why nothing here needs administrator rights, the same
-# reason the installer does not. The name matches the Desktop shortcut, so the
-# two are one icon in two places rather than two things called the same.
-STARTUP_DIR = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows",
-                           "Start Menu", "Programs", "Startup")
-STARTUP_LNK = os.path.join(STARTUP_DIR, f"{APP_NAME}.lnk")
-# Writing a .lnk means COM, and there is no binding for it in a project with no
-# dependencies -- so it is PowerShell's WScript.Shell, the same object
-# make_shortcut.ps1 hands the Desktop icon to, writing the same shortcut.
-#
-# The values arrive through the environment rather than on the command line. A
-# repo path with a space in it is the obvious way this breaks, and quoting
-# PowerShell inside Python inside a shell is three chances to get it wrong.
-SHORTCUT_PS = ("$s = New-Object -ComObject WScript.Shell; "
-               "$l = $s.CreateShortcut($env:CV_LINK); "
-               "$l.TargetPath = $env:CV_EXE; "
-               "$l.Arguments = $env:CV_ARGS; "
-               "$l.WorkingDirectory = $env:CV_DIR; "
-               "$l.Description = $env:CV_TEXT; "
-               "if (Test-Path $env:CV_ICON) { $l.IconLocation = \"$($env:CV_ICON),0\" }; "
-               "$l.Save()")
+# Opening with Windows is one value under HKCU's Run key (voice_lib.open_at_login):
+# per-user, so it needs no administrator rights, and written with winreg rather
+# than by a hidden PowerShell making a .lnk in the Startup folder -- the shape
+# antivirus heuristics watch for. A Startup-folder shortcut from before is still
+# read as "on", and goes the first time the box is switched.
 NO_WINDOW = 0x08000000
 
 # Dark is a set of colours plus a change of ttk theme. The native Windows theme
@@ -565,49 +557,18 @@ def _sane_size(value, fallback=FACE):
 
 
 def starts_with_windows():
-    """Whether the login shortcut is there. This is the whole of that setting.
-
-    There is no config key behind the tick box: Windows opens what is in that
-    folder, so the folder is the truth, and a key beside it would only be a
-    second opinion capable of disagreeing with it.
-    """
-    return os.path.isfile(STARTUP_LNK)
+    """Whether the panel opens at login. There is no config key behind the tick
+    box: Windows reads the Run key, so that is the truth, and a setting beside it
+    would only be a second opinion capable of disagreeing with it."""
+    return voice_lib.opens_at_login()
 
 
 def make_startup_shortcut():
-    """Write the login shortcut. Says nothing -- the caller re-reads the folder.
-
-    A quarter of a second, measured, which is why it is done on the Tk thread
-    and read straight back. A tick box that waits on a thread for its answer is
-    a tick box that is briefly wrong, and this one is only ever pressed on
-    purpose.
-    """
-    env = dict(os.environ,
-               CV_LINK=STARTUP_LNK,
-               # pythonw where there is one, so logging in does not also open a
-               # console window behind the panel. voice_lib picks it by the same
-               # rule for the engine and for the Desktop icon; one rule, one
-               # place, even though the name says it is private.
-               CV_EXE=voice_lib._python(),
-               CV_ARGS=f'"{os.path.join(voice_lib.ROOT, "panel.py")}"',
-               CV_DIR=voice_lib.ROOT,
-               CV_TEXT="Abby, and what she is saying -- the claude-voice panel",
-               CV_ICON=os.path.join(ICON_DIR, "abby.ico"))
-    try:
-        os.makedirs(STARTUP_DIR, exist_ok=True)
-        subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
-                        "-Command", SHORTCUT_PS],
-                       capture_output=True, timeout=30, env=env,
-                       creationflags=NO_WINDOW)
-    except (OSError, subprocess.SubprocessError):
-        pass
+    voice_lib.open_at_login(True)
 
 
 def drop_startup_shortcut():
-    try:
-        os.remove(STARTUP_LNK)
-    except OSError:
-        pass
+    voice_lib.open_at_login(False)
 
 
 def _descendants(widget):
@@ -683,6 +644,20 @@ class Panel:
         self.session_vars = {}       # transcript path -> its checkbox
         self.drawn = {}              # last drawn content, to skip pointless redraws
         self.pending = {}            # clicked, not yet confirmed by a poll
+        # Bumped by every press of the engine switch. Each poll is stamped with
+        # the number it started under, and an answer stamped with an older one
+        # is thrown away: it was asked before the click, so whatever it says
+        # about the engine is already out of date. This is what stopped the
+        # switch going OFF, ON, OFF -- the poll in flight as you unloaded came
+        # back with the engine still up and was drawn.
+        self.engine_gen = 0
+        self.misses = 0              # polls in a row that got no answer
+        # Config writes, in click order and off the Tk thread. A write is a
+        # read and a replace of a file four other programs also use, and the
+        # antivirus looks at every one of them -- small, until it is not, and
+        # then it was the button that stuck.
+        self.writes = queue.Queue()
+        threading.Thread(target=self._write_loop, name="config", daemon=True).start()
         self.width = 0
         self.volume_send = None      # a drag waiting to be told to the engine
         self.echoing = False         # drawing the slider, rather than being dragged
@@ -690,6 +665,7 @@ class Panel:
         # deliver another resize event -- which would arrive in the middle of
         # this one. Doing that to any depth is a hang, so it is done once.
         self.drawing_art = False
+        self.settle_job = None       # a refit booked by _on_configure, not yet run
         self.icons = Icons()
         self.art_pics = Icons(ART_DIR)     # the big picture, in its own folder
         # One transparent pixel, held for as long as the window is. The two
@@ -790,9 +766,9 @@ class Panel:
         self.wear_icon()
         root.wm_attributes("-topmost", self.on_top.get())
         root.protocol("WM_DELETE_WINDOW", self.close)
-        root.bind("<Configure>", self._rewrap)
+        root.bind("<Configure>", self._on_configure)
 
-        head = ttk.Frame(root)
+        head = self.head = ttk.Frame(root)
         head.pack(fill="x", padx=8, pady=(8, 0))
 
         # A strip along the very top, the way an ordinary window has one, and
@@ -883,21 +859,37 @@ class Panel:
         said.pack(side="left", fill="x", expand=True)
         # Who is talking goes above what they said: you read down to the words
         # already knowing whose they are, rather than back up to find out.
+        #
+        # A grid with every row's height reserved, rather than rows packed and
+        # unpacked as they had something to say. Each pack and unpack re-flowed
+        # the whole window -- the picture refitted, the lists moved -- and the
+        # engine switch alone went through three of them in a second (a
+        # two-line "starting" message, the load bar, the mood). That was the
+        # jump. A row that is blank now keeps its place instead.
+        said.columnconfigure(0, weight=1)
         self.whose = ttk.Label(said, text="", font=FONT_SMALL, foreground=GREY, anchor="w")
-        self.whose.pack(fill="x")
+        self.whose.grid(row=0, column=0, sticky="ew")
         self.dim.append(self.whose)
         self.now = ttk.Label(said, text="…", font=FONT_BOLD, justify="left",
-                             wraplength=270, anchor="w")
-        self.now.pack(fill="x", pady=(1, 0))
-        # How it was told to sound, under the words it belongs to. Only Qwen
-        # takes one and most lines do not carry one, so this row has no height
-        # at all until there is something to put in it.
+                             wraplength=270, anchor="nw")
+        self.now.grid(row=1, column=0, sticky="new", pady=(1, 0))
+        # Two lines at least: every message the engine switch shows fits in
+        # two, so going from one of them to another moves nothing. A spoken
+        # line longer than that still grows the row, which is the one change
+        # of height worth having.
+        said.rowconfigure(1, minsize=2 * tkfont.Font(font=FONT_BOLD).metrics("linespace") + 1)
+        # How it was told to sound, under the words it belongs to. Blank when
+        # the line carries none, but the row stays: see above.
         self.mood = ttk.Label(said, text="", font=FONT_SMALL, justify="left",
                               wraplength=270, anchor="w")
+        self.mood.grid(row=2, column=0, sticky="ew")
+        said.rowconfigure(2, minsize=self.mood.winfo_reqheight())
         self.moods = [self.mood]
         # How far a model load has got, under the line that is waiting for it.
-        # Packed only while one is under way, so it takes no room otherwise.
+        # Shown only while one is under way, but its row is always reserved,
+        # so the bar appearing and going again moves nothing else.
         self.load_bar = ttk.Progressbar(said, mode="determinate", maximum=100)
+        said.rowconfigure(3, minsize=self.load_bar.winfo_reqheight() + 4)
 
         bar = ttk.Frame(head)
         bar.pack(fill="x", pady=(6, 0))
@@ -1070,6 +1062,11 @@ class Panel:
         self.status = ttk.Label(credit, text="", font=FONT_SMALL, foreground=GREY)
         self.status.pack(side="right")
         self.dim += [made, dot, self.status]
+        # The whole sentence when the engine had to do something on its own --
+        # Windows blocking Qwen, another program holding the port. The row
+        # only has room for the start of it.
+        self.notice = ""
+        self.tips["status"] = Tip(self.status, lambda: self.notice, self.dark.get)
 
 
         # Her, right above the credit -- the picture is what she looks like,
@@ -1461,7 +1458,7 @@ class Panel:
         out whether it works.
         """
         on = bool(self.auto_update.get())
-        voice_lib.patch_state(updateCheck=on)
+        self.remember(updateCheck=on)
         if on:
             self.look_for_update()
         else:
@@ -1555,8 +1552,9 @@ class Panel:
                 if ok:
                     self.update_reopen = True     # the button says the rest
                     self.update_msg = f"updated to {update_check.shown_version()}"
-                    if update_check.local().get("needsSetup"):
-                        self.update_msg += " -- run setup.ps1 too"
+                    # An installed copy's update re-ran the install itself.
+                    if update_check.local().get("needsSetup") and not voice_lib.INSTALL:
+                        self.update_msg += " -- run install.ps1 too"
                 else:
                     # The first line is the refusal itself; the rest is detail,
                     # and detail is what the log is for.
@@ -1568,7 +1566,7 @@ class Panel:
 
     def toggle_dark(self):
         self.apply_theme()
-        voice_lib.patch_state(panelDark=bool(self.dark.get()))
+        self.remember(panelDark=bool(self.dark.get()))
 
     @staticmethod
     def _rows(parent, height, expand=False):
@@ -1604,6 +1602,36 @@ class Panel:
         tree.pack(fill="both" if expand else "x", expand=expand, padx=8)
         return tree
 
+    def _on_configure(self, event):
+        """The window, or the rows above and below the lists, changed size.
+
+        Bound on the root, and the root is in every widget's bindtags -- so
+        this used to run for every label, button and canvas that changed size,
+        and each run settled the whole layout and refitted the picture. A
+        poll that changed one line of text set off dozens of them, and a
+        refit could resize the window, which started it all again. That was
+        most of the stutter.
+
+        Now only three widgets count: the window itself, and the two frames
+        whose height decides how much room is left for her. Everything else's
+        size change shows up in one of those anyway. And it is gathered: the
+        first event books one settle a moment later, and the rest of the burst
+        rides on that one.
+        """
+        widget = event.widget
+        watched = (self.root, getattr(self, "head", None), getattr(self, "sessions", None))
+        if not any(widget is w for w in watched):
+            return
+        if getattr(self, "settle_job", None) is None:
+            self.settle_job = self.root.after(SETTLE_MS, self._settle)
+
+    def _settle(self):
+        self.settle_job = None
+        try:
+            self._rewrap()
+        except tk.TclError:
+            pass                                  # the window is going away
+
     def _rewrap(self, _event=None):
         """Keep the now-playing line wrapping to the window, not past it.
 
@@ -1629,7 +1657,7 @@ class Panel:
         away is what makes possible -- see hold_the_floor.
         """
         self.art_open = not self.art_open
-        voice_lib.patch_state(panelArt=self.art_open)
+        self.remember(panelArt=self.art_open)
         self.paint_art()
         self.draw_art(force=True)
 
@@ -1690,20 +1718,31 @@ class Panel:
     # -- talking to the engine ---------------------------------------------
     def _poll_loop(self):
         while not self.stopping.is_set():
+            gen = self.engine_gen                # read before asking -- see __init__
             try:
                 data = voice_lib.post(self.port, "/state", timeout=3)
             except Exception:
                 data = None                      # nobody home; the UI says so
-            self.inbox.put(data)
+                # The engine may have moved: when another program holds its
+                # port it takes the next free one and writes that into the
+                # config. Follow it there rather than calling it down.
+                try:
+                    self.port = voice_lib.load_state().get("port") or self.port
+                except Exception:
+                    pass
+            self.inbox.put((gen, data))
             self.stopping.wait(POLL_SECONDS)
 
     def _drain(self):
         latest, got = None, False
         while True:                              # only the newest one matters
             try:
-                latest, got = self.inbox.get_nowait(), True
+                gen, data = self.inbox.get_nowait()
             except queue.Empty:
                 break
+            # Asked before the engine switch was last pressed: stale.
+            if gen == self.engine_gen:
+                latest, got = data, True
         if got:
             try:
                 self.render(latest)
@@ -1729,8 +1768,29 @@ class Panel:
 
         threading.Thread(target=go, name="act", daemon=True).start()
 
+    def errand(self, job):
+        """Run job on the config thread, after every write asked for before it."""
+        writes = getattr(self, "writes", None)
+        if writes is None:                       # a half-built panel, in tests
+            return job()
+        writes.put(job)
+
+    def remember(self, **changes):
+        """Write settings to the config, off the Tk thread and in click order."""
+        self.errand(lambda: voice_lib.patch_state(**changes))
+
+    def _write_loop(self):
+        while True:
+            job = self.writes.get()
+            if job is None:
+                return
+            try:
+                job()
+            except Exception:
+                pass                    # a setting not saved is not worth a crash
+
     def toggle_hide_game(self):
-        voice_lib.patch_state(hideGameVoices=bool(self.hide_game.get()))
+        self.remember(hideGameVoices=bool(self.hide_game.get()))
         self.drawn.pop("voices", None)       # redraw the list on the next poll
 
     def toggle_top(self):
@@ -1743,11 +1803,11 @@ class Panel:
         for win in (self.settings, self.typer, self.setup_win):
             if win is not None and win.winfo_exists():
                 win.wm_attributes("-topmost", on)
-        voice_lib.patch_state(panelTopmost=on)
+        self.remember(panelTopmost=on)
 
     def toggle_at_open(self):
         """Only ever about the next time. Nothing starts or stops here."""
-        voice_lib.patch_state(panelAutostart=bool(self.at_open.get()))
+        self.remember(panelAutostart=bool(self.at_open.get()))
 
     def open_up(self, st):
         """Load an engine and turn the voice on, once, as the window opens.
@@ -1771,10 +1831,10 @@ class Panel:
         This can happen while there is no engine to post to -- the one being
         started a line earlier is still loading -- and the config is what that
         engine reads as it comes up. An engine already running hears it just as
-        quickly, because the watcher re-reads that file every sweep. It is the
+        quickly: it reads that file afresh for every hook call. It is the
         same write the engine's own /enabled does, which is why the two agree.
         """
-        voice_lib.patch_state(enabled=True)
+        self.remember(enabled=True)
         self.hold("enabled")
         self.drawn["enabled"] = True
         self.paint_power(True)
@@ -1814,6 +1874,9 @@ class Panel:
         being said is whether it is running, which is what the colour is for.
         Only the words under the pointer change.
         """
+        if self.drawn.get("engine_paint", "never") == up:
+            return
+        self.drawn["engine_paint"] = up
         face, hover = POWER_DEAD if up is None else (POWER_ON if up else POWER_OFF)
         if not self.icons_ok and up is not None:
             self.engine_btn.configure(text="engine off" if up else "engine on")
@@ -1836,19 +1899,47 @@ class Panel:
         The off is written straight to the config rather than posted, because
         these two have to happen in that order and the second one is what stops
         the engine answering. The panel already writes its own settings there,
-        and the watcher re-reads that file every sweep.
+        and the engine reads that file afresh for every hook call.
         """
-        voice_lib.patch_state(enabled=False)
+        # Optimistic, and it stays that way: every poll already asked is void
+        # (engine_gen), and until a poll finds nobody there, an engine still
+        # answering on its way out is not drawn (the "unloading" hold).
+        self.engine_gen += 1
+        self.pending.pop("engine", None)
+        self.hold("unloading", UNLOAD_HOLD)
         self.hold("enabled")
         self.drawn["enabled"] = False
         self.drawn["engine_up"] = False
+        self.drawn["engine_loading"] = False
+        self.drawn["transport"] = False
         self.paint_power(None)                 # no engine, so no idea
+        for b in self.transport:
+            b.state(["disabled"])
+        self.power.configure(state="disabled")
         self.paint_engine(False)               # answer the click at once
         self.status.configure(text="engine: unloading…")
-        self.act("/quit")
+        port = self.port
+
+        # The off first, then the quit, in that order and on the config thread.
+        # A short timeout: an engine that does not answer a quit at once is
+        # already on its way out, and this must not hold up the next write.
+        def off_then_quit():
+            voice_lib.patch_state(enabled=False)
+            try:
+                voice_lib.post(port, "/quit", {}, timeout=3)
+            except Exception:
+                pass
+
+        self.errand(off_then_quit)
 
     def start_engine(self):
-        self.hold("engine", 25)
+        self.engine_gen += 1                   # see unload_engine
+        self.pending.pop("unloading", None)
+        self.hold("engine", START_HOLD)
+        self.misses = 0
+        # The window no longer says "not running", so the next time it has to,
+        # it must draw it again rather than think it already has.
+        self.drawn["down"] = False
         self.drawn["engine_up"] = True         # so a second press unloads it
         self.now.configure(text="starting the engine — the first model load "
                                 "takes 40 to 60 seconds")
@@ -1859,13 +1950,17 @@ class Panel:
         self.drawn["engine_loading"] = True
         self.paint_engine(None)
         self.engine_btn.configure(state="disabled")
-        threading.Thread(target=lambda: voice_lib.start_server(voice_lib.load_state()),
-                         name="start", daemon=True).start()
+        self.drawn["transport"] = False        # so the first reply enables it again
         # Unloading turned the voice off, and has to (see unload_engine). Loading
         # has to undo that, or the engine button reads as a restart and is
         # really a mute: the engine comes back, a spoken test line works, and
         # every session stays silent. Twice in one morning, 2026-09-29.
         self.turn_voice_on()
+        # Launched from the config thread so it starts after that write, and
+        # on a thread of its own so its health checks do not hold up the next.
+        self.errand(lambda: threading.Thread(
+            target=lambda: voice_lib.start_server(voice_lib.load_state()),
+            name="start", daemon=True).start())
 
     # A click has to survive the next poll, which was already in flight and
     # still says otherwise. Without this the tick you just made flickers back.
@@ -1885,16 +1980,28 @@ class Panel:
     def render(self, st):
         if st is None:
             return self.render_down()
-        for b in self.transport:
-            b.state(["!disabled"])
-        self.power.configure(state="normal")
-        self.engine_btn.configure(state="normal")
+        if self.held("unloading"):
+            # Asked to go and still answering on its way out. Drawing this
+            # would paint the switch back on for a poll or two.
+            return
+        self.misses = 0
+        self.drawn["down"] = False
+        if self.drawn.get("transport") is not True:
+            self.drawn["transport"] = True
+            for b in self.transport:
+                b.state(["!disabled"])
+            self.power.configure(state="normal")
+            self.engine_btn.configure(state="normal")
         # It answered, so the wait is over whatever the clock said. The hold is
         # only there to stop the window flashing "engine not running" during a
         # load; a reply is better evidence than a countdown.
         self.pending.pop("engine", None)
-        self.drawn["engine_loading"] = False
-        self.paint_engine(True)
+        # Up, but still loading its model, is neither colour yet -- it was
+        # painted green on the first reply, then sat green and silent for the
+        # rest of a minute. Still pressable, so a load can be given up on.
+        loading = bool(st.get("loading")) or (not st.get("ready") and not st.get("error"))
+        self.drawn["engine_loading"] = loading
+        self.paint_engine(None if loading else True)
 
         # Engine first of the three: it decides what the catalogue contains,
         # and stand_in reads it to choose which portrait a voice borrows.
@@ -1932,7 +2039,6 @@ class Panel:
         self.fill(self.hist_list, "history", st.get("history") or [])
 
         self.render_sessions(st.get("sessions") or [], st.get("voice"))
-        self.render_voices(st)
 
         # The switch says whether she is talking or held, which is not the same
         # question as whether the voice is on at all: "off" is a setting and
@@ -1965,8 +2071,11 @@ class Panel:
                 finally:
                     self.echoing = False
 
+        self.notice = " ".join(n for n in (st.get("notice"), st.get("portNote")) if n)
         if st.get("error"):
             note = f"engine failed: {one_line(st['error'], 28)}"
+        elif self.notice:
+            note = one_line(self.notice, 34)
         elif not st.get("ready") or st.get("loading"):
             note = "engine: loading the model…"
         elif st.get("speaking"):
@@ -1977,8 +2086,6 @@ class Panel:
             note += " · held"
         elif not st.get("enabled"):
             note += " · voice off"
-        elif not st.get("watching"):
-            note += " · not watching"
         self.status.configure(text=note)
 
     def show_loading(self, load, cur):
@@ -1992,7 +2099,7 @@ class Panel:
         if not load:
             if self.drawn.get("load_bar"):
                 self.load_bar.stop()
-                self.load_bar.pack_forget()
+                self.load_bar.grid_remove()
                 self.drawn["load_bar"] = None
             return
         mins, secs = divmod(int(load.get("seconds") or 0), 60)
@@ -2012,14 +2119,28 @@ class Panel:
             if mode == "indeterminate":
                 self.load_bar.start(40)
             if not self.drawn.get("load_bar"):
-                self.load_bar.pack(fill="x", pady=(4, 0))
+                self.load_bar.grid(row=3, column=0, sticky="ew", pady=(4, 0))
             self.drawn["load_bar"] = mode
         if frac is not None:
             self.load_bar["value"] = frac * 100
 
     def render_down(self):
-        if self.held("engine"):
+        if self.held("unloading"):
+            self.pending.pop("unloading", None)   # gone, as asked: draw it at once
+        elif self.held("engine"):
             return                                # we just asked it to start
+        else:
+            # One poll that timed out is not an engine gone: it is usually one
+            # busy synthesising. A second in a row is believed. A refused
+            # connection fails at once, so a real exit still shows within a
+            # second.
+            self.misses += 1
+            if self.misses < 2 and self.drawn.get("engine_up"):
+                return
+        if self.drawn.get("down"):
+            return                                # already says so
+        self.drawn["down"] = True
+        self.drawn["transport"] = False
         self.now.configure(text="engine not running")
         self.whose.configure(text="nothing is being spoken anywhere")
         for b in self.transport:
@@ -2146,7 +2267,7 @@ class Panel:
         drawn = int(self.face.cget("width"))
         self.size_box.set(str(drawn))             # say what was actually done
         self.size_box.selection_clear()
-        voice_lib.patch_state(panelFace=want)
+        self.remember(panelFace=want)
         self.width = 0
         self._rewrap()
         self.hold_the_floor()
@@ -2266,17 +2387,19 @@ class Panel:
                                 "project": TEST_PROJECT})
 
     def show_mood(self, words):
-        """The mood under the line that is speaking, or no row at all.
+        """The mood under the line that is speaking, or a blank row.
 
-        Packed and unpacked rather than blanked, so a line without one does not
-        leave a gap of empty space in the tallest, most-read part of the window.
+        Blanked rather than unpacked. It used to take its row away when a line
+        had no mood, which saved one line of height and cost a re-flow of the
+        whole window on every line that differed from the one before -- see
+        the grid in _build. The row sits beside the portrait, which is taller
+        than this column anyway, so the blank costs nothing to look at.
         """
         words = (words or "").strip()
-        if not words:
-            return self.mood.pack_forget()
-        self.mood.configure(text="— " + one_line(words, 120))
-        if not self.mood.winfo_manager():
-            self.mood.pack(fill="x")
+        text = "— " + one_line(words, 120) if words else ""
+        if self.drawn.get("mood") != text:
+            self.drawn["mood"] = text
+            self.mood.configure(text=text)
 
     # How wide the mood column gets when there is anything to put in it. Narrow
     # on purpose: it is taking the room from the words, and the whole of a mood
@@ -2871,7 +2994,7 @@ class Panel:
         it reads this per message rather than at startup, so the next line
         spoken already uses it and a restart is never needed.
         """
-        voice_lib.patch_state(playback=self.playback.get())
+        self.remember(playback=self.playback.get())
 
     def _paint_settings(self):
         """The dialog's own background, which is all that takes no styling.
@@ -2889,18 +3012,26 @@ class Panel:
                                 ttk.Style().lookup("TFrame", "background"))
 
     def toggle_at_login(self):
-        """Ticked means the shortcut is in the Startup folder, and nothing else.
+        """Ticked means the Run value is there, and nothing else.
 
-        So the box is read back off the folder rather than left where the click
-        put it: a create that failed must not leave a tick claiming it worked,
-        and neither must a delete. There is nothing else to write -- see
+        So the box is read back off the registry rather than left where the
+        click put it: a write that failed must not leave a tick claiming it
+        worked, and neither must a delete. There is nothing else to write -- see
         starts_with_windows for why there is no setting behind this one.
         """
-        if self.at_login.get():
-            make_startup_shortcut()
-        else:
-            drop_startup_shortcut()
-        self.at_login.set(starts_with_windows())
+        # A registry write is instant, but it stays off the Tk thread with the
+        # rest of the panel's errands, and the tick is read back when it is done.
+        job = threading.Thread(
+            target=make_startup_shortcut if self.at_login.get() else drop_startup_shortcut,
+            name="startup-shortcut", daemon=True)
+        job.start()
+
+        def read_back():
+            if job.is_alive():
+                return self.root.after(100, read_back)
+            self.at_login.set(starts_with_windows())
+
+        self.root.after(100, read_back)
 
     def close_settings(self):
         if self.settings is not None:
@@ -3051,7 +3182,7 @@ class Panel:
         subprocess.Popen([voice_lib._python(), os.path.join(voice_lib.ROOT, "voice_cli.py"),
                           "install", "breeze", "--yes", "--to", self.setup_target],
                          stdout=out, stderr=out, stdin=subprocess.DEVNULL,
-                         creationflags=DETACHED, close_fds=True, cwd=voice_lib.ROOT)
+                         creationflags=DETACHED, close_fds=True, cwd=voice_lib._workdir())
         self.setup_started = time.time()
         self.setup_go.state(["disabled"])
         self.setup_status.configure(text="starting…")
@@ -3181,16 +3312,24 @@ class Panel:
 
     def close(self):
         self.stopping.set()
-        try:
-            self.root.after_cancel(self.tick)     # else it fires into a dead window
-        except Exception:
-            pass
+        for job in (self.tick, self.settle_job):
+            try:
+                self.root.after_cancel(job)       # else it fires into a dead window
+            except Exception:
+                pass
         try:
             geometry = self.root.geometry()
             if GEOMETRY.match(geometry):
-                voice_lib.patch_state(panelGeometry=geometry)
+                self.remember(panelGeometry=geometry)
         except Exception:
             pass
+        # Let the writes already asked for land before the process goes: the
+        # thread is a daemon, and a setting ticked just before closing would
+        # otherwise be lost with it. A few seconds at most.
+        self.writes.put(None)
+        for thread in threading.enumerate():
+            if thread.name == "config":
+                thread.join(timeout=3)
         self.root.destroy()
 
 

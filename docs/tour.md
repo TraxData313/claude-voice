@@ -15,55 +15,45 @@ Windows only. If this is not Windows, say so now — none of the rest will work.
 ## 1. Set it up
 
 ```powershell
-.\setup.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-One command, and it does the lot: finds Python (or installs it per-user, no admin), fetches
-Qwen-TTS Studio and the model, writes the config, adds `/voice`, puts an icon on the
-Desktop, opens the panel, and loads the model. It skips anything already there, so it is
-safe to run again.
+One command, and it does the lot. The folder you cloned is only the **source**: it installs
+claude-voice as a program into `%LOCALAPPDATA%\Programs\claude-voice`, on a private copy of
+python.org's Python that it fetches and checks (SHA-256 and signature), installs Pocket TTS into
+that Python, lists it in Settings → Apps with an Uninstall, puts **Abby for Claude** in the Start
+menu, installs the hooks and `/voice`, starts the engine and opens the panel. No administrator
+rights, and it works with Smart App Control on. Running it again updates in place.
+
+The flag is there because Windows ships with script files switched off; it applies to that one
+PowerShell and changes no setting. Say so if they ask.
 
 Two things about the wait, because they will be watching a quiet terminal:
 
-- **It is roughly 3 GB of download** on a cold machine — ~660 MB of engine, ~2.4 GB of
-  model. **Tell them that before you start it**, and that it resumes if it drops. Ten
-  minutes is normal; an hour on a bad connection is not a hang.
-- **PowerShell may refuse to run it** — an execution policy, not a permission. Retry with
-  `powershell -ExecutionPolicy Bypass -File .\setup.ps1`, and if group policy blocks even
-  that, `Get-Content .\setup.ps1 -Raw | Invoke-Expression` works, because the rule is about
-  running script *files*.
-
-**No NVIDIA card, or they say the laptop is weak?** Run `.\setup.ps1 -Engine pocket` instead.
-It skips Studio and the Qwen model entirely, installs Pocket TTS with pip — a few hundred
-MB, not 3 GB — and runs on the CPU. Abby still speaks; Cyrillic does not. Ask if you are
-unsure: Qwen on a machine with no card downloads everything and then fails at load.
-
-Useful flags, if the situation calls for one: `-ProjectDir $env:USERPROFILE` to speak in
-every project rather than this one, `-Build system` if they already have the CUDA runtime
-and want the 268 MB Studio instead of 663, `-PythonExe` or `-StudioDir` if your own checks
-found either somewhere unusual.
-
-It also installs hooks, which **may never fire** depending on the client. That is expected
-and does not matter — the watcher does not use them.
+- **It is a few hundred MB** on a cold machine — Python, then torch's CPU build — and Pocket's
+  voice model comes down the first time the engine loads. Tell them before you start.
+- **With an NVIDIA card and Smart App Control off**, `-Engine qwen` gets Qwen (Studio and a
+  2.4 GB model; Cyrillic works). With Smart App Control on, Qwen's DLLs are refused and the
+  engine falls back to Pocket — so on such a machine, do not offer it. `-Engine breeze` is the one
+  that laughs (11 GB, a 16 GB card).
 
 ## 2. Check it really is up
 
 ```powershell
-python voice_cli.py status
+& "$env:LOCALAPPDATA\Programs\claude-voice\runtime\python.exe" "$env:LOCALAPPDATA\Programs\claude-voice\app\voice_cli.py" status
 ```
 
-`setup.ps1` has already turned it on, so this is confirmation, not action. You want
-`engine: ready` and *following sessions itself*. **Do not tell them it is speaking until you
-have seen that** — you cannot hear it, and it is silent when it fails.
-
-If the engine is not ready, `python voice_cli.py on` loads it; cold, that takes 40–60
-seconds and the command waits.
+The installer's last lines already said `engine : ready on port 8765` or why not; this is
+confirmation. **Do not tell them it is speaking until you have seen it ready** — you cannot hear
+it, and it is silent when it fails. The hooks are read when a session starts, so **this session
+may not be wired up yet**. Ask them to restart Claude Code and come back to this conversation
+(`claude --continue`, or reopen it in the app): a resumed session runs the new hooks, and the
+tour carries on from step 3. Until then nothing you write is heard.
 
 ## 3. Start writing to be heard — from your very next message
 
-The installer has just written the rules into `~\.claude\CLAUDE.md`, which every *future*
-session loads at startup. **You are not a future session.** That file was read before it
-existed for you, so nothing has told you any of this, and the first thing the user will hear
+The SessionStart hook hands these rules to every *future* session. **You are not a future
+session** — this one started before the hooks existed — so nothing has told you any of this, and the first thing the user will hear
 is whatever you write next. Read [writing for the ear](writing-for-the-ear.md) now, and
 apply it from here on:
 
@@ -74,13 +64,15 @@ apply it from here on:
   makes people turn it off in the first five minutes.
 - **Keep the summary self-contained**: what changed, whether it works, what to do next, in
   plain sentences, five at most, with no paths or flags in it.
-- **Give the short lines between your tool calls a verb.** They are spoken exactly as
-  written: "Now I'm writing the fix", not "Now the fix itself".
+- **What is heard is the end of each turn**, and a prompt that is waiting on them. The short
+  lines between tool calls are silent unless they turn on `narrate transcript on`; give them a
+  verb anyway ("Now I'm writing the fix", not "Now the fix itself"), in case they do.
 
 ## 4. Give the tour — out loud, four things
 
-They are listening now, so this is the demonstration. Keep every line to a sentence or two
-of plain speech; those lines *are* the tour. Cover exactly these, in this order:
+They are listening now, so this is the demonstration. Only the end of each of your turns is
+heard, so give the tour as short turns, one point each, ending on its own `## TL;DR`. Cover
+exactly these, in this order:
 
 1. **That it is working, and who is talking.** Name the current voice. The panel is open in
    front of them — say so, and that it shows what is being said and has the volume slider.
@@ -94,8 +86,7 @@ Then stop. Do not read the whole command list aloud; that is what `help` is for.
 
 ## 5. Ask them once about update checks
 
-They installed this by cloning a repo, so nothing tells them when a newer version exists.
-There is a check for that, and **it is off**, because the whole promise of this project is
+Nothing tells them when a newer version exists. There is a check for that, and **it is off**, because the whole promise of this project is
 that it runs on their machine and tells nobody about it. Turning it on is theirs to decide,
 not yours, so **ask, in one sentence, and take the answer**:
 
@@ -103,55 +94,17 @@ not yours, so **ask, in one sentence, and take the answer**:
 > claude-voice. It's off right now, and it's the only thing here that would ever use the
 > network. Want it on?"
 
-- **Yes** → `python voice_cli.py update on`
+- **Yes** → `/voice update on`
 - **No, or no clear answer** → leave it. Say that `/voice update` looks whenever they ask,
   and move on.
 
 Do not sell it, do not ask twice, and do not turn it on because it seems helpful. Somebody
 who chose an offline voice for a reason has already answered this.
 
-## 6. Check git, before an update is something they try on their own
+## 6. Updates need no git
 
-Both ways of taking one — `update --apply` and the panel's button — shell out to git, and
-**the panel does not have your PATH.** It starts from the Desktop shortcut, so it inherits
-Explorer's environment, built from the registry at login; your terminal has whatever started
-it, and Claude Code hands its children a PATH with a git of its own prepended. So `git
---version` working for *you* says nothing about the button. This has already happened to
-somebody: the button said *git is not on PATH* on a machine with git on it, while the same
-pull from the command line worked.
-
-Test the PATH they will get, not yours. `setup.ps1` prints this as its `git :` line, so if
-you have just run it, you have already seen the answer:
-
-```powershell
-@([Environment]::GetEnvironmentVariable('Path','User'),
-  [Environment]::GetEnvironmentVariable('Path','Machine')) -join ';' -split ';' |
-  Where-Object { $_ -and (Test-Path -LiteralPath ($_.TrimEnd('\') + '\git.exe')) }
-```
-
-- **A folder comes back** → nothing to do, and nothing to say.
-- **Nothing comes back, but git is installed** — look in `%LOCALAPPDATA%\Programs\Git\cmd`
-  and `%ProgramFiles%\Git\cmd` — then updates work regardless, because the updater looks in
-  those folders itself. Still worth one sentence, since everything else on that machine has
-  the same blind spot. **Ask before you touch their PATH**; if they want it listed:
-
-  ```powershell
-  [Environment]::SetEnvironmentVariable('Path',
-    [Environment]::GetEnvironmentVariable('Path','User').TrimEnd(';') + ';<that folder>', 'User')
-  ```
-
-  Only processes started afterwards see it, so tell them the panel needs reopening — and if
-  the shortcut still cannot see it, signing out and back in settles it for good.
-- **No git anywhere** → then this copy did not arrive by cloning, because that would have
-  needed git. It is a zip, or the plugin. Ask, in one sentence, rather than deciding for
-  them: *"there's no git here that I can find, so an update would be a zip download by hand
-  — want me to point you at installing it, so `/voice update` can do it for you?"* Yes →
-  <https://git-scm.com/download/win>, and say to leave **"Git from the command line and also
-  from 3rd-party software"** ticked, because that is the option that puts it on PATH. No →
-  drop it. Everything except pulling works without git, and the zip route is in
-  [updating.md](updating.md#if-you-have-no-git).
-
-Do not install git for them unasked, and do not edit their PATH unasked. Both are theirs.
+An installed copy updates itself: `/voice update --apply`, or the panel's button, takes the
+newest release from GitHub, swaps it in and keeps their settings. Nothing to check here.
 
 ## 7. Worth mentioning once, then leaving alone
 
@@ -159,14 +112,14 @@ Do not install git for them unasked, and do not edit their PATH unasked. Both ar
   everywhere, and it survives a reboot.
 - The **engine does not** survive a reboot. With the voice left on, the first prompt they
   type afterwards starts it again; `on` or the button in the panel does it by hand.
-- The panel can be closed and reopened from the **Abby for Claude** icon on the Desktop.
-- The **version is in the panel's bottom right corner**, and `/voice update` is how a newer
-  one arrives — it pulls and restarts the engine, which is the step that is easy to miss.
+- The panel can be closed and reopened from **Abby for Claude** in the Start menu.
+- The **version is in the panel's bottom right corner**, and `/voice update --apply` is how a
+  newer one arrives — it swaps the program and restarts the engine, keeping their settings.
 - If it ever goes quiet, `status` says whether the engine died, and `on` revives it. So does
   their next prompt, while the voice is on.
 
 ## If something is wrong
 
-`logs\speak-server.log` is the engine's account of itself. Silence with no error is covered
+`%LOCALAPPDATA%\claude-voice\logs\speak-server.log` is the engine's account of itself. Silence with no error is covered
 in [troubleshooting](troubleshooting.md) — work down it in order rather than guessing, and
 tell them plainly what you found rather than reassuring them it is fine.

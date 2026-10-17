@@ -1,23 +1,23 @@
 # How it works
 
-Four moving parts, none of them clever on their own.
+Four moving parts, none of them clever on their own. Claude Code calls the hook; the hook
+hands what it was given to the engine and goes; the engine decides what is said and says it.
 
 ```
-Claude Code  ──writes──▶  session transcript (.jsonl on disk)
-                                   │
-                            watcher thread  ──▶  strip markdown, pick what to say
-                                   │
-                            engine thread   ──▶  Qwen talker model  ──▶  wav
-                                   │
-                            player thread   ──▶  winsound
+Claude Code  ──hook──▶  speak_hook.py  ──POST /hook──▶  engine: pick what to say (TL;DR)
+                                                          │
+                                                   engine thread  ──▶  talker model  ──▶  wav
+                                                          │
+                                                   player thread  ──▶  winsound
 ```
 
 ## The engine
 
 `speak_server.py` is a long-running process holding one loaded talker model. Loading takes
 the better part of a minute cold, which is fine once and unbearable per sentence — hence a
-resident process rather than a command run per line. It listens on `127.0.0.1:8765` and
-nothing else: not reachable from your network, let alone the internet.
+resident process rather than a command run per line. It listens on `127.0.0.1:8765` — or the
+next free port, when another program holds that one — and nothing else: not reachable from
+your network, let alone the internet.
 
 Qwen-TTS Studio has no CLI. Its `--dump-speaker-embedding` fallback wants a `tts-cli`
 binary that is not shipped, and everything else is buttons. So `qwen_engine.py` starts
@@ -39,106 +39,87 @@ Also: the embedding extractor and the ICL prompt encoder **cannot share a proces
 Loading the ICL encoder tears the talker model down underneath the engine. That is why
 `clone --icl-only` is a separate run rather than a flag.
 
-## The watcher
+## The hooks
 
-Claude Code writes every turn to a JSONL transcript under `~\.claude\projects\` as it
-happens. A thread tails those files and speaks what is new.
+Since 2.0 the hooks are the only door from a session into the voice. Nothing reads Claude
+Code's files on its own initiative, and nothing writes into `~\.claude\CLAUDE.md`.
+`speak_hook.py` is a thin courier: it forwards the fields of each call to the engine's
+`POST /hook` and exits 0, whatever happens. Every decision — on or off, muted session, headless
+run, TL;DR or whole answer, already said, mood, project name — is made once, in the engine
+(`SessionBook.hook` in `speak_server.py`).
 
-This is the part that makes it dependable. Hooks are the tidy way to do this, and they are
-installed too — but a hook only runs if the client chooses to run it, and **nothing from
-outside can tell whether it did**. That is indistinguishable from the voice being broken,
-and cost days here before the watcher existed. Transcripts need no cooperation from
-anybody: no hooks, no restart, and it follows every session at once.
+| event | what it does | waits? |
+|---|---|---|
+| `SessionStart` | prints the speaking rules, the voice and its persona, and what this engine can do with a mood or a sound, as the session's own context | yes, 5 s at most |
+| `UserPromptSubmit` | prints that again only if it has changed since the session was told; tells the engine the session exists, and starts a dead engine if the voice is on | yes, 5 s at most |
+| `Stop` | hands over the final message, `last_assistant_message`; the engine speaks its TL;DR, or the whole of a short answer | no |
+| `Notification` | the session stopped and is waiting on you — a permission prompt, a question left unanswered | no |
+| `PreToolUse` | `AskUserQuestion` only: a question halts the turn, and its words are in the tool's input | no |
 
-Details that matter:
+`voice_cli.py hooks install` writes these into `~\.claude\settings.json` and `hooks remove`
+takes them out — only entries whose command names `speak_hook.py`; anybody else's hooks are
+left exactly as they were. The installer runs the first, the uninstaller the second.
 
-- It starts at the **end** of a file it has never seen, so switching it on does not recite
-  a whole conversation at you.
-- It **remembers its position** across restarts, so an engine that dies does not swallow
-  everything written while it was gone — with a freshness window, because catching up
-  after a crash is wanted and reading out last night's backlog is not.
-- It **names the session** when the speaker changes, reading the title you see on screen.
-  Only on a change; announcing every line would be worse than the confusion it fixes.
-- It **stays quiet on runs nobody is sitting in front of**. `claude -p`, an SDK caller, an
-  errand one of your own programs sends off: those write a transcript exactly like a
-  session you are watching, in the project folder you are working in, and the watcher
-  needs no hook to find them — so keeping your hooks out of such a run does *not* keep it
-  quiet. Their reports are addressed to the program that asked, not to the room, and
-  hearing one read out in full is how this was found. Every user entry carries the
-  `entrypoint` that wrote it, and a headless run says `sdk-cli` where a window says `cli`
-  or `claude-desktop`. `/voice headless on` if you would rather hear yours come home.
+**The three that speak are `async`.** Claude Code starts them and does not wait, so a slow
+engine, or an absent one, can never hold up the end of a turn or the start of a tool. The two
+that print have to run in line, so they are short and have a timeout.
 
-## The one thing the watcher cannot see
+**An engine that is down loses nothing recent.** A hook that finds nobody listening writes
+its call to `logs\pending.jsonl` and starts the engine, if the voice is on. The engine says
+whatever in that spool is younger than `catchupSeconds` (five minutes) once it is up.
 
-Everything above works off transcripts, which is why it is dependable. But a session that
-stops and waits for you writes **nothing** to the transcript while it waits. A permission
-dialog is not a message. Neither is a turn that has gone quiet with a question in it. So
-the moment you most want a voice — you looked away, and the work silently stopped fifteen
-minutes ago — is the one moment the watcher has nothing to read.
+**What each session was told is kept**, in `logs\told.json`: which version of the note each
+of the newest 64 sessions last had. That is what lets `UserPromptSubmit` stay quiet on nearly
+every prompt, which matters, since whatever it prints goes to the model with the prompt. A
+voice changed in the panel reaches an open session at its next prompt.
 
-Claude Code raises those as a `Notification` hook event, and the hook is the only way to
-hear them. `speak_hook.py` answers it, and `/voice alerts off` turns it off.
+**The panel's sessions come from the hooks too**, kept in memory: named by the first prompt,
+labelled with the folder they run in, listed for fifteen minutes after their last call. After
+an engine restart a session reappears at its next hook.
 
-What the event actually carries, since the shape is not obvious and was read out of the
-client itself:
+**Runs nobody is sitting in front of stay quiet.** `claude -p`, an SDK caller, an errand one
+of your own programs sends off: Claude Code puts its entrypoint in the hook's environment, and
+a headless run says `sdk-cli` where a window says `cli` or `claude-desktop`. Their reports are
+addressed to the program that asked, not to the room. `/voice headless on` if you would rather
+hear yours come home.
+
+### What a hook does not carry
+
+**The short lines between tool calls.** `PreToolUse` is given the tool's name and its input,
+and nothing the assistant wrote before it. So since 2.0 those lines are silent by default, and
+only the end of each turn is heard.
+
+`/voice narrate transcript on`, then `/voice hooks install`, brings them back the one way a hook
+can: `PreToolUse` is registered for every tool, and reads the last 256 KB of the transcript
+Claude Code names in that call, at that moment — one bounded read of one file, per tool call.
+It is off by default because it reads a file format nobody promised to keep (see *A switch can
+stop working* below for what that has cost before).
+
+**The tool behind a permission prompt.** A `Notification` reads, in full:
 
 ```json
 { "hook_event_name": "Notification",
-  "message": "Claude needs your permission",
+  "message": "Claude needs permission to use Bash",
   "title": "Claude Code",
   "notification_type": "permission_prompt" }
 ```
 
+The tool is named only inside `message`, so that is where it is read from.
 `notification_type` is one of `permission_prompt`, `idle_prompt`, `auth_success`,
-`elicitation_dialog`, `elicitation_complete`, `elicitation_response`, `agent_needs_input`
-or `agent_completed`. Three things worth knowing:
+`elicitation_dialog`, `elicitation_complete`, `elicitation_response`, `agent_needs_input` or
+`agent_completed`. Two more things worth knowing:
 
-- **The message never says which tool.** `"Claude needs your permission"` is the whole of
-  it — the tool name lives in the dialog on screen and nowhere in the payload. The
-  announcement would be useless without it, so `pending_tool()` reads the newest
-  `tool_use` block out of the transcript instead, which is already written by the time the
-  dialog appears.
-- **A matcher on this event is a regex over `notification_type`, not a tool name.** The
-  `"*"` that means "everything" for `PreToolUse` is not a valid regex, so the entry the
-  installer writes carries no matcher at all.
-- **These dedupe on time, not on text.** Everything else here refuses to say the same
-  words twice; three permission prompts in a row are three separate halts and every one of
-  them is worth hearing. `notification_due()` only swallows the double-fire you get when
-  the same hook is registered in a project's settings and in your own.
+- **A matcher on this event is a regex over `notification_type`, not a tool name.** The `"*"`
+  that means "everything" for `PreToolUse` is not a valid regex, so the entry carries no
+  matcher at all — and one malformed entry can invalidate the whole hooks block.
+- **These dedupe on time, not on text.** Everything else here refuses to say the same words
+  twice; three permission prompts in a row are three separate halts and every one is worth
+  hearing. `notification_due()` only swallows the double-fire you get when the same hook is
+  registered in a project's settings and in your own.
 
-Hooks are read when a session starts. On Claude Code 2.1.280 a change to them reached a
-session that was already open at its next prompt; older versions needed Claude Code
-restarted after an install, unlike anything the watcher does.
-
-## The hooks
-
-`speak_hook.py` answers five of Claude Code's hook events. Since the watcher does the
-reading, most of what the hook does is not reading:
-
-| event | what it does |
-|---|---|
-| `SessionStart` | tells the session what the voice can do right now: on or off, whose voice, and whether this engine takes a mood or makes a sound. See [writing for the ear](writing-for-the-ear.md#a-mood-and-a-laugh-when-the-engine-has-them) |
-| `UserPromptSubmit` | tells it again only if that has changed, and starts the engine if the voice is on and nothing answers |
-| `Notification` | says the prompt that is waiting on you, which reaches no transcript |
-| `Stop` | with the watcher on, only brings a dead engine back; with it off, speaks the answer |
-| `PreToolUse` | with the watcher on, nothing; with it off, speaks the line before the tool |
-
-**The watcher reads, the hook does not.** Both used to speak the same lines, and whichever
-saw a message first said it. That made every difference between them a coin toss: the hook
-barged in where the watcher queued, knew nothing of muted sessions or headless runs, and
-named no project. It never showed, because in the desktop app the hook never ran (see
-below). Now a line has one reader. The hook reads only when `watch` is off, and then does
-it the way the watcher would: queued, labelled with its project, silent for a muted
-session, mood and all.
-
-**What each session was told is kept**, in `logs\told.json`: which paragraph each of the
-newest 64 sessions last heard. That is what lets `UserPromptSubmit` stay quiet on nearly
-every prompt, which matters, since whatever it prints goes to the model with the prompt.
-
-**The engine is started by a prompt, not by a line.** The watcher lives inside the engine,
-so an engine that dies takes the reader of every transcript with it. The next prompt typed
-into any session brings it back, if the voice is on. The panel's unload button switches the
-voice off first for exactly this reason.
+**Hooks are read when a session starts.** On Claude Code 2.1.280 a change reached a session
+that was already open at its next prompt; older versions need Claude Code restarted. A resumed
+conversation runs the hooks as they are now.
 
 ## Choosing what to say
 
@@ -152,6 +133,9 @@ happily and a speech model cannot pronounce (`—`, `×`, `≥`, emoji, box draw
 translated or removed.
 
 ### The line is not always in a text block
+
+This matters only where a line is read off the transcript: with `narrate transcript on`, and
+for a `Stop` from a Claude Code too old to send `last_assistant_message`.
 
 A turn reaches the transcript as several lines, and the sentence you read on screen is not
 always in the one this used to look at. Claude Code writes the model's working-out into a
@@ -187,12 +171,9 @@ moves Opus 5 by 1%. `/voice thinking off` if you would rather have none of it.
 Two facts about ordering are what make the first test cheap, and both are exact rather than
 merely usual: within a response the thinking always precedes the text (3,094 of 3,094), and
 every tool call comes after everything that response said (10,361 of 10,361). So the hook,
-which reads backwards, meets the text first and never reaches the thinking behind it — the
-rule costs it nothing at all. The watcher reads forwards and cannot see what is coming, so
-it **holds** a thinking line instead, and lets it go the moment a tool call proves nothing
-else was said. That is still before the tool runs, which is the entire point of narration.
-A response that says one line and then ends the turn has no tool call to wait for, so a
-five-second timer releases it.
+which reads the end of the transcript backwards, meets the text first and never reaches the thinking behind it — the
+rule costs it nothing at all. (The transcript watcher before 2.0 read forwards, and had to
+hold a thinking line until a tool call proved nothing else was said.)
 
 
 ## Speaking and playing
@@ -239,7 +220,7 @@ A resume starts **0.2s before** where the pause landed, because a pause almost n
 on a word boundary and coming back on the exact sample comes back mid-syllable.
 
 Two things follow from pause being a hold rather than a stop. The **queue goes on filling**
-while it is held — the engine keeps its model, the watcher keeps queueing, and synthesis
+while it is held — the engine keeps its model, new answers keep queueing, and synthesis
 stops on its own after two pieces because the play queue is capped at two and blocks. And
 **"quiet now" is not "I never want to hear that"**: emptying the queue is ⏭ skip all,
 sitting next to the pause button, which is the honest place for it.
@@ -515,10 +496,14 @@ something, `end_turn` means it had finished — and it is written on every entry
 on it, and no alarm attached.*
 
 
-**Hooks are not dependable, so this does not need them.** A hook runs only if the client
-chooses to run it, and nothing from outside can tell whether it did — which looks exactly
-like the voice being broken. Claude Code writes every turn to a transcript on disk
-regardless, so that is what gets followed. No hooks, no restart, every session at once.
+**The watcher was built on a misdiagnosis.** From August to 2.0 the engine tailed every
+transcript under `~\.claude\projects` every 0.7 seconds, because hooks "were not dependable":
+a hook runs only if the client chooses to run it, and nothing from outside can tell whether it
+did. But the hooks had never run for a reason of this project's own — the backslashes above —
+and once the command could run, they ran every time. The watcher meanwhile parsed a file format
+nobody had promised to keep, and was quietly wrong about it for months (the switch above). It
+also needed a note in `CLAUDE.md` rewritten on every start, in a file that belongs to the
+user. Both are gone, and `hook.log` gets one line per call, so "did it run" has an answer.
 
 **`SO_REUSEADDR` means something else on Windows.** `HTTPServer` sets it, and Windows then
 lets a *second* process bind a port already in use rather than failing — two engines, two
@@ -563,10 +548,9 @@ Studio with it, and the engine then failed to start with a folder-not-found nami
 that had been correct for weeks — which reads like a bug in this project, not like Windows
 tidying up. Both installers had listed `~\Downloads\qwen-tts-studio` *first* among the
 places to look and adopted it where it stood, so a folder that only ever landed there by
-accident became the recorded home. `setup.ps1` now moves such a copy to
-`%LOCALAPPDATA%\Programs`; `install.ps1` looks there last and says out loud what will
-happen if that is genuinely the only copy. A *package* left in `Downloads` is still read
-from there — losing a `.zip` costs one download, not the install.
+accident became the recorded home. The installer no longer looks in `Downloads` at all:
+Studio goes to `%LOCALAPPDATA%\Programs\qwen-tts-studio`, or the folder given with
+`-BigData`.
 
 **The same engine can have another program depending on it.** The ImmersiveAI mod for
 Bannerlord fetches this identical Qwen-TTS build, checks `~\Downloads\qwen-tts-studio`
@@ -602,3 +586,76 @@ seconds a file — before quietly using the cache. The engine sat at "loading th
 a hundred seconds with no CPU and no error, and looked hung. `pocket_engine` now injects
 `truststore` when it is installed, so Python trusts what Windows trusts: the same load took
 8 seconds.
+
+**The answer was in the Stop hook all along.** Claude Code hands a `Stop` hook the finished
+message as `last_assistant_message`, and its documentation says to prefer that over reading
+the transcript. The hook and the watcher both read the transcript anyway, for as long as this
+project existed: the file was where the answer had always been found, so nobody looked in the
+payload. The opposite lesson came with it — the lines *between* tool calls are in no hook at
+all. `PreToolUse` gets the tool and its input; what was written before it is only in the
+transcript. Going hooks-only cost exactly those lines, which is why `narrate transcript on`
+exists, and why it is off by default.
+
+**Binding a port is not the same as owning it.** On 2026-10-15 a FaceLab dev server sat on
+8765. The engine said "cannot bind; another engine is probably up" and left — and every prompt
+then started another engine that said the same and left (six in the log), while the game
+showed "port in use" with no idea by whom. Now a taken port is asked what it is: an engine of
+ours means leave; a stranger is named (from `netstat` and `tasklist`) and the engine takes the
+next free port of the following ten; a port that accepts and never answers is left alone when
+a Python holds it, since that may be our own engine stuck in a load. A port refused with
+nobody listening is one Windows has reserved for Hyper-V or WSL (`netsh int ipv4 show
+excludedportrange protocol=tcp`), and is skipped. Wherever it lands goes into the config,
+where.json and the registry, which is where the panel, the hooks and a game look; `portHome`
+keeps the port it wanted, so it moves back when that is free.
+
+**A root `<Configure>` binding fires for every child.** Tk delivers an event to each of a
+widget's bindtags, and every widget's tags include its toplevel — so a handler bound on the
+root window "to refit when the window resizes" runs once for every child that changes size.
+The panel did a synchronous `update_idletasks` layout pass in that handler, and one change of
+state cascaded: 21 resize events made 61 full layout passes, which is the stutter and the jump
+that were blamed on the engine switch. The handler now acts only for the root, the head frame
+and the sessions frame, at most once every 30 ms, and the same sequence makes 5. A reflow storm
+looks exactly like a widget that is the wrong size, so count the passes before resizing
+anything.
+
+**Smart App Control judges each file, not each package.** The first end-to-end install ran on
+python.org's 3.13. Python itself loaded — signed by the Python Software Foundation — and then
+Smart App Control refused `_sentencepiece.cp313-win_amd64.pyd` (Code Integrity event 3077),
+while the cp312 build of the very same sentencepiece 0.2.2 loads. Reputation belongs to a file,
+and a wheel built for a newer Python simply has fewer machines running it. Hence the private
+runtime is 3.12.10, the last 3.12 with Windows binaries, and `requirements-pocket.txt` pins the
+exact versions seen to load, installed with `--only-binary=:all:` so nothing is ever compiled
+on the spot into a file nobody has seen. Re-pin only after watching the new wheels load with
+Smart App Control on.
+
+**Asking whether a DLL will load is itself a load.** Qwen's refusal never reached the engine
+as one: the JVM's own loader printed "An Application Control policy has blocked this file" to
+stdout and carried on, and the first native call then failed as "java exception during
+CallLongMethod". The obvious fix — map the DLL first with `DONT_RESOLVE_DLL_REFERENCES` and
+look at the error — works, and every such probe is another Code Integrity event and another
+Windows Security toast on the user's screen: three in ten minutes, all from probes, on the day
+it was written. So the engine asks what Windows already says instead. Smart App Control
+enforcing (`VerifiedAndReputablePolicyState` = 1, readable without admin) means refused with
+nothing loaded; a refusal seen once is remembered per DLL; only with neither is a single probe
+made.
+
+**An unsigned `.exe` can never run under Smart App Control.** The old `ClaudeVoiceSetup.exe`,
+an installer built with Inno Setup, a frozen engine: all of them are refused on a clean
+Windows 11, and the only way past that is a code-signing certificate, paid for every year.
+Rather than that, the program *is* a signed Python — python.org's, checked against its SHA-256
+and its Authenticode signature — running this project's plain `.py` files, which are data to
+it rather than programs, and so not Smart App Control's to judge.
+
+**A running program's folder can be renamed, though not deleted.** The uninstaller runs on the
+very Python it is removing, and Windows will not delete the image of a running process. It
+will rename the folder that holds it, so the uninstaller moves `runtime\` into `%TEMP%` in one
+step and deletes everything else; the few MB still in use are swept by the next install, or by
+Windows. Paths are compared after `realpath`, because an 8.3 short name (`SOMEON~1`) and the
+long one are the same folder and different strings — which is how the first end-to-end
+uninstall missed its own Run value and hooks.
+
+**A discovery file written only by a running program is not discovery.** Games found this by
+`where.json`, which the engine writes when it starts. So an install whose engine had never
+started — or had not since a reboot — could not be found by the very game that installed it.
+The `HKCU\Software\claude-voice` key is written by the installer before anything runs, and the
+engine only refreshes its port. **[How a game finds it →](discovery.md)**

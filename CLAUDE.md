@@ -32,14 +32,19 @@ the same idea: explain *why*, not what the line already says.
 ## Before you finish
 
 - `python -m py_compile speak_server.py voice_lib.py voice_cli.py panel.py speak_hook.py
-  update_check.py`
+  update_check.py installer.py`
+- Changed the install? `python test_installer.py`. A real run must not touch the real install:
+  `install.ps1 -Root <temp> -Product claude-voice-test -DataDir <temp> -ClaudeDir <temp>
+  -ShortcutDir <temp> -Port 8799`, then the uninstall its Settings → Apps entry names. Bump
+  `runtime.json` and `install.ps1` together (the test checks), and re-pin `requirements-pocket.txt`
+  only after seeing the new wheels load with Smart App Control on.
 - Changed a command? `python voice_cli.py help --markdown` regenerates `docs/commands.md`.
 - **Releasing?** Bump `version` and `date` in `version.json`, write its `headline` for the
   ear, and add the matching `## <version>` section to `CHANGELOG.md` — `update --apply`
   prints that section to whoever takes the release. Set `needsSetup` when the release
-  changes `commands\`, `speaking-notes.md` or either installer, since a pull does not
-  reinstall those. Nobody hears about a release that does not bump that file.
+  changes `commands\`, `templates\` or the install scripts, since a `git pull` in a checkout does
+  not reinstall those (an installed copy's update re-runs its installer by itself). Nobody hears about a release that does not bump that file.
 - Changed anything the engine imports? It must be restarted to take effect:
-  `python voice_cli.py kill` then `start`. Config changes need no restart — the watcher
-  re-reads it every sweep.
+  `python voice_cli.py kill` then `start`. Config changes need no restart — the engine
+  re-reads it whenever the file changes.
 - Do not commit anything from `logs\`, and `config.json` is machine-specific and ignored.

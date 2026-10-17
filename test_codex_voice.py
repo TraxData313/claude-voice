@@ -1,142 +1,97 @@
-"""Verify Codex transcript selection without loading the speech model."""
+"""Codex through its `notify` setting, without loading the speech model.
+
+Codex used to be heard by reading its rollouts under ~/.codex/sessions. Now its
+notify program (speak_hook.py) is handed the finished turn as a JSON argument
+and passes it to the engine like a Claude Stop hook.
+
+    python test_codex_voice.py
+"""
 import json
-import os
-import tempfile
-import time
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
+import speak_hook
 import speak_server
 import voice_lib
 
+voice_lib.notify = voice_lib._unlogged
 
-class CodexVoiceTests(unittest.TestCase):
+STATE = {"enabled": True, "engine": "pocket", "voice": "abby", "source": "embedding",
+         "port": 8765, "narrate": True, "alerts": True, "maxChars": 4000,
+         "fullMaxChars": 4000, "narrateMaxChars": 240}
+
+
+def turn(text, **extra):
+    return json.dumps({"type": "agent-turn-complete", "thread-id": "t-123",
+                       "turn-id": "1", "cwd": r"C:\code\abby",
+                       "input-messages": ["fix the build please"],
+                       "last-assistant-message": text, **extra})
+
+
+class WhatNotifyHands(unittest.TestCase):
+    def test_a_finished_turn_is_a_stop(self):
+        body = speak_hook.codex_body(turn("Done."))
+        self.assertEqual(body["event"], "Stop")
+        self.assertEqual(body["client"], "codex")
+        self.assertEqual(body["text"], "Done.")
+        self.assertEqual(body["transcript_path"], "codex:t-123")
+        self.assertEqual(body["prompt"], "fix the build please")
+
+    def test_anything_else_is_nothing(self):
+        for arg in ("not json", json.dumps({"type": "approval-requested"}),
+                    turn("   "), json.dumps([1, 2])):
+            self.assertIsNone(speak_hook.codex_body(arg), arg)
+
+    def test_the_old_notify_program_is_still_run(self):
+        started = []
+        with patch("subprocess.Popen", lambda args, **kw: started.append(args)), \
+                patch.object(speak_hook, "trace", lambda msg: None):
+            speak_hook.pass_on(["--then", "computer-use.exe", "turn-ended", turn("x")])
+            speak_hook.pass_on([turn("x")])
+        self.assertEqual(started, [["computer-use.exe", "turn-ended", turn("x")]])
+
+    def test_main_sends_it_while_the_voice_is_on(self):
+        sent = []
+        with patch.object(voice_lib, "load_state", lambda: dict(STATE)), \
+                patch.object(speak_hook, "send", lambda state, body: sent.append(body)), \
+                patch.object(speak_hook, "trace", lambda msg: None):
+            speak_hook.main([turn("Body.\n\n## TL;DR\n\n- Abby is ready.")])
+            with patch.object(voice_lib, "load_state", lambda: dict(STATE, enabled=False)):
+                speak_hook.main([turn("Again.")])
+        self.assertEqual(len(sent), 1)
+
+
+class WhatTheEngineSays(unittest.TestCase):
     def setUp(self):
-        self.watcher = speak_server.TranscriptWatcher(None)
-        self.spoken = []
-        self.watcher._say = lambda speech, kind, state, path: self.spoken.append(speech)
-        self.state = voice_lib.load_state()
+        self.jobs = []
+        speaker = type("Speaker", (), {"submit": lambda _, job, barge=False:
+                                       self.jobs.append(job)})()
+        with patch.object(voice_lib, "load_state", lambda: {}):
+            self.book = speak_server.SessionBook(speaker)
+        for name, value in (("already_spoken", lambda text, remember=True: False),
+                            ("resolve", lambda *a, **k: ({"id": "abby", "name": "Abby"}, {}))):
+            patcher = patch.object(voice_lib, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
-    def message(self, text, phase="final_answer", **extra):
-        return json.dumps({"type": "response_item", "payload": {
-            "type": "message", "role": "assistant", "phase": phase,
-            "content": [{"type": "output_text", "text": text}], **extra}})
+    def test_only_the_summary_is_spoken(self):
+        body = speak_hook.codex_body(turn("Technical body.\n\n## TL;DR\n\n- Abby is ready."))
+        self.book.hook(body, dict(STATE))
+        self.assertEqual(self.jobs[-1].text, "Abby is ready.")
 
-    def test_only_summary_is_spoken(self):
-        self.watcher._consider(self.message("Technical body.\n\n## TL;DR\n\n- Abby is ready."), self.state, "task")
-        self.assertEqual(self.spoken, ["Abby is ready."])
+    def test_it_appears_in_the_panel_under_its_first_request(self):
+        self.book.hook(speak_hook.codex_body(turn("Done.")), dict(STATE))
+        row = self.book.sessions(state=dict(STATE))[0]
+        self.assertEqual(row["path"], "codex:t-123")
+        self.assertEqual(row["label"], "fix the build please")
+        self.assertEqual(row["project"], "abby")
 
-    def test_private_and_duplicate_records_are_silent(self):
-        for entry in (
-            {"type": "event_msg", "payload": {"type": "agent_message", "message": "duplicate"}},
-            {"type": "response_item", "payload": {"type": "reasoning", "text": "private"}},
-            {"type": "response_item", "payload": {"type": "function_call_output", "output": "tool"}},
-        ):
-            self.watcher._consider(json.dumps(entry), self.state, "task")
-        self.watcher._consider(self.message("private", phase="analysis"), self.state, "task")
-        self.watcher._consider(self.message("tool", recipient="functions.exec"), self.state, "task")
-        self.assertEqual(self.spoken, [])
-
-    def test_narration_toggle_keeps_final_answers(self):
-        state = {**self.state, "narrate": False}
-        self.watcher._consider(self.message("Working.", "commentary"), state, "task")
-        self.watcher._consider(self.message("Finished."), state, "task")
-        self.assertEqual(self.spoken, ["Finished."])
-
-    def test_partial_record_is_retried_without_history_replay(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "task.jsonl"
-            path.write_text(self.message("Old history.") + "\n", encoding="utf-8")
-            watcher = self.watcher
-            watcher.OFFSETS = str(Path(directory) / "offsets.json")
-            watcher.offsets = {}
-            watcher._transcripts = lambda: [(str(path), path.stat().st_size, path.stat().st_mtime)]
-            with patch.object(voice_lib, "load_state", return_value={**self.state, "enabled": True, "watch": True}):
-                watcher._sweep()
-                record = (self.message("Café is ready.") + "\n").encode("utf-8")
-                with path.open("ab") as output:
-                    output.write(record[:-5])
-                watcher._sweep()
-                self.assertEqual(self.spoken, [])
-                with path.open("ab") as output:
-                    output.write(record[-5:])
-                watcher._sweep()
-                watcher._sweep()
-                self.assertEqual(self.spoken, ["Café is ready."])
-
-    def test_codex_discovery_without_claude_directory(self):
-        with tempfile.TemporaryDirectory() as directory:
-            self.watcher.PROJECTS = os.path.join(directory, "absent")
-            self.watcher.CODEX_SESSIONS = directory
-            path = Path(directory) / "2026" / "09" / "12" / "rollout.jsonl"
-            path.parent.mkdir(parents=True)
-            path.write_text(json.dumps({"type": "session_meta", "payload": {
-                "cwd": r"C:\work\demo", "source": {"subagent": {}},
-                "thread_source": "agent"}}) + "\n", encoding="utf-8")
-            with patch.object(voice_lib, "load_state", return_value={"watchCodex": True}):
-                self.assertEqual(len(list(self.watcher._transcripts())), 1)
-            self.watcher._ensure_label(str(path))
-            self.assertTrue(self.watcher.headless[str(path)])
-
-    def test_resumed_old_codex_task_is_followed_by_size(self):
-        with tempfile.TemporaryDirectory() as directory:
-            watcher = self.watcher
-            watcher.PROJECTS = os.path.join(directory, "absent")
-            watcher.CODEX_SESSIONS = directory
-            watcher.OFFSETS = str(Path(directory) / "offsets.json")
-            watcher.offsets = {}
-            path = Path(directory) / "2026" / "01" / "01" / "rollout.jsonl"
-            path.parent.mkdir(parents=True)
-            path.write_text(json.dumps({"type": "session_meta", "payload": {
-                "cwd": r"C:\work\demo", "source": "vscode",
-                "thread_source": "user"}}) + "\n", encoding="utf-8")
-            old = time.time() - watcher.FRESH_SECONDS - 60
-            os.utime(path, (old, old))
-            state = {**self.state, "enabled": True, "watch": True, "watchCodex": True}
-            with patch.object(voice_lib, "load_state", return_value=state):
-                self.assertEqual(list(watcher._transcripts()), [])
-                baseline = path.stat().st_size
-                with path.open("ab") as output:
-                    output.write((self.message("This resumed task speaks.") + "\n").encode("utf-8"))
-                # Match Codex Desktop: appending does not make the rollout look new.
-                os.utime(path, (old, old))
-                found = list(watcher._transcripts())
-                self.assertEqual([row[0] for row in found], [str(path)])
-                self.assertEqual(watcher.offsets[str(path)], baseline)
-                watcher._sweep()
-                self.assertEqual(self.spoken, ["This resumed task speaks."])
-                self.assertEqual(len(watcher.sessions()), 1)
-
-    def test_incomplete_guardian_identity_is_retried_and_silenced(self):
-        with tempfile.TemporaryDirectory() as directory:
-            watcher = self.watcher
-            watcher.PROJECTS = os.path.join(directory, "absent")
-            watcher.CODEX_SESSIONS = directory
-            watcher.OFFSETS = str(Path(directory) / "offsets.json")
-            watcher.offsets = {}
-            path = Path(directory) / "2026" / "09" / "13" / "guardian.jsonl"
-            path.parent.mkdir(parents=True)
-            path.write_bytes(b"")
-            state = {**self.state, "enabled": True, "watch": True, "watchCodex": True}
-            with patch.object(voice_lib, "load_state", return_value=state):
-                # Reproduce the panel polling between file creation and the
-                # first record. An unresolved identity must never be cached.
-                self.assertIsNone(watcher._ensure_label(str(path)))
-                self.assertNotIn(str(path), watcher.labels)
-                list(watcher._transcripts())
-                guardian = {"type": "session_meta", "payload": {
-                    "cwd": r"C:\work\demo", "source": {"subagent": {"other": "guardian"}},
-                    "thread_source": "guardian_review"}}
-                decision = self.message(
-                    '{"risk_level":"low","outcome":"allow"}')
-                path.write_text(json.dumps(guardian) + "\n" + decision + "\n",
-                                encoding="utf-8")
-                watcher._sweep()
-                self.assertTrue(watcher.headless[str(path)])
-                self.assertEqual(self.spoken, [])
-                self.assertEqual(watcher.sessions(), [])
+    def test_a_muted_task_is_silent(self):
+        state = dict(STATE, mutedSessions=["codex:t-123"])
+        reply = self.book.hook(speak_hook.codex_body(turn("Done.")), state)
+        self.assertEqual(self.jobs, [])
+        self.assertIn("muted", reply["why"])
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(verbosity=2)
