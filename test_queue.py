@@ -145,5 +145,43 @@ class TakingTheFloor(unittest.TestCase):
         self.assertEqual(self.order(), [])
 
 
+class AnEngineSwappedUnderALine(unittest.TestCase):
+    """Qwen picked, Windows refuses it, Pocket loads instead. The line was
+    resolved for Qwen; spoken as it was, Pocket found no voice in it and read
+    it as Alba, a man -- a game's wife, after every switch (2026-10-17)."""
+
+    def setUp(self):
+        self.sp = speak_server.Speaker.__new__(speak_server.Speaker)
+        self.sp.engine_name = "pocket"
+        patcher = patch.object(speak_server, "log")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_voice_is_cast_again_for_the_engine_that_loaded(self):
+        job = speak_server.Job(["Hello."], "abby", {"embedding_path": "abby.bin"},
+                               engine="qwen", source="embedding")
+        fitted = {"pocket_voice": "abby.safetensors", "pocket_language": "english"}
+        with patch.object(speak_server.voice_lib, "resolve",
+                          return_value=({"id": "abby"}, fitted)) as resolve:
+            self.sp._fit_voice(job, {"engine": "qwen"})
+        args = resolve.call_args[0]
+        self.assertEqual(args[0], "abby")
+        self.assertEqual(args[2]["engine"], "pocket")
+        self.assertEqual(job.kwargs, fitted)
+        self.assertEqual(job.engine, "pocket")
+
+    def test_a_line_meant_for_the_loaded_engine_is_left_alone(self):
+        job = speak_server.Job(["Hello."], "abby", {"pocket_voice": "x"}, engine="pocket")
+        with patch.object(speak_server.voice_lib, "resolve") as resolve:
+            self.sp._fit_voice(job, {"engine": "pocket"})
+        resolve.assert_not_called()
+        self.assertEqual(job.kwargs, {"pocket_voice": "x"})
+
+    def test_said_again_keeps_what_it_was_meant_for(self):
+        job = speak_server.Job(["Hello."], "abby", {}, engine="qwen", source="icl")
+        again = job.again()
+        self.assertEqual((again.engine, again.source), ("qwen", "icl"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -287,15 +287,24 @@ class Job:
     """
 
     __slots__ = ("id", "chunks", "voice", "kwargs", "text", "session", "project",
-                 "when", "cancelled", "stalled", "instruction", "mood")
+                 "when", "cancelled", "stalled", "instruction", "mood", "engine",
+                 "source")
     _ids = itertools.count(1)
 
     def __init__(self, chunks, voice, kwargs, text=None, session=None, project=None,
-                 instruction=None, mood=None):
+                 instruction=None, mood=None, engine=None, source=None):
         self.id = next(Job._ids)
         self.chunks = list(chunks)
         self.voice = voice
         self.kwargs = kwargs
+        # Which engine the kwargs were resolved for, and from which source. The
+        # engine loaded when this is spoken can differ -- Qwen picked, Windows
+        # refuses it, Pocket loads instead -- and Qwen's kwargs mean nothing to
+        # Pocket, which then speaks in its own default: Alba, a man. That is how
+        # a game's wife came out as a man after every switch (2026-10-17). The
+        # engine thread re-resolves the voice when the two disagree.
+        self.engine = engine
+        self.source = source
         # How it is to be delivered, in words -- "sound daring and brave". Not
         # in kwargs, because kwargs identify a voice and are handed through
         # unread; this one only means anything to an engine that takes it.
@@ -319,7 +328,8 @@ class Job:
         """This line as a new job, said again from its start: the same words,
         voice and delivery, under an id of its own."""
         return Job(chunks or self.chunks, self.voice, self.kwargs, self.text,
-                   self.session, self.project, self.instruction, self.mood)
+                   self.session, self.project, self.instruction, self.mood,
+                   self.engine, self.source)
 
     def as_dict(self):
         return {
@@ -927,6 +937,7 @@ class Speaker:
             # helped. One small JSON read per message costs nothing beside a
             # generation.
             live = self._live()
+            self._fit_voice(job, live)
             try:
                 mode = self._mode(live)
                 if live.get("streaming", True) and self._stream(eng, job, mode):
@@ -936,6 +947,25 @@ class Speaker:
                 with self.lock:
                     if self.current is job:
                         self.current = None
+
+    def _fit_voice(self, job, live):
+        """Re-resolve the job's voice when it was resolved for another engine.
+
+        Same voice id, kwargs for the engine actually loaded. A voice that
+        engine does not have keeps the old kwargs -- the engine then speaks in
+        its default, as before, and the log says why.
+        """
+        if not job.engine or job.engine == self.engine_name:
+            return
+        try:
+            _, job.kwargs = voice_lib.resolve(job.voice, job.source,
+                                              {**live, "engine": self.engine_name})
+            log(f"  [{job.voice}] was meant for {job.engine}; "
+                f"re-cast for {self.engine_name}")
+        except LookupError as exc:
+            log(f"  [{job.voice}] was meant for {job.engine}, and "
+                f"{self.engine_name} cannot find it: {exc}")
+        job.engine = self.engine_name
 
     def _kwargs(self, job):
         """What the loaded engine is called with, mood included if it takes one.
@@ -1752,7 +1782,8 @@ class SessionBook:
         if not pieces:
             return {"why": "nothing speakable"}
         job = Job(pieces, voice["id"], kwargs, text=speech, session=row.get("label"),
-                  project=row.get("project"), instruction=instruction, mood=mood)
+                  project=row.get("project"), instruction=instruction, mood=mood,
+                  engine=voice_lib.engine_of(state), source=state.get("source"))
         self.speaker.submit(job)                                    # queued, never barging
         log(f"sessions: {what} [{voice['id']}] {len(pieces)} chunk(s) "
             f"{'(' + mood + ') ' if mood else ''}"
@@ -2393,7 +2424,9 @@ class Handler(BaseHTTPRequestHandler):
             sp.submit(Job(pieces, voice["id"], kwargs, text=text,
                           session=payload.get("session"),
                           project=payload.get("project"),
-                          instruction=instruction, mood=mood),
+                          instruction=instruction, mood=mood,
+                          engine=voice_lib.engine_of(live),
+                          source=payload.get("source") or live.get("source")),
                       barge=not payload.get("queue"))
             said_how = mood or instruction
             log(f"speak [{voice['id']}] {len(pieces)} chunk(s): "
