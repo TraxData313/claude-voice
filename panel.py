@@ -1838,13 +1838,18 @@ class Panel:
         self.hold("enabled")
         self.drawn["enabled"] = True
         self.paint_power(True)
+        # The engine switch is green only for both together (see paint_engine).
+        if self.drawn.get("engine_up") and not self.drawn.get("engine_loading"):
+            self.paint_engine(True)
 
     def _engine_says(self):
         if self.drawn.get("engine_loading"):
             return "loading the model — 40 to 60 seconds"
+        if self.drawn.get("engine_up") and not self.drawn.get("enabled"):
+            return "turn the voice ON — the engine is up, but no session is heard"
         if self.drawn.get("engine_up"):
-            return "turn the engine OFF — hands back about 3.5 GB"
-        return "turn the engine ON — the first load takes 40 to 60 seconds"
+            return "turn the voice and engine OFF — hands back about 3.5 GB"
+        return "turn the voice and engine ON — the first load takes 40 to 60 seconds"
 
     def _volume_says(self):
         """How loud, as a whole percent.
@@ -1870,6 +1875,12 @@ class Panel:
     def paint_engine(self, up):
         """The engine switch. None is "loading", which is neither yet.
 
+        True is green: an engine up *and* the voice on, which is the only state
+        in which a session is heard. Anything else is red. An engine with the
+        voice off used to be drawn green -- a game had started it for its own
+        voices -- and the panel looked ready through a whole evening of silent
+        sessions (2026-10-21).
+
         The cog does not change -- a cog is the engine either way, and what is
         being said is whether it is running, which is what the colour is for.
         Only the words under the pointer change.
@@ -1883,10 +1894,17 @@ class Panel:
         self.engine_btn.configure(background=face, activebackground=hover)
 
     def toggle_engine(self):
-        """Load the model, or give the memory back."""
-        if self.drawn.get("engine_up"):
+        """Voice and engine on together, or both off and the memory back.
+
+        Red with an engine already up means only the voice is off, so the press
+        turns it on rather than unloading a model that is already loaded. A load
+        still in progress can be given up on, voice or no voice.
+        """
+        if not self.drawn.get("engine_up"):
+            return self.start_engine()
+        if self.drawn.get("enabled") or self.drawn.get("engine_loading"):
             return self.unload_engine()
-        self.start_engine()
+        self.turn_voice_on()
 
     def unload_engine(self):
         """Stop speaking, then shut the engine down.
@@ -2001,7 +2019,10 @@ class Panel:
         # rest of a minute. Still pressable, so a load can be given up on.
         loading = bool(st.get("loading")) or (not st.get("ready") and not st.get("error"))
         self.drawn["engine_loading"] = loading
-        self.paint_engine(None if loading else True)
+        # Read before the paint: green needs the voice on as well (paint_engine).
+        if not self.held("enabled"):
+            self.drawn["enabled"] = bool(st.get("enabled"))
+        self.paint_engine(None if loading else bool(self.drawn.get("enabled")))
 
         # Engine first of the three: it decides what the catalogue contains,
         # and stand_in reads it to choose which portrait a voice borrows.
@@ -2044,9 +2065,8 @@ class Panel:
         # question as whether the voice is on at all: "off" is a setting and
         # lives in the config, "held" is about right now and lives in the
         # engine. The status line under the row still says when the voice is
-        # off, because that is the one that explains a silence.
-        if not self.held("enabled"):
-            self.drawn["enabled"] = bool(st.get("enabled"))
+        # off, because that is the one that explains a silence. The engine
+        # switch says it too: red while the voice is off.
         held = bool(st.get("paused"))
         if self.held("paused"):
             held = self.drawn.get("paused", held)  # just clicked; let it settle

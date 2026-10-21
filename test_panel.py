@@ -342,6 +342,26 @@ class EngineSwitch(unittest.TestCase):
         self.assertNotIn("unloading", one.pending)
         self.assertEqual(one.painted, [False, False])
 
+    def test_an_engine_up_with_the_voice_off_is_switched_on_not_unloaded(self):
+        # A game starts the engine and never touches the voice. Red, and the
+        # press turns the voice on (2026-10-21).
+        one = self.window()
+        one.remember = lambda **_: None
+        one.drawn.update(enabled=False, engine_loading=False)
+        panel.Panel.toggle_engine(one)
+        self.assertTrue(one.drawn["enabled"])
+        self.assertEqual(one.painted, [True])
+        self.assertEqual(one.engine_gen, 0)          # nothing unloaded
+        self.assertEqual(one.errands, [])
+
+    def test_voice_and_engine_both_on_go_off_together(self):
+        one = self.window()
+        one.drawn.update(enabled=True, engine_loading=False)
+        panel.Panel.toggle_engine(one)
+        self.assertFalse(one.drawn["enabled"])
+        self.assertEqual(one.painted, [False])
+        self.assertEqual(len(one.errands), 1)        # off, then quit
+
     def test_one_missed_poll_is_not_an_engine_gone(self):
         one = self.window()
         panel.Panel.render_down(one)
