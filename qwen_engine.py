@@ -506,6 +506,87 @@ def refusal(studio_dir, probe=None):
     return None
 
 
+# ---------------------------------------------------------------------------
+# Whether the GPU can be used at all.
+#
+# Studio ships its own CUDA runtime (cudart64_<major>.dll) next to ggml-cuda,
+# and a CUDA runtime refuses to start on a driver older than its major version
+# needs. ggml's only word on it is "failed to initialize CUDA: (null)", and then
+# it quietly runs on the CPU at a fraction of the speed -- an RTX 5070 on driver
+# 577.13 against Studio's CUDA 13, 2026-10-23. Nothing about that says "update
+# the driver", so this does. Read from NVML, which the driver itself installs,
+# rather than by starting CUDA: asking costs nothing and cannot crash anything.
+# ---------------------------------------------------------------------------
+
+# The oldest driver each CUDA major version runs on, on Windows (NVIDIA's CUDA
+# toolkit release notes). Only the major matters: a minor release asks for a
+# little more, but Studio is built against the .0 runtime.
+CUDA_DRIVER_MIN = {12: 528, 13: 580}
+
+
+def studio_cuda_major(studio_dir):
+    """The CUDA major version Studio's runtime is built for, or None."""
+    try:
+        names = os.listdir(studio_dir)
+    except OSError:
+        return None
+    for name in names:
+        low = name.lower()
+        if low.startswith("cudart64_") and low.endswith(".dll"):
+            digits = low[len("cudart64_"):-len(".dll")]
+            if digits.isdigit():
+                return int(digits[:2]) if len(digits) > 2 else int(digits)
+    return None
+
+
+def nvidia_gpu():
+    """(GPU name, driver version) from NVML, or None with no NVIDIA driver."""
+    try:
+        nvml = ctypes.CDLL(os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                                        "System32", "nvml.dll"))
+    except OSError:
+        return None
+    if nvml.nvmlInit_v2() != 0:
+        return None
+    try:
+        buf = ctypes.create_string_buffer(96)
+        if nvml.nvmlSystemGetDriverVersion(buf, len(buf)) != 0:
+            return None
+        driver = buf.value.decode("ascii", "replace")
+        name = "an NVIDIA GPU"
+        dev = c_void_p()
+        if nvml.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(dev)) == 0:
+            got = ctypes.create_string_buffer(96)
+            if nvml.nvmlDeviceGetName(dev, got, len(got)) == 0:
+                name = got.value.decode("utf-8", "replace")
+        return name, driver
+    finally:
+        nvml.nvmlShutdown()
+
+
+def gpu_problem(studio_dir, gpu=None):
+    """A sentence on why Studio cannot use this machine's NVIDIA GPU, or None.
+
+    None also when there is no NVIDIA GPU, or nothing can be told: the CPU is
+    then simply what there is, not a fault. Tests pass their own `gpu`.
+    """
+    major = studio_cuda_major(studio_dir)
+    need = CUDA_DRIVER_MIN.get(major)
+    gpu = gpu or nvidia_gpu()
+    if not need or not gpu:
+        return None
+    name, driver = gpu
+    try:
+        have = int(driver.split(".")[0])
+    except ValueError:
+        return None
+    if have >= need:
+        return None
+    return (f"the {name} is not used: Qwen-TTS Studio is built for CUDA {major}, "
+            f"which needs NVIDIA driver {need} or newer, and this one is {driver}. "
+            f"Qwen runs on the CPU until the driver is updated")
+
+
 class Engine:
     """QwenEngine, minus the user interface.
 

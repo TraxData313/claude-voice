@@ -80,6 +80,14 @@ def cmd_status(state, _args):
     else:
         print(f"  voices from  : {len(voice_lib.catalog(state))} in "
               f"{len(voice_lib.voice_roots(state))} folder(s)")
+        # Only ever a problem line: on the CPU Qwen still speaks, just slowly,
+        # so nothing else would ever say why. See gpu_problem. Studio's only:
+        # Qwen on PyTorch brings its own CUDA and its own word on it.
+        from qwen_engine import gpu_problem
+        problem = (voice_lib.qwen_backend(state) != "torch"
+                   and gpu_problem(state.get("studioDir") or ""))
+        if problem:
+            print(f"  gpu          : {problem}")
     # Reads the last look off disk; it never checks from here. Quote this
     # version when reporting a bug -- until now there was nothing to quote.
     import update_check

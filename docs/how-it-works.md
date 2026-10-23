@@ -659,3 +659,10 @@ uninstall missed its own Run value and hooks.
 started — or had not since a reboot — could not be found by the very game that installed it.
 The `HKCU\Software\claude-voice` key is written by the installer before anything runs, and the
 engine only refreshes its port. **[How a game finds it →](discovery.md)**
+
+**Qwen on the CPU with a good GPU right there means the driver is too old.** Studio ships its
+own CUDA runtime (`cudart64_13.dll`), and a CUDA 13 runtime will not start on a driver older
+than 580. ggml only says `failed to initialize CUDA: (null)`, somewhere in the middle of forty
+lines of loading, and carries on at a fraction of the speed, so on an RTX 5070 with driver
+577.13 every line took seconds and nothing said why. The engine now reads the driver
+version from NVML before loading and says, in the log and in `status`, which driver is needed.

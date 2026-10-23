@@ -531,5 +531,34 @@ class CheapPolls(unittest.TestCase):
         self.assertIn("/state", speak_server.READ_ONLY_ROUTES)
 
 
+class ADriverTooOldForStudiosCuda(unittest.TestCase):
+    """An RTX 5070 on driver 577.13 against Studio's CUDA 13 ran Qwen on the
+    CPU with nothing but "(null)" in the log to say why."""
+
+    def setUp(self):
+        self.studio = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.studio, True)
+
+    def ship(self, name):
+        open(os.path.join(self.studio, name), "wb").close()
+
+    def test_an_old_driver_is_named_with_the_one_needed(self):
+        self.ship("cudart64_13.dll")
+        said = qwen_engine.gpu_problem(self.studio, ("NVIDIA GeForce RTX 5070", "577.13"))
+        self.assertIn("580 or newer", said)
+        self.assertIn("577.13", said)
+
+    def test_a_new_enough_driver_says_nothing(self):
+        self.ship("cudart64_13.dll")
+        self.assertIsNone(qwen_engine.gpu_problem(self.studio, ("RTX", "581.42")))
+
+    def test_no_cuda_runtime_in_studio_says_nothing(self):
+        self.assertIsNone(qwen_engine.gpu_problem(self.studio, ("RTX", "300.00")))
+
+    def test_the_runtime_major_is_read_off_its_name(self):
+        self.ship("cudart64_12.dll")
+        self.assertEqual(qwen_engine.studio_cuda_major(self.studio), 12)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

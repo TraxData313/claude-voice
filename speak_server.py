@@ -260,8 +260,13 @@ def build_engine(state, progress=None):
         eng.load_models()
         return which, eng
 
-    from qwen_engine import Engine
+    from qwen_engine import Engine, gpu_problem
 
+    # Said before the load, because the load's own word on it is one line of
+    # ggml saying "(null)" somewhere in the middle of forty.
+    problem = gpu_problem(state["studioDir"])
+    if problem:
+        log(f"GPU: {problem}")
     eng = Engine(state["studioDir"], verbose=True)
     eng.load_models(state["modelDir"], state["talker"])
     return which, eng
