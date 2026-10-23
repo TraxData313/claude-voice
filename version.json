@@ -1,16 +1,16 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
-  "version": "2.0.0",
-  "date": "2026-10-17",
+  "version": "2.1.0",
+  "date": "2026-10-23",
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "I am a proper program now, with a Python of my own and a real uninstall, and I speak your answers but not the lines in between, unless you ask.",
+  "headline": "Qwen runs even where Smart App Control is on, and when your graphics card sits idle because its driver is too old, I now say which driver you need.",
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "claude-voice installs as a program of its own, on a signed copy of Python, so Smart App Control lets it run. Existing installs move over by running the installer once.",
-    "Claude Code's hooks hand me each finished answer. Nothing reads your transcripts or rewrites your CLAUDE.md any more, and the lines between tool calls are off unless you turn them on.",
-    "Games find me through the registry, even when I am not running, and I move to a free port when another program has mine."
+    "Where Windows refuses Qwen-TTS Studio, Qwen now runs on PyTorch instead, installed with one command, and every voice works on it unchanged.",
+    "If an NVIDIA graphics card is there but its driver is too old for Studio's CUDA, the status and the log name the driver to install, instead of Qwen quietly running slowly on the processor.",
+    "A line queued for Qwen keeps its voice when Pocket speaks it instead, and the engine button in the panel is green only when the voice is on too."
   ],
   "_needsSetup": "true when a release changes the hooks, the slash command or the install scripts -- the parts a git pull alone does not reinstall. An installed copy's update re-runs its installer by itself.",
-  "needsSetup": true,
+  "needsSetup": false,
   "changelog": "https://github.com/TraxData313/claude-voice/blob/main/CHANGELOG.md"
 }

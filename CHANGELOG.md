@@ -6,7 +6,7 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
-## Unreleased
+## 2.1.0 — 2026-10-23
 
 **Qwen runs with Smart App Control on.** Picking Qwen on a machine where Windows refuses
 Qwen-TTS Studio used to switch, fall back to Pocket on its own, and look as if the choice
@@ -25,6 +25,11 @@ would not stick. Now Qwen runs there on PyTorch instead.
   back to Pocket mid-line, the line reached Pocket without a Pocket voice and was read as
   Alba, a man — a game's wife included. Each line is now re-cast for the engine that loads.
 - The machine check reads 2026 NVIDIA drivers, which print "CUDA UMD Version".
+- **A GPU left idle by an old driver is named.** Studio ships a CUDA 13 runtime, which will
+  not start on an NVIDIA driver older than 580, and ggml said only `failed to initialize
+  CUDA: (null)` before running Qwen on the CPU at a third of the speed. `/voice status` and
+  the log now say which driver is installed and which is needed. On an RTX 5070 laptop,
+  updating 577.13 to 621.01 took a line from 3.2 s to 1.0 s.
 
 ## 2.0.0 — 2026-10-17
 

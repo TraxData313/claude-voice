@@ -1,7 +1,7 @@
 {
   "name": "claude-voice",
   "displayName": "claude-voice",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Claude Code and Codex read their answers aloud in a voice you choose, entirely on your own machine. A local speech model does the speaking: no cloud, no API key, no account, and no audio leaving the computer. Windows; runs on the CPU, or an NVIDIA card for Qwen.",
   "author": {
     "name": "TraxData313",
