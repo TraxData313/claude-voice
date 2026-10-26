@@ -222,7 +222,10 @@ class Hook(unittest.TestCase):
 
     def run_hook(self, **payload):
         out = io.StringIO()
-        with patch("sys.stdin", io.StringIO(json.dumps(payload))), \
+        # Bytes under a text wrapper, as Claude Code pipes it: the hook reads
+        # the bytes, not the code page's guess at them.
+        stdin = io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode("utf-8")))
+        with patch("sys.stdin", stdin), \
                 contextlib.redirect_stdout(out):
             speak_hook.main([])
         printed = out.getvalue().strip()

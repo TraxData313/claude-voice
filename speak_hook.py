@@ -346,6 +346,23 @@ def send(state, body):
     return False
 
 
+def read_payload(stream):
+    """The JSON Claude Code pipes in, decoded as the UTF-8 it is.
+
+    Bytes, not sys.stdin's text. On Windows a piped stdin is decoded with the
+    ANSI code page, cp1252 here, so every Cyrillic letter came through as two
+    Latin ones -- and the cleaner then read the ° and ± among them as
+    "degrees" and "plus or minus". A Bulgarian session was heard as a long
+    string of "degrees" (2026-10-26). A byte-order mark is tolerated: a
+    payload piped in by hand from PowerShell carries one, and json refuses it.
+    """
+    try:
+        payload = json.loads(stream.read().decode("utf-8-sig", "replace") or "{}")
+    except (ValueError, OSError):
+        payload = {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     state = voice_lib.load_state()
@@ -359,14 +376,7 @@ def main(argv=None):
             send(state, body)
         return
 
-    try:
-        # A byte-order mark is tolerated: a payload piped in by hand from
-        # PowerShell carries one, and json refuses it.
-        payload = json.loads(sys.stdin.read().lstrip("﻿") or "{}")
-    except (ValueError, OSError):
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
+    payload = read_payload(sys.stdin.buffer)
     event = payload.get("hook_event_name") or "Stop"
 
     # Log before deciding anything, so "Claude Code never called us" can be

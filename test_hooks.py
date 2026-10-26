@@ -238,5 +238,43 @@ class LoginValueTest(unittest.TestCase):
         self.assertFalse(voice_lib._names_root('"' + voice_lib.ROOT + '-old\\panel.py"'))
 
 
+class PayloadTest(unittest.TestCase):
+    """What Claude Code pipes in is UTF-8 whatever the console's code page.
+
+    The stdin here is built the way Windows builds a piped one -- cp1252 with
+    surrogateescape -- so a hook that reads text off it fails the test the way
+    it failed in use: a Bulgarian answer heard as "degrees" over and over.
+    """
+
+    SAID = "Така, колежка ми даде няколко тестови файла."
+
+    def stop(self, raw):
+        import io
+        from unittest.mock import patch
+        import speak_hook
+
+        stdin = io.TextIOWrapper(io.BytesIO(raw), encoding="cp1252", errors="surrogateescape")
+        sent = []
+        with patch.object(sys, "stdin", stdin), \
+                patch.object(voice_lib, "load_state", lambda: {"enabled": True}), \
+                patch.object(speak_hook, "headless", lambda state: False), \
+                patch.object(speak_hook, "send", lambda state, body: sent.append(body)), \
+                patch.object(speak_hook, "trace", lambda msg: None):
+            speak_hook.main([])
+        return sent
+
+    def payload(self):
+        return json.dumps({"hook_event_name": "Stop", "session_id": "s",
+                           "last_assistant_message": self.SAID}, ensure_ascii=False)
+
+    def test_cyrillic_arrives_as_cyrillic(self):
+        sent = self.stop(self.payload().encode("utf-8"))
+        self.assertEqual([b["text"] for b in sent], [self.SAID])
+
+    def test_a_byte_order_mark_is_tolerated(self):
+        sent = self.stop(b"\xef\xbb\xbf" + self.payload().encode("utf-8"))
+        self.assertEqual([b["text"] for b in sent], [self.SAID])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
