@@ -1,14 +1,14 @@
 {
   "_comment": "What version this copy is. The same file on GitHub is what an update check compares against, so the two are always the same shape. Bump it in the commit that releases, and add the matching section to CHANGELOG.md. Three other places carry this number too -- .claude-plugin/plugin.json, the marketplace entry beside it, and the git tag -- and 'claude plugin tag' checks that they agree.",
-  "version": "2.1.0",
-  "date": "2026-10-23",
+  "version": "2.1.1",
+  "date": "2026-10-27",
   "_headline": "One sentence, spoken aloud when an update is found. Write it for the ear.",
-  "headline": "Qwen runs even where Smart App Control is on, and when your graphics card sits idle because its driver is too old, I now say which driver you need.",
+  "headline": "A short answer is now said once instead of twice, and a long one tells you what is waiting on screen. Cyrillic is heard as Cyrillic too.",
   "_notes": "The two or three things worth hearing about this release. The full account lives in CHANGELOG.md.",
   "notes": [
-    "Where Windows refuses Qwen-TTS Studio, Qwen now runs on PyTorch instead, installed with one command, and every voice works on it unchanged.",
-    "If an NVIDIA graphics card is there but its driver is too old for Studio's CUDA, the status and the log name the driver to install, instead of Qwen quietly running slowly on the processor.",
-    "A line queued for Qwen keeps its voice when Pocket speaks it instead, and the engine button in the panel is green only when the voice is on too."
+    "A short answer has no summary repeating it: it is said once, in a few short lines.",
+    "A long answer's summary also says what detail is on screen, so you know whether to read the rest.",
+    "Claude Code's messages reach the voice as UTF-8, so a Bulgarian session is no longer heard as a string of degrees."
   ],
   "_needsSetup": "true when a release changes the hooks, the slash command or the install scripts -- the parts a git pull alone does not reinstall. An installed copy's update re-runs its installer by itself.",
   "needsSetup": false,

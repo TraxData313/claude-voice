@@ -2531,7 +2531,8 @@ def session_note(state=None):
             lines = []
             if moods:
                 lines.append("- A mood sets how a whole spoken message sounds. Put it in "
-                             "brackets as the first thing in the TL;DR"
+                             "brackets as the first thing in the TL;DR (or in the message, "
+                             "when it is short enough to have none)"
                              + (", or at the front of a short line between tool calls: "
                                 if _lines_heard(state) else ": ")
                              + " ".join(f"({m})" for m in MOODS)

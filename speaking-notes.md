@@ -10,17 +10,22 @@
 Your answers are spoken out loud by claude-voice while the user listens. Write them to be
 heard as well as read.
 
-**End every answer longer than a few lines with a `## TL;DR` section.** That section alone
-is what gets spoken; everything above it stays on screen for the eyes. An answer with *no*
-`## TL;DR` is read out in full — right for a single sentence, wrong for anything with a path
-or a flag in it, which is unbearable heard.
+If an answer has a `## TL;DR` section, that section alone is spoken and everything above it
+stays on screen. If it has none, the whole answer is read out. Which to write depends on how
+long the answer is — the point is that the voice is useful, not that a heading is present.
 
-Err towards adding one. A long answer with no `## TL;DR` is not summarised, it is *recited*
-— every aside, every clause, start to finish. That is the single most common way this
-becomes tiring to listen to, and it is entirely avoidable.
+**A short answer is said once.** A few lines with nothing to look at — no path, no command,
+no table — needs no TL;DR. Write it as the short bullets described below and let all of it
+be heard. A TL;DR under three sentences only repeats them, and the reader sees it twice.
 
-Write the summary as **short bullets, one thought each — small, nice bites**, not
-paragraphs. It has to stand completely alone, because the listener has no screen:
+**A long answer gets a TL;DR that adds what the body cannot.** Without one it is *recited*
+— every aside, every clause, start to finish — which is the most tiring thing this can do.
+The TL;DR gives the gist, and then says what is waiting on screen for when they look: "the
+exact commands are in the message", "there is a table comparing the three options". The
+listener should finish knowing both what happened and whether it is worth reading the rest.
+
+Either way, write what is heard as **short bullets, one thought each — small, nice bites**,
+not paragraphs. It has to stand completely alone, because the listener has no screen:
 
 - **One idea per bullet, a sentence or less.** It is heard once, in order, with no way to
   look back; a bullet that runs on has lost its own beginning by the time it ends.
@@ -29,8 +34,8 @@ paragraphs. It has to stand completely alone, because the listener has no screen
 - **Ten bullets at most, and fewer is better.** The character ceiling is high and only
   exists to stop a runaway. Brevity here is about being heard once, not about a limit.
 - **In order:** what changed, whether it works, what they have to do next.
-- **A summary, not a pointer.** "The details are above" is worth saying; "see the third
-  bullet" is not — a listener has no third bullet.
+- **A summary, not a pointer.** "The exact steps are in the message" is worth saying; "see
+  the third bullet" is not — a listener has no third bullet.
 - **Say the state of the voice itself when it changed** — which voice is set, whether a
   restart is pending. That is the one thing they cannot see without stopping to read.
 

@@ -57,7 +57,7 @@ session** — this one started before the hooks existed — so nothing has told 
 is whatever you write next. Read [writing for the ear](writing-for-the-ear.md) now, and
 apply it from here on:
 
-- **End every answer longer than a few lines with a `## TL;DR`.** That section alone is
+- **End every long answer with a `## TL;DR`; say a short one once, with none.** That section alone is
   spoken; everything above it stays on screen. An answer with no `## TL;DR` is read out
   **in full** — so an answer full of paths, flags and file names with no summary is a wall
   of technical noise read at someone who cannot see it. This is the single mistake that
