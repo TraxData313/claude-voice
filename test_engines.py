@@ -243,9 +243,14 @@ class ThePocketEngineItself(unittest.TestCase):
         self.assertEqual(pocket_engine.style_of("cosette"), "")
 
     def test_french_takes_the_only_french_model_there_is(self):
-        # Asking for "french" fails with a message telling you to ask for
-        # french_24l. Fine to read once, poor to hit mid-answer.
-        self.assertEqual(pocket_engine.model_for("french"), "french_24l")
+        # Asking for "french" used to fail with a message telling you to ask for
+        # french_24l. Fine to read once, poor to hit mid-answer. pocket-tts 3.3.0
+        # ships a small French model too, and then that one is taken.
+        names = pocket_engine._config_names()
+        self.assertEqual(pocket_engine.model_for("french"),
+                         "french" if not names or "french" in names else "french_24l")
+        with patch.object(pocket_engine, "_config_names", return_value={"english", "french_24l"}):
+            self.assertEqual(pocket_engine.model_for("french"), "french_24l")
         self.assertEqual(pocket_engine.model_for("english"), "english")
 
     def test_every_language_maps_to_a_config_that_exists(self):
