@@ -64,6 +64,7 @@ command — it is `/voice on`, never `/voice_on`.
 | `unregister [--force]` | Take that registration away again, if it names this copy. |
 | `install breeze [--check]` | Check this machine for Breeze TTS 2, the voice that laughs, then offer to download it (about 11 GB). Asks first. |
 | `install qwen [--check]` | Check this machine for Qwen on PyTorch -- Qwen with Smart App Control on -- then offer to download it (about 7 GB). Asks first. |
+| `packs [fetch]` | Voice packs a registered voice folder offers (baked Pocket voices): how each stands, or fetch them now. |
 
 ## Keeping it current
 

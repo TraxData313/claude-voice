@@ -171,6 +171,20 @@ def rss_mb():
         return None
 
 
+def fetch_voice_packs(force=False):
+    """Fetch any registered root's voice pack that is not here yet, on a thread
+    of its own. Never in the way of speech: the voices join the list when the
+    pack is in place, and until then are what they were. See pocket_packs.py."""
+    import pocket_packs
+
+    pocket_packs.log = log
+
+    def arrived(_results):
+        _VOICES["when"] = 0.0                    # the dropdown should see them now
+
+    pocket_packs.ensure_soon(None, on_done=arrived, force=force)
+
+
 def build_engine(state, progress=None):
     """Whichever engine the config asks for, loaded and ready to speak.
 
@@ -212,6 +226,7 @@ def build_engine(state, progress=None):
             # problem, and it says so there with the text in hand; refusing to
             # start over it would take the whole engine down for one bad name.
             log(f"could not warm the voice: {exc}")
+        fetch_voice_packs()
         return which, eng
 
     if which == "breeze":
@@ -2215,7 +2230,23 @@ class Handler(BaseHTTPRequestHandler):
             except LookupError as exc:
                 return self._reply(404, {"error": str(exc)})
             _VOICES["when"] = 0.0          # the dropdown should see them now
+            # A root that brings a voice pack: fetched now if Pocket is the
+            # engine speaking, rather than at its next load. A Pocket that has
+            # not loaded yet fetches it then.
+            if payload.get("add") and sp.engine_name == "pocket":
+                fetch_voice_packs()
             return self._reply(200, {"extraVoicesDirs": roots})
+
+        if route == "/voice-packs":
+            # The packs registered roots bring, and how each stands: ready,
+            # downloading, offline, mismatch... {"fetch": true} tries any that
+            # are not in place now, without waiting out a recent failure.
+            import pocket_packs
+
+            if payload.get("fetch"):
+                fetch_voice_packs(force=True)
+            return self._reply(200, {"packsDir": pocket_packs.packs_dir(),
+                                     "packs": pocket_packs.status(voice_lib.load_state())})
 
         if route == "/panel":
             # The window, opened for someone who is not at a command line --

@@ -28,6 +28,7 @@ and make new ones.
 
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import voice_lib
@@ -937,6 +938,39 @@ def cmd_unregister(state, args):
               " 'unregister --force' removes it anyway.")
 
 
+def cmd_packs(state, args):
+    """Voice packs: the baked Pocket states a registered voice folder offers.
+
+    No argument says how each stands. 'fetch' downloads any not in place yet,
+    here and now -- the installer runs it, and so may anyone who would rather
+    not wait for the engine to do it in the background. See docs/voice-packs.md.
+    """
+    import pocket_packs
+
+    pocket_packs.log = lambda msg: print("  " + msg, flush=True)
+    if args and args[0].lower() in ("fetch", "get", "download"):
+        last = {"at": 0.0}
+
+        def progress(done, total):
+            if time.monotonic() - last["at"] > 5:
+                last["at"] = time.monotonic()
+                print(f"  {done / 1e6:.0f} of {total / 1e6:.0f} MB", flush=True)
+
+        pocket_packs.fetch_all(state, force=True, progress=progress)
+    elif args:
+        raise SystemExit("usage: voice_cli.py packs [fetch]")
+    rows = pocket_packs.status(state)
+    if not rows:
+        print("No voice folder here brings a voice pack.")
+        return
+    print(f"Voice packs (kept in {pocket_packs.packs_dir()}):")
+    for r in rows:
+        print(f"  {r.get('name', '?'):<20} {r['state']:<11} "
+              + (f"{r['voices']} voices, {r['bytes'] / 1e6:.0f} MB" if "voices" in r else "")
+              + (f" -- {r['detail']}" if r.get("detail") else ""))
+        print(f"  {'':<20} from {r['root']}")
+
+
 def _registration_line():
     found = voice_lib.registration()
     if not found:
@@ -995,6 +1029,7 @@ HELP = [
         ("unregister", "[--force]", "Take that registration away again, if it names this copy."),
         ("install", "breeze [--check]", "Check this machine for Breeze TTS 2, the voice that laughs, then offer to download it (about 11 GB). Asks first."),
         ("install", "qwen [--check]", "Check this machine for Qwen on PyTorch -- Qwen with Smart App Control on -- then offer to download it (about 7 GB). Asks first."),
+        ("packs", "[fetch]", "Voice packs a registered voice folder offers (baked Pocket voices): how each stands, or fetch them now."),
     ]),
     ("Keeping it current", [
         ("version", "", "What this copy is. Contacts nobody -- worth quoting in a bug report."),
@@ -1186,7 +1221,7 @@ COMMANDS = {
     "play": cmd_resume, "resume": cmd_resume, "carry-on": cmd_resume,
     "mediakey": cmd_mediakey, "media": cmd_mediakey,
     "start": cmd_start, "kill": cmd_kill, "source": cmd_source, "max": cmd_max,
-    "install": cmd_install,
+    "install": cmd_install, "packs": cmd_packs, "pack": cmd_packs,
     "register": cmd_register, "unregister": cmd_unregister,
     "history": cmd_history, "playback": cmd_playback, "buffer": cmd_playback,
     "volume": cmd_volume, "vol": cmd_volume, "loud": cmd_volume,
@@ -1224,7 +1259,7 @@ def main():
     # 'update' itself, which is on its way to ask GitHub directly. Skipped too
     # for what an installer runs: a detached Python started from an uninstall
     # would hold the very runtime folder it is about to delete.
-    if cmd not in ("update", "upgrade", "hooks", "register", "unregister"):
+    if cmd not in ("update", "upgrade", "hooks", "register", "unregister", "packs", "pack"):
         import update_check
         update_check.refresh_soon(state)
     COMMANDS[cmd](state, args)
