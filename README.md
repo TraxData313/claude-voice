@@ -96,6 +96,7 @@ audio inside a README. **[Cloning your own, and whose voice you may publish →]
 | **[How it works →](docs/how-it-works.md)** | the engine, the hooks, the JNI bridge — and the things that cost real time to find |
 | **[How a game finds it →](docs/discovery.md)** | the registry key, where.json, and the order a program looks in |
 | **[Talking to her from a program →](docs/api.md)** | the HTTP API — and [what a game needs](docs/api.md#for-a-game) |
+| **[Voice packs →](docs/voice-packs.md)** | a library's baked Pocket voices, fetched once, no sign-in |
 | **[When it goes quiet →](docs/troubleshooting.md)** | silence has no error message. Start here |
 
 <!-- ─────────────────────────────────────────────────────────────────────────

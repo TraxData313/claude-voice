@@ -6,6 +6,20 @@ headline out of that file rather than out of this one — so a release means edi
 To move from one of these to the next: `/voice update --apply`, or by hand,
 **[updating →](docs/updating.md)**.
 
+## Unreleased
+
+**A game's voices speak on Pocket without a Hugging Face sign-in.** A registered voice folder may
+carry a `pocket-pack.json` naming a zip of baked Pocket states; the app fetches it into its own
+data folder, checks its size and checksum, and speaks each covered voice from it.
+**[Voice packs →](docs/voice-packs.md)**
+
+- Fetched by the installer for folders already registered, in the background when Pocket loads,
+  or with `/voice packs fetch`. Never in front of speech; offline, it tries again later.
+- A pack baked on other Pocket weights than this copy loads is never used, and the log says so:
+  its voices would be garbage audio.
+- `POST /voice-packs` says how each pack stands.
+- A float16 `pocket.safetensors` loads: its tensors are brought up to the model's dtype.
+
 ## 2.1.1 — 2026-10-27
 
 **What is heard depends on how long the answer is.** The read-aloud notes asked for a
@@ -19,6 +33,7 @@ as the message, once as a summary of it.
 - **Cyrillic is heard as Cyrillic.** On Windows the hook's stdin was decoded as cp1252, so
   each Cyrillic letter reached the engine as two Latin ones and a Bulgarian session was read
   as a run of "degrees" and "plus or minus". The hook now decodes the bytes as UTF-8 itself.
+
 ## 2.1.0 — 2026-10-23
 
 **Qwen runs with Smart App Control on.** Picking Qwen on a machine where Windows refuses

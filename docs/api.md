@@ -155,6 +155,7 @@ performed than you expected — somebody may have switched engines.
 | `POST /health` | whether it is up, which version, its `port` (and `portNote` when it is not the one it wanted), the folder it runs from (`root`), and whether a mood or a sound would be performed |
 | `POST /voices` | every voice the engine speaking now can use, each with its `sex` and `culture` |
 | `POST /voice-roots` `{"add": "C:\\…"}` | also read the voices in that folder, where they lie. `remove` takes one away |
+| `POST /voice-packs` | the [voice packs](voice-packs.md) registered folders offer, and how each stands. `{"fetch": true}` tries any not in place now |
 | `POST /storage` | where each engine's files are on disk and how many bytes they take (`bytes` in all, `sizes` folder by folder), and the app's own folder |
 | `POST /panel` | opens the panel window, or raises the one already open |
 | `POST /quit` | closes the engine and hands its memory back |
@@ -179,6 +180,9 @@ many characters can use them the same way.
   catalogue as they lie, never copied, never written to. The folder may be laid out as
   `<sex>\<id>`, `<sex>\<culture>\<id>`, or flat `<id>` with `Gender` (1 woman, 2 man) and
   `Culture` in each `voice.json`. It is remembered in `extraVoicesDirs`; asking again is harmless.
+- **Ship baked Pocket voices beside it.** A `pocket-pack.json` in that folder names a zip of
+  `pocket.safetensors` files; it is fetched into this app's own folder and those voices speak on
+  Pocket with no Hugging Face sign-in. **[Voice packs →](voice-packs.md)**
 - **Cast from `/voices`.** Each engine has its own voices — Pocket speaks a voice only if it has a
   baked state, or a clip where cloning is available; Breeze only if it has a clip and its words —
   so read the list again after `/set-engine`. A voice folder speaks on all three engines when it
