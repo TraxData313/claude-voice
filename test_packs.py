@@ -152,7 +152,7 @@ class Packs(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.case, "escape")))
         # Nothing is written into the voice root; nothing but the pack is left in packs.
         self.assertEqual(sorted(os.listdir(self.root)), ["female", "male", "pocket-pack.json"])
-        self.assertEqual(os.listdir(os.path.join(self.packs, "calradia")), [REVISION])
+        self.assertEqual(os.listdir(os.path.join(self.packs, "calradia")), [REVISION[:12]])
 
     def test_present_and_verified_is_not_fetched_again(self):
         self._pack()
@@ -164,7 +164,7 @@ class Packs(unittest.TestCase):
     def test_a_new_zip_for_the_same_revision_replaces_the_old_whole(self):
         self._pack()
         pocket_packs.fetch_all(self.state)
-        marker = os.path.join(self.packs, "calradia", REVISION, pocket_packs.MARKER)
+        marker = os.path.join(self.packs, "calradia", REVISION[:12], pocket_packs.MARKER)
         with open(marker, encoding="utf-8") as fh:
             doc = json.load(fh)
         doc["sha256"] = "0" * 64                      # as if an older zip were in place
@@ -173,7 +173,7 @@ class Packs(unittest.TestCase):
         self.assertEqual(self._states(), ["absent"])
         self.assertEqual(pocket_packs.fetch_all(self.state), [("calradia", "ready")])
         self.assertEqual(len(_Served.hits), 2)
-        self.assertEqual(sorted(os.listdir(os.path.join(self.packs, "calradia"))), [REVISION])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.packs, "calradia"))), [REVISION[:12]])
 
     # -- refused ----------------------------------------------------------
     def test_a_checksum_mismatch_is_refused_and_left_alone_for_a_while(self):
@@ -181,7 +181,7 @@ class Packs(unittest.TestCase):
         self.assertEqual(pocket_packs.fetch_all(self.state), [("calradia", "failed")])
         self.assertEqual(self._states(), ["failed"])
         self.assertIn("sha256", pocket_packs.status(self.state)[0]["detail"])
-        self.assertFalse(os.path.exists(os.path.join(self.packs, "calradia", REVISION)))
+        self.assertFalse(os.path.exists(os.path.join(self.packs, "calradia", REVISION[:12])))
         self.assertEqual([f for f in os.listdir(os.path.join(self.packs, "calradia"))], [],
                          "the bad download is not kept")
         self.assertEqual(pocket_packs.fetch_all(self.state), [("calradia", "failed")])
@@ -220,7 +220,7 @@ class Packs(unittest.TestCase):
     def test_a_zip_without_a_listed_voice_is_refused_whole(self):
         self._pack(voices=list(self.voices) + ["male/khuzait/khuzait_male_absent"])
         self.assertEqual(pocket_packs.fetch_all(self.state), [("calradia", "failed")])
-        self.assertFalse(os.path.exists(os.path.join(self.packs, "calradia", REVISION)))
+        self.assertFalse(os.path.exists(os.path.join(self.packs, "calradia", REVISION[:12])))
 
     def test_no_pocket_tts_means_waiting_not_downloading(self):
         self._pack()

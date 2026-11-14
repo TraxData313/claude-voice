@@ -154,8 +154,14 @@ def read(root):
 
 
 def where(pack):
-    """The folder this pack is unpacked into: <packs>\\<name>\\<revision>."""
-    return os.path.join(packs_dir(), pack["name"], pack["weights"]["revision"])
+    """The folder this pack is unpacked into: <packs>\\<name>\\<revision, 12 digits>.
+
+    Twelve, not forty: a library's own folders are deep already
+    (female\\battania\\battanian_female_earnest\\pocket.safetensors), and the
+    full hash pushed a pack under a long data folder past Windows' 260
+    characters -- found the first time one was unpacked in a deep temp folder.
+    """
+    return os.path.join(packs_dir(), pack["name"], pack["weights"]["revision"][:12])
 
 
 def is_ready(pack):
@@ -373,7 +379,7 @@ def fetch(root, pack, progress=None):
     final = where(pack)
     parent = os.path.dirname(final)
     os.makedirs(parent, exist_ok=True)
-    rev = pack["weights"]["revision"]
+    rev = pack["weights"]["revision"][:12]
     part = os.path.join(parent, f"{rev}.{pack['sha256'][:12]}.zip.part")
     log(f"voice pack {pack['name']}: fetching {pack['bytes'] / 1e6:.0f} MB from {pack['url']}")
     _note(root, pack, "downloading", "", done=0)
@@ -411,8 +417,8 @@ def fetch(root, pack, progress=None):
 
     # Unpacked beside its final place and renamed in, so the catalogue sees
     # either the whole old pack, or the whole new one, never half of either.
-    tmp = os.path.join(parent, f".{rev}.new-{os.getpid()}")
-    old = os.path.join(parent, f".{rev}.old-{os.getpid()}")
+    tmp = os.path.join(parent, f".new-{os.getpid()}")
+    old = os.path.join(parent, f".old-{os.getpid()}")
     shutil.rmtree(tmp, ignore_errors=True)
     try:
         _unpack(part, pack, tmp)
