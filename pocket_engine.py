@@ -257,6 +257,38 @@ def _trust_windows_certificates():
         pass
 
 
+def model_dtype(model):
+    """The floating dtype the model computes in: its first floating parameter's.
+
+    float32 for every config Pocket ships today, but read rather than assumed --
+    an int8-quantised model still keeps some float layers, and those are the
+    ones a voice state meets.
+    """
+    import torch
+
+    try:
+        for p in model.parameters():
+            if p.is_floating_point():
+                return p.dtype
+    except (AttributeError, TypeError):
+        pass
+    return torch.float32
+
+
+def as_dtype(state, dtype):
+    """A voice state with every floating tensor in `dtype`; the rest untouched.
+
+    A state file keeps the dtype it was saved in, and pocket-tts loads it as it
+    is. A pack of a hundred voices is saved in float16 to halve the download,
+    and a float16 key/value cache handed to a float32 model fails at the first
+    matmul -- so it is brought up to the model's dtype once, here, on load. The
+    step counters ("offset") are integers and stay integers.
+    """
+    return {module: {k: (t.to(dtype) if t.is_floating_point() and t.dtype != dtype else t)
+                     for k, t in tensors.items()}
+            for module, tensors in state.items()}
+
+
 class Engine:
     """Held to the same shape as qwen_engine.Engine, and no wider.
 
@@ -391,7 +423,10 @@ class Engine:
                 f"'{key}' is not a pocket-tts voice. Known: "
                 + ", ".join(v for v, _, _, _ in VOICES))
 
-        self._states[key] = self.model.get_state_for_audio_prompt(target)
+        state = self.model.get_state_for_audio_prompt(target)
+        if str(target).lower().endswith(".safetensors"):
+            state = as_dtype(state, model_dtype(self.model))
+        self._states[key] = state
         return self._states[key]
 
     # -- what the server calls ---------------------------------------------

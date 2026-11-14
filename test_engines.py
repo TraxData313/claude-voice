@@ -343,5 +343,63 @@ class AFailedStartIsNotTheEnd(unittest.TestCase):
         self.assertFalse(self.wait_for(lambda: len(self.builds) > 1, seconds=1.5))
 
 
+class AHalfPrecisionVoice(unittest.TestCase):
+    """A voice state saved in float16 -- how a pack of a hundred keeps its size
+    down -- must reach the model in the model's own dtype, or the first matmul
+    fails. No model is loaded: a stand-in reads the file the way pocket-tts does."""
+
+    def setUp(self):
+        try:
+            import torch
+            from pocket_tts.models.model_state import _import_model_state, export_model_state
+        except ImportError:
+            self.skipTest("pocket-tts is not installed")
+        import shutil
+        import tempfile
+        self.torch = torch
+        self.dir = tempfile.mkdtemp(prefix="cv-fp16-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+        class StandIn(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.zeros(2, dtype=torch.float32))
+
+            def get_state_for_audio_prompt(self, path):
+                return _import_model_state(path, torch.device("cpu"))
+
+        self.model = StandIn()
+        self.export = export_model_state
+
+    def _state_file(self, dtype):
+        import os
+        t = self.torch
+        path = os.path.join(self.dir, f"pocket-{str(dtype)[6:]}.safetensors")
+        self.export({"layer0": {"cache": t.ones(2, 3, dtype=dtype),
+                                "current_end": t.zeros(5, dtype=t.long)}}, path)
+        return path
+
+    def _engine(self):
+        eng = pocket_engine.Engine(language="english")
+        eng.model = self.model
+        return eng
+
+    def test_float16_is_brought_up_to_the_models_dtype(self):
+        got = self._engine().voice_state(self._state_file(self.torch.float16), "english")
+        self.assertEqual(got["layer0"]["cache"].dtype, self.torch.float32)
+        self.assertTrue(bool((got["layer0"]["cache"] == 1).all()))
+        # The step counter is an integer, and stays one.
+        self.assertEqual(got["layer0"]["offset"].dtype, self.torch.long)
+
+    def test_a_float32_state_is_left_as_it_is(self):
+        # Abby's and Neya's own files are float32, and must keep loading unchanged.
+        got = self._engine().voice_state(self._state_file(self.torch.float32), "english")
+        self.assertEqual(got["layer0"]["cache"].dtype, self.torch.float32)
+
+    def test_the_dtype_is_read_off_the_model(self):
+        self.model.half()
+        self.assertEqual(pocket_engine.model_dtype(self.model), self.torch.float16)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
