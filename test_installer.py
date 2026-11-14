@@ -355,6 +355,17 @@ class DryRun(Base):
         self.assertIsNone(installer.reg_read(self.lay.uninstall_key))
         self.assertIsNone(installer.reg_read(self.lay.reg_key))
         self.assertTrue(any("nothing was written" in line for line in out.lines))
+        self.assertTrue(any("voice pack" in line for line in out.lines), "the packs step is on the plan")
+
+    def test_voice_packs_are_fetched_through_the_installed_copys_own_cli(self):
+        # Never fatal (check=False): offline, the engine fetches them later.
+        _tree(self.lay.root, {"runtime/python.exe": ""})
+        with patch.object(installer, "run") as ran:
+            installer.fetch_voice_packs(self.lay, Quiet(self.lay), dry_run=False)
+        cmd = ran.call_args.args[0]
+        self.assertEqual(cmd[0], self.lay.python)
+        self.assertEqual(cmd[1:], [os.path.join(self.lay.app, "voice_cli.py"), "packs", "fetch"])
+        self.assertEqual(ran.call_args.kwargs, {"cwd": self.lay.data, "check": False})
 
     def test_a_games_no_claude_install_keeps_the_claude_wiring_on_record(self):
         claude = {"dir": os.path.join(self.tmp, ".claude")}

@@ -1308,6 +1308,21 @@ def register_everything(lay, out, options, dry_run):
 # install
 # --------------------------------------------------------------------------
 
+def fetch_voice_packs(lay, out, dry_run):
+    """The voice packs already-registered voice folders offer (docs/voice-packs.md),
+    fetched now so a game's voices speak from the first line after an update.
+    Run through the installed copy's own CLI, which reads the install's config.
+    Never fatal: offline, the engine fetches them later in the background."""
+    if dry_run:
+        out.line("would fetch", "any voice pack a registered voice folder offers")
+        return
+    if not os.path.isfile(lay.python):
+        return
+    out.status(phase="engine", headline="Fetching voice packs", detail="")
+    run([lay.python, os.path.join(lay.app, "voice_cli.py"), "packs", "fetch"], out,
+        cwd=lay.data, check=False)
+
+
 def install(lay, source, out, engine=None, claude=True, big=None, port=None, options=None,
             dry_run=False, start=True, panel=True):
     options = dict(options or {})
@@ -1417,6 +1432,7 @@ def install(lay, source, out, engine=None, claude=True, big=None, port=None, opt
         claims.update(install_breeze(lay, out, big, dry_run))
     if torch_qwen:
         claims.update(install_qwen_torch(lay, out, big, dry_run))
+    fetch_voice_packs(lay, out, dry_run)
     out.check_cancel()
 
     if claude:
