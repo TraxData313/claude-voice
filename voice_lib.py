@@ -1142,6 +1142,20 @@ def catalog(state=None, engine=None):
         # a Hugging Face sign-in, and without them a clip-only voice is silence.
         # pocket_engine writes down which it is the first time the model loads.
         clips = bool(state.get("pocketCloning"))
+        # And a voice a pack covers: the baked states a root's pocket-pack.json
+        # names, fetched into this app's own folder (pocket_packs.py). The
+        # pack's file stands in for a pocket.safetensors beside the clip, and
+        # its language is the model it was baked on, whatever voice.json says.
+        try:
+            import pocket_packs
+            packed = pocket_packs.overlay(state)
+        except Exception as exc:                      # noqa: BLE001 -- never cost the list
+            notify(f"voice packs skipped: {exc}")
+            packed = {}
+        for v in out:
+            hit = None if v["pocket"] else packed.get(os.path.normcase(os.path.abspath(v["dir"])))
+            if hit:
+                v["pocket"], v["pocketLanguage"] = hit
         cloned = [v for v in out if v["pocket"] or (clips and v["breeze"])]
         have = {v["id"].lower() for v in cloned}
         return cloned + [v for v in pocket_engine.catalog(engine_language(state))

@@ -150,6 +150,38 @@ def model_for(language):
     return wide if wide in names else lang
 
 
+def weights_of(language):
+    """[(repo, revision)] the installed package loads for a language, or [].
+
+    Read off the config's own `weights_path` lines (hf://<repo>/...@<revision>):
+    the one with voice cloning, and the ungated one used where those are not
+    signed in for. They are the same release, and a voice state made against
+    one is the state the other expects -- Kyutai's own built-in voices are
+    exactly that. A state made against any OTHER release is not an error but
+    garbage audio, which is why a voice pack names the revision it was baked on
+    and is checked against this before it is used. Cheap: a text read, no torch.
+    """
+    import importlib.util
+    import re
+
+    name = model_for(language)
+    try:
+        spec = importlib.util.find_spec("pocket_tts")
+    except (ImportError, ValueError):
+        return []
+    found = []
+    for where in (spec.submodule_search_locations or []) if spec else []:
+        try:
+            with open(os.path.join(where, "config", name + ".yaml"), encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        for m in re.finditer(r"^weights_path\w*:\s*hf://([^/\s]+/[^/\s]+)/\S*@([0-9a-fA-F]+)\s*$",
+                             text, re.M):
+            found.append((m.group(1), m.group(2).lower()))
+    return found
+
+
 def available():
     """Is the package installed, without paying to import it.
 

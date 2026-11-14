@@ -44,3 +44,7 @@ installed.json
 # The manager agent's working notes (progress, survey) for a multi-step change.
 # Scratch for whoever is doing the work, not part of the project.
 .manager/
+
+# Voice packs fetched for a registered voice root (pocket_packs.py): downloaded
+# baked states, hundreds of MB, kept in the data folder -- which in a checkout is here.
+pocket-packs/
